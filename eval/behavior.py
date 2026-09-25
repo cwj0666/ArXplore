@@ -249,7 +249,11 @@ def behavior_scores(
         for citation in record.get("citations") or []:
             cited_id = normalize_arxiv_id(str(citation.get("arxiv_id") or ""))
             title = str(citation.get("title") or "").strip().lower()
-            if cited_id in required and (citation.get("in_answer") or (len(title) >= 12 and title in lowered_answer)):
+            title_prefix = title.split(":")[0].strip()
+            title_seen = (len(title) >= 12 and title in lowered_answer) or (
+                len(title_prefix) >= 12 and title_prefix in lowered_answer
+            )
+            if cited_id in required and (citation.get("in_answer") or title_seen):
                 mentioned.add(cited_id)
         scores["mentions_required_ids"] = len(required & mentioned) / len(required)
     return outcome, scores
