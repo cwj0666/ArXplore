@@ -59,8 +59,16 @@ def escape_like(value: str) -> str:
     return _LIKE_SPECIAL_CHARS.sub(r"\\\1", value)
 
 
-_ANY_QUERY_TERM_SQL = r"""
-    SELECT string_agg('''' || replace(replace(lexeme, '\', '\\'), '''', '''''') || '''', ' | ')::tsquery AS any_term
+PER_PAPER_CANDIDATE_CAP = 3
+STRICT_MATCH_BONUS = 1.0
+MIN_PARTIAL_MATCH_POOL = 500
+PARTIAL_MATCH_POOL_PER_RESULT = 20
+
+_QUERY_TERMS_SQL = r"""
+    SELECT
+        string_agg('''' || replace(replace(lexeme, '\', '\\'), '''', '''''') || '''', ' | ')::tsquery AS any_term,
+        array_agg(lexeme) AS lexemes,
+        count(*) AS lexeme_count
     FROM unnest(
         tsvector_to_array(to_tsvector('english', %(query)s) || to_tsvector('english', %(fts_query)s))
     ) AS lexeme
@@ -72,14 +80,23 @@ def build_lexical_candidates_query(
     *,
     limit: int,
     arxiv_id: str | None = None,
+    per_paper_cap: int | None = PER_PAPER_CANDIDATE_CAP,
 ) -> tuple[str, dict[str, Any]] | None:
     """lexical 후보 조회 SQL과 파라미터를 만든다. 질의가 비어 있으면 None.
 
     1. 후보: 질의 lexeme 중 하나라도 가진 청크. GIN 인덱스가 걸린 두 생성 컬럼
        (`papers.title_abstract_vector`, `paper_chunks.chunk_vector`)을 각각 조회해 UNION한다.
-       AND 질의는 제목과 청크에 걸쳐 만족될 수 있어 컬럼별 `@@ 원래 질의`로는 후보가 빠진다.
-    2. 판정·점수: 두 벡터를 이어 붙인 tsvector(제목 A, 초록 B, 청크 C)에 원래 질의를 적용한다.
-    전체 질의 ILIKE는 후보 필터가 아니라 점수 보너스로만 쓴다.
+    2. 선별(screened): 후보마다 두 벡터를 이어 붙인 tsvector(제목 A, 초록 B, 청크 C)를 만들어
+       원래 질의(websearch 또는 plainto, 모든 lexeme 요구)를 만족하는지(`strict_match`)와
+       질의 lexeme 중 그 tsvector에 있는 비율(`coverage`)만 계산한다.
+    3. 점수 풀(pool): strict 행은 모두, 나머지(부분 일치) 행은 coverage 상위
+       `max(limit * PARTIAL_MATCH_POOL_PER_RESULT, MIN_PARTIAL_MATCH_POOL)`개만 순위 계산으로 넘긴다.
+    4. 점수: strict 행은 AND 질의 순위 합에 `STRICT_MATCH_BONUS`(1.0)를 더한다. 부분 일치 행은 OR 질의
+       `ts_rank_cd`(정규화 32, 0~1)에 coverage를 곱하므로 1 미만이고, 같은 보정을 받으면 strict 행보다 아래에 온다.
+    5. 논문 범위(`arxiv_id`)가 없고 `per_paper_cap`이 양수면 논문마다 점수 상위 `per_paper_cap`개 청크만 남긴 뒤
+       점수순으로 `limit`개를 자른다.
+    전체 질의 ILIKE는 후보 필터가 아니라 점수 보너스로만 쓰며, 부분 문자열 일치는 strict 일치를 함의하므로
+    strict 행에만 계산한다.
     """
     normalized_query = " ".join(query.split())
     if not normalized_query:
@@ -93,13 +110,19 @@ def build_lexical_candidates_query(
         "like_pattern": f"%{escape_like(normalized_query)}%",
         "limit": max(1, int(limit)),
     }
+    params["partial_pool"] = max(params["limit"] * PARTIAL_MATCH_POOL_PER_RESULT, MIN_PARTIAL_MATCH_POOL)
     if arxiv_id:
         chunk_scope_sql = "AND c.arxiv_id = %(arxiv_id)s"
         paper_scope_sql = "AND p.arxiv_id = %(arxiv_id)s"
         params["arxiv_id"] = arxiv_id
 
+    cap_filter_sql = ""
+    if not arxiv_id and per_paper_cap is not None and int(per_paper_cap) > 0:
+        params["per_paper_cap"] = int(per_paper_cap)
+        cap_filter_sql = "WHERE paper_rank <= %(per_paper_cap)s"
+
     sql = f"""
-        WITH query_terms AS ({_ANY_QUERY_TERM_SQL}),
+        WITH query_terms AS ({_QUERY_TERMS_SQL}),
         matched AS (
             SELECT c.id
             FROM paper_chunks c
@@ -112,90 +135,149 @@ def build_lexical_candidates_query(
             WHERE p.title_abstract_vector @@ (SELECT any_term FROM query_terms)
                 {paper_scope_sql}
         ),
-        ranked AS (
+        screened AS MATERIALIZED (
             SELECT
                 c.id AS chunk_id,
+                (
+                    v.search_vector @@ websearch_to_tsquery('english', %(query)s)
+                    OR v.search_vector @@ plainto_tsquery('english', %(fts_query)s)
+                ) AS strict_match,
+                (length(v.search_vector) - length(ts_delete(v.search_vector, q.lexemes)))::double precision
+                    / GREATEST(q.lexeme_count, 1) AS coverage
+            FROM matched m
+            JOIN paper_chunks c ON c.id = m.id
+            JOIN papers p ON p.arxiv_id = c.arxiv_id
+            CROSS JOIN query_terms q
+            CROSS JOIN LATERAL (
+                SELECT p.title_abstract_vector || c.chunk_vector AS search_vector OFFSET 0
+            ) v
+            WHERE coalesce(c.metadata->>'content_role', '') <> 'toc'
+        ),
+        pool AS (
+            SELECT chunk_id, strict_match, coverage
+            FROM screened
+            WHERE strict_match
+            UNION ALL
+            (
+                SELECT chunk_id, strict_match, coverage
+                FROM screened
+                WHERE NOT strict_match
+                ORDER BY coverage DESC, chunk_id DESC
+                LIMIT %(partial_pool)s
+            )
+        ),
+        candidates AS (
+            SELECT
+                k.chunk_id,
                 c.arxiv_id,
                 p.title AS paper_title,
                 p.abstract AS paper_abstract,
                 c.chunk_text,
-                c.chunk_index,
                 c.section_title,
                 COALESCE(c.metadata->>'content_role', '') AS content_role,
-                (
-                    ts_rank_cd(
-                        p.title_abstract_vector || c.chunk_vector,
-                        websearch_to_tsquery('english', %(query)s)
-                    )
-                    +
-                    0.65 * ts_rank_cd(
-                        p.title_abstract_vector || c.chunk_vector,
-                        plainto_tsquery('english', %(fts_query)s)
-                    )
-                ) AS fts_score,
+                k.strict_match,
+                k.coverage,
+                v.search_vector,
+                q.any_term
+            FROM pool k
+            JOIN paper_chunks c ON c.id = k.chunk_id
+            JOIN papers p ON p.arxiv_id = c.arxiv_id
+            CROSS JOIN query_terms q
+            CROSS JOIN LATERAL (
+                SELECT p.title_abstract_vector || c.chunk_vector AS search_vector OFFSET 0
+            ) v
+        ),
+        ranked AS (
+            SELECT
+                chunk_id,
+                arxiv_id,
+                strict_match,
+                coverage,
                 CASE
-                    WHEN p.title ILIKE %(like_pattern)s THEN 0.45
-                    WHEN p.abstract ILIKE %(like_pattern)s THEN 0.2
-                    WHEN c.chunk_text ILIKE %(like_pattern)s THEN 0.15
+                    WHEN strict_match THEN
+                        ts_rank_cd(search_vector, websearch_to_tsquery('english', %(query)s))
+                        + 0.65 * ts_rank_cd(search_vector, plainto_tsquery('english', %(fts_query)s))
+                        + {STRICT_MATCH_BONUS}
+                    ELSE coverage * ts_rank_cd(search_vector, any_term, 32)
+                END AS fts_score,
+                CASE
+                    WHEN NOT strict_match THEN 0
+                    WHEN paper_title ILIKE %(like_pattern)s THEN 0.45
+                    WHEN paper_abstract ILIKE %(like_pattern)s THEN 0.2
+                    WHEN chunk_text ILIKE %(like_pattern)s THEN 0.15
                     ELSE 0
                 END AS ilike_bonus,
                 CASE
-                    WHEN coalesce(c.metadata->>'content_role', '') = 'references' THEN -0.24
-                    WHEN coalesce(c.metadata->>'content_role', '') = 'toc' THEN -0.28
-                    WHEN coalesce(c.metadata->>'content_role', '') = 'front_matter' THEN -0.14
-                    WHEN coalesce(c.metadata->>'content_role', '') = 'table_like' THEN -0.12
-                    WHEN coalesce(c.metadata->>'content_role', '') = 'figure_caption' THEN -0.08
-                    WHEN coalesce(c.metadata->>'content_role', '') = 'appendix' THEN -0.08
+                    WHEN content_role = 'references' THEN -0.24
+                    WHEN content_role = 'toc' THEN -0.28
+                    WHEN content_role = 'front_matter' THEN -0.14
+                    WHEN content_role = 'table_like' THEN -0.12
+                    WHEN content_role = 'figure_caption' THEN -0.08
+                    WHEN content_role = 'appendix' THEN -0.08
                     ELSE 0
                 END AS content_role_adjustment,
                 CASE
-                    WHEN c.section_title ILIKE 'Abstract' THEN 0.16
-                    WHEN c.section_title ILIKE '%%Introduction%%' THEN 0.1
-                    WHEN c.section_title ILIKE '%%Method%%' OR c.section_title ILIKE '%%Approach%%' THEN 0.04
-                    WHEN c.section_title ILIKE '%%Related Work%%' THEN 0.02
-                    WHEN c.section_title ILIKE '%%Conclusion%%' THEN -0.02
-                    WHEN c.section_title ILIKE '%%Discussion%%' THEN -0.02
-                    WHEN c.section_title ILIKE '%%Appendix%%' THEN -0.08
-                    WHEN c.section_title ILIKE '%%Additional Analysis%%' THEN -0.08
-                    WHEN c.section_title ILIKE '%%Experimental Details%%' THEN -0.06
-                    WHEN c.section_title ILIKE '%%Implementation Details%%' THEN -0.06
+                    WHEN section_title ILIKE 'Abstract' THEN 0.16
+                    WHEN section_title ILIKE '%%Introduction%%' THEN 0.1
+                    WHEN section_title ILIKE '%%Method%%' OR section_title ILIKE '%%Approach%%' THEN 0.04
+                    WHEN section_title ILIKE '%%Related Work%%' THEN 0.02
+                    WHEN section_title ILIKE '%%Conclusion%%' THEN -0.02
+                    WHEN section_title ILIKE '%%Discussion%%' THEN -0.02
+                    WHEN section_title ILIKE '%%Appendix%%' THEN -0.08
+                    WHEN section_title ILIKE '%%Additional Analysis%%' THEN -0.08
+                    WHEN section_title ILIKE '%%Experimental Details%%' THEN -0.06
+                    WHEN section_title ILIKE '%%Implementation Details%%' THEN -0.06
                     ELSE 0
                 END AS section_boost,
                 CASE
-                    WHEN c.section_title ILIKE '%%Table of Contents%%' THEN -0.12
-                    WHEN c.section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
-                    WHEN c.section_title = 'Front Matter' THEN -0.03
+                    WHEN section_title ILIKE '%%Table of Contents%%' THEN -0.12
+                    WHEN section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
+                    WHEN section_title = 'Front Matter' THEN -0.03
                     ELSE 0
                 END AS structural_adjustment
-            FROM matched m
-            JOIN paper_chunks c ON c.id = m.id
-            JOIN papers p ON p.arxiv_id = c.arxiv_id
-            WHERE
-                coalesce(c.metadata->>'content_role', '') <> 'toc'
-                AND (
-                    (p.title_abstract_vector || c.chunk_vector) @@ websearch_to_tsquery('english', %(query)s)
-                    OR (p.title_abstract_vector || c.chunk_vector) @@ plainto_tsquery('english', %(fts_query)s)
-                )
+            FROM candidates
+        ),
+        scored AS MATERIALIZED (
+            SELECT
+                ranked.*,
+                (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score
+            FROM ranked
+        ),
+        kept AS (
+            SELECT
+                scored.*,
+                row_number() OVER (PARTITION BY arxiv_id ORDER BY score DESC, chunk_id DESC) AS paper_rank
+            FROM scored
+            WHERE score > 0.01
+        ),
+        top_hits AS (
+            SELECT *
+            FROM kept
+            {cap_filter_sql}
+            ORDER BY score DESC, chunk_id DESC
+            LIMIT %(limit)s
         )
         SELECT
-            chunk_id,
-            arxiv_id,
-            paper_title,
-            paper_abstract,
-            chunk_text,
-            chunk_index,
-            section_title,
-            content_role,
-            fts_score,
-            ilike_bonus,
-            content_role_adjustment,
-            section_boost,
-            structural_adjustment,
-            (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score
-        FROM ranked
-        WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01
-        ORDER BY score DESC, chunk_id DESC
-        LIMIT %(limit)s
+            t.chunk_id,
+            t.arxiv_id,
+            p.title AS paper_title,
+            p.abstract AS paper_abstract,
+            c.chunk_text,
+            c.chunk_index,
+            c.section_title,
+            COALESCE(c.metadata->>'content_role', '') AS content_role,
+            t.fts_score,
+            t.ilike_bonus,
+            t.content_role_adjustment,
+            t.section_boost,
+            t.structural_adjustment,
+            t.score,
+            t.strict_match,
+            t.coverage
+        FROM top_hits t
+        JOIN paper_chunks c ON c.id = t.chunk_id
+        JOIN papers p ON p.arxiv_id = t.arxiv_id
+        ORDER BY t.score DESC, t.chunk_id DESC
     """
     return sql, params
 
@@ -734,9 +816,10 @@ class PaperRepository:
         *,
         limit: int = 5,
         arxiv_id: str | None = None,
+        per_paper_cap: int | None = PER_PAPER_CANDIDATE_CAP,
     ) -> list[dict[str, Any]]:
         """FTS 기반 청크 후보를 조회한다. SQL은 `build_lexical_candidates_query` 참고."""
-        built = build_lexical_candidates_query(query, limit=limit, arxiv_id=arxiv_id)
+        built = build_lexical_candidates_query(query, limit=limit, arxiv_id=arxiv_id, per_paper_cap=per_paper_cap)
         if built is None:
             return []
         sql, params = built
@@ -764,6 +847,8 @@ class PaperRepository:
                     "content_role_adjustment": float(row[10]) if row[10] is not None else 0.0,
                     "section_boost": float(row[11]) if row[11] is not None else 0.0,
                     "structural_adjustment": float(row[12]) if row[12] is not None else 0.0,
+                    "coverage": float(row[15]) if row[15] is not None else 0.0,
+                    "strict_match": bool(row[14]),
                 },
                 "snippet": self._build_search_snippet(
                     normalized_query,

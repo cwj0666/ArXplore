@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.integrations.paper_retriever import PaperRetriever
+from src.integrations.paper_retriever import (
+    PaperRetriever,
+    candidate_fetch_limit,
+    hybrid_branch_limit,
+    normalize_search_query,
+)
 
 BODY = (
     "The policy is trained to prefer chosen responses over rejected ones using a simple "
@@ -181,6 +186,172 @@ class TestApplyPaperDiversity:
         candidates = [_candidate(1, arxiv_id="A"), _candidate(2, arxiv_id="B")]
 
         assert _ids(_retriever()._apply_paper_diversity(candidates, limit=0, arxiv_id=None)) == [1]
+
+    def test_multi_paper_pool_fills_top_k_without_refill(self):
+        candidates = [
+            *(_candidate(chunk_id, arxiv_id="A", score=1.0 - chunk_id / 100) for chunk_id in (1, 2, 3)),
+            *(_candidate(chunk_id, arxiv_id="B", score=0.8 - chunk_id / 100) for chunk_id in (4, 5, 6)),
+            *(_candidate(chunk_id, arxiv_id="C", score=0.6 - chunk_id / 100) for chunk_id in (7, 8, 9)),
+            _candidate(10, arxiv_id="D", score=0.3),
+        ]
+
+        selected = _retriever()._apply_paper_diversity(candidates, limit=7, arxiv_id=None)
+
+        assert _ids(selected) == [1, 2, 4, 5, 7, 8, 10]
+        assert len({candidate["arxiv_id"] for candidate in selected}) == 4
+
+    def test_capped_pool_refills_only_after_other_papers_run_out(self):
+        candidates = [
+            *(_candidate(chunk_id, arxiv_id="A") for chunk_id in (1, 2, 3)),
+            *(_candidate(chunk_id, arxiv_id="B") for chunk_id in (4, 5, 6)),
+            *(_candidate(chunk_id, arxiv_id="C") for chunk_id in (7, 8, 9)),
+        ]
+
+        selected = _retriever()._apply_paper_diversity(candidates, limit=8, arxiv_id=None)
+
+        assert _ids(selected) == [1, 2, 4, 5, 7, 8, 3, 6]
+
+
+class RecordingRepository:
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+        self.calls: list[dict] = []
+
+    def list_chunk_candidates_by_query(self, query, *, limit, arxiv_id=None):
+        self.calls.append({"query": query, "limit": limit, "arxiv_id": arxiv_id})
+        return [dict(row) for row in self.rows[:limit]]
+
+
+class RecordingVectorRepository(RecordingRepository):
+    def search_paper_chunks(self, embedding, *, limit, arxiv_id=None):
+        self.calls.append({"embedding": embedding, "limit": limit, "arxiv_id": arxiv_id})
+        return [dict(row) for row in self.rows[:limit]]
+
+
+class RecordingEmbeddingClient:
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def embed_texts(self, texts):
+        self.texts.extend(texts)
+        return [[0.0] for _ in texts]
+
+
+def _multi_paper_rows() -> list[dict]:
+    return [
+        _candidate(paper * 10 + index, arxiv_id=f"P{paper}", score=1.0 - paper / 10 - index / 100)
+        for paper in range(6)
+        for index in range(3)
+    ]
+
+
+def _recording_retriever(rows: list[dict] | None = None) -> PaperRetriever:
+    rows = _multi_paper_rows() if rows is None else rows
+    return PaperRetriever(
+        repository=RecordingRepository(rows),
+        embedding_client=RecordingEmbeddingClient(),
+        vector_repository=RecordingVectorRepository(rows),
+    )
+
+
+class TestCandidatePool:
+    @pytest.mark.parametrize("limit,expected", [(1, 30), (5, 30), (6, 30), (7, 35), (10, 50), (0, 30)])
+    def test_candidate_fetch_limit(self, limit, expected):
+        assert candidate_fetch_limit(limit) == expected
+
+    @pytest.mark.parametrize("limit,expected", [(1, 10), (3, 10), (4, 12), (10, 30)])
+    def test_hybrid_branch_limit(self, limit, expected):
+        assert hybrid_branch_limit(limit) == expected
+
+    def test_global_search_requests_the_wider_pool_and_spreads_papers(self):
+        retriever = _recording_retriever()
+
+        results = retriever.search_paper_chunks("policy loss", limit=10)
+
+        assert retriever.repository.calls[0]["limit"] == 50
+        assert len(results) == 10
+        assert [candidate["arxiv_id"] for candidate in results] == [
+            "P0",
+            "P0",
+            "P1",
+            "P1",
+            "P2",
+            "P2",
+            "P3",
+            "P3",
+            "P4",
+            "P4",
+        ]
+
+    def test_scoped_search_requests_exactly_limit(self):
+        retriever = _recording_retriever()
+
+        retriever.search_paper_chunks("policy loss", limit=4, arxiv_id="P1")
+        retriever.search_paper_chunks_by_vector("policy loss", limit=4, arxiv_id="P1")
+
+        assert [call["limit"] for call in retriever.repository.calls] == [4]
+        assert [call["limit"] for call in retriever.vector_repository.calls] == [4]
+
+    def test_hybrid_uses_branch_limits_then_wider_pools(self):
+        retriever = _recording_retriever()
+
+        results = retriever.search_paper_chunks_by_hybrid("policy loss", limit=10)
+
+        assert [call["limit"] for call in retriever.repository.calls] == [150]
+        assert [call["limit"] for call in retriever.vector_repository.calls] == [150]
+        assert len({candidate["arxiv_id"] for candidate in results}) >= 5
+
+
+class TestQueryNormalization:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("RAG\x00에서 retriever\x07의 역할은?", "RAG에서 retriever의 역할은?"),
+            ("  policy\n\tloss  ", "policy loss"),
+            ("a\x1fb\x7fc\x0bd", "abcd"),
+            ("\x00\x01 \x02", ""),
+            ("", ""),
+        ],
+    )
+    def test_strips_control_characters_and_collapses_whitespace(self, raw, expected):
+        assert normalize_search_query(raw) == expected
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "search_paper_chunks",
+            "search_paper_chunks_by_vector",
+            "search_paper_chunks_by_hybrid",
+            "search_paper_contexts",
+            "search_paper_contexts_by_vector",
+            "search_paper_contexts_by_hybrid",
+        ],
+    )
+    def test_nul_query_reaches_backends_without_control_characters(self, method):
+        retriever = _recording_retriever([_candidate(1, arxiv_id="A")])
+        retriever.repository.list_chunk_window = lambda arxiv_id, index, *, window=1: []
+
+        getattr(retriever, method)("RAG\x00에서 retriever\x07의 역할은?", limit=3)
+
+        sent = [call["query"] for call in retriever.repository.calls] + retriever.embedding_client.texts
+        assert sent
+        assert all(query == "RAG에서 retriever의 역할은?" for query in sent)
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "search_paper_chunks",
+            "search_paper_chunks_by_vector",
+            "search_paper_chunks_by_hybrid",
+            "search_paper_contexts",
+            "search_paper_contexts_by_vector",
+            "search_paper_contexts_by_hybrid",
+        ],
+    )
+    def test_query_empty_after_stripping_skips_every_backend(self, method):
+        retriever = PaperRetriever(repository=object(), embedding_client=object(), vector_repository=object())
+
+        assert getattr(retriever, method)("\x00 \x01\n\t\x1f", limit=3) == []
 
 
 class TestRerankVectorCandidates:

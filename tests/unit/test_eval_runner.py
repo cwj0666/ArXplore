@@ -396,7 +396,7 @@ class TestAblationsOnRealRetriever:
         retriever.search_paper_chunks("benchmark evaluation", limit=3)
         query = EvalQuery(id="q", query="benchmark evaluation", lang="en", relevant_arxiv_ids=("A",), source="manual")
         result = run_query(retriever, "lexical_nodiv", query, k=3)
-        assert retriever.repository.fetch_limits == [10, 10]
+        assert retriever.repository.fetch_limits == [30, 30]
         assert result.retrieved_chunk_ids == [1, 2, 3]
 
     def test_lexical_nofilter_keeps_reference_chunk(self):

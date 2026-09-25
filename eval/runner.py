@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from eval.dataset import EvalQuery
 from eval.metrics import hit_at_k, mean, mrr_at_k, percentile, recall_at_k
+from src.integrations.paper_retriever import candidate_fetch_limit, hybrid_branch_limit
 
 NOISE_ROLES = frozenset({"references", "toc", "front_matter"})
 HIT_KS = (1, 5, 10)
@@ -31,12 +32,10 @@ class SupportsContextSearch(Protocol):
 SearchFn = Callable[[Any, str, int, int], list[dict]]
 
 
-def _fetch_limit(limit: int) -> int:
-    return max(max(1, limit) * 3, 10)
-
-
 def _lexical_pipeline(retriever: Any, query: str, limit: int, *, apply_filter: bool = True) -> list[dict]:
-    candidates = retriever.repository.list_chunk_candidates_by_query(query, limit=_fetch_limit(limit), arxiv_id=None)
+    candidates = retriever.repository.list_chunk_candidates_by_query(
+        query, limit=candidate_fetch_limit(limit), arxiv_id=None
+    )
     candidates = retriever._normalize_candidates(query, candidates, retrieval_method="lexical")
     candidates = retriever._rerank_lexical_candidates(query, candidates)
     if apply_filter:
@@ -46,7 +45,9 @@ def _lexical_pipeline(retriever: Any, query: str, limit: int, *, apply_filter: b
 
 def _vector_pipeline(retriever: Any, query: str, limit: int, *, apply_rerank: bool = True) -> list[dict]:
     embedding = retriever.embedding_client.embed_texts([query])[0]
-    candidates = retriever.vector_repository.search_paper_chunks(embedding, limit=_fetch_limit(limit), arxiv_id=None)
+    candidates = retriever.vector_repository.search_paper_chunks(
+        embedding, limit=candidate_fetch_limit(limit), arxiv_id=None
+    )
     candidates = retriever._normalize_candidates(query, candidates, retrieval_method="vector")
     if apply_rerank:
         candidates = retriever._rerank_vector_candidates(query, candidates)
@@ -93,7 +94,7 @@ def _search_vector_nodiv(retriever: Any, query: str, k: int, window: int) -> lis
 
 
 def _search_hybrid_nodiv(retriever: Any, query: str, k: int, window: int) -> list[dict]:
-    sub_limit = _fetch_limit(k)
+    sub_limit = hybrid_branch_limit(k)
     lexical = _lexical_pipeline(retriever, query, sub_limit)[:sub_limit]
     vector = _vector_pipeline(retriever, query, sub_limit)[:sub_limit]
     merged = retriever._merge_hybrid_candidates(
@@ -113,7 +114,7 @@ def _search_vector_norerank(retriever: Any, query: str, k: int, window: int) -> 
 
 
 def _search_hybrid_plainrrf(retriever: Any, query: str, k: int, window: int) -> list[dict]:
-    sub_limit = _fetch_limit(k)
+    sub_limit = hybrid_branch_limit(k)
     lexical = retriever.search_paper_chunks(query, limit=sub_limit)
     vector = retriever.search_paper_chunks_by_vector(query, limit=sub_limit)
     return _with_contexts(retriever, _diversify(retriever, plain_rrf([lexical, vector]), k), window)

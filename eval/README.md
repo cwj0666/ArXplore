@@ -114,7 +114,7 @@ DB에 연결할 수 없거나, 정답 id가 DB에 없거나, vector 계열인데
 
 | 이름 | 방식 | 무엇을 끄나 |
 | --- | --- | --- |
-| `nodiv` | `lexical_nodiv`, `vector_nodiv`, `hybrid_nodiv` | `_apply_paper_diversity`(논문당 2청크 우선). hybrid는 입력 두 목록과 병합 결과 모두에서 끔 |
+| `nodiv` | `lexical_nodiv`, `vector_nodiv`, `hybrid_nodiv` | `_apply_paper_diversity`(논문당 2청크 우선). hybrid는 입력 두 목록과 병합 결과 모두에서 끔. SQL 안의 논문당 3청크 상한은 남는다 |
 | `nofilter` | `lexical_nofilter` | `_filter_lexical_candidates`(references/front_matter/참고문헌형·목차형 텍스트 제거) |
 | `norerank` | `vector_norerank` | `_rerank_vector_candidates`(섹션 prior, 토큰 겹침, 참고문헌형 감점) |
 | `plainrrf` | `hybrid_plainrrf` | hybrid의 적응 가중치·lexical 품질 가중·교차 보너스 → 표준 RRF(k=60)로 대체. 입력은 기본 lexical/vector 결과, diversity는 유지 |

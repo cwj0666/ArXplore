@@ -70,9 +70,14 @@ def _named_params(sql: str) -> set[str]:
 QUERY = [0.5, -0.25, 1.0]
 
 
-@pytest.mark.parametrize("limit,expected", [(1, 40), (5, 40), (10, 40), (11, 44), (30, 120), (0, 40)])
+@pytest.mark.parametrize("limit,expected", [(1, 80), (5, 80), (10, 80), (11, 88), (30, 240), (0, 80)])
 def test_candidate_limit(limit, expected):
     assert resolve_candidate_limit(limit) == expected
+
+
+@pytest.mark.parametrize("limit,expected", [(1, 40), (5, 40), (10, 40), (11, 44), (30, 120), (0, 40)])
+def test_scoped_candidate_limit_is_unchanged(limit, expected):
+    assert resolve_candidate_limit(limit, scoped=True) == expected
 
 
 @pytest.mark.parametrize("candidates,expected", [(40, None), (44, 44), (1200, 1000)])
@@ -103,10 +108,31 @@ def test_global_query_orders_candidates_by_raw_distance_for_hnsw():
     assert "min_similarity" not in normalized
     assert params == {
         "query": "[0.500000000000,-0.250000000000,1.000000000000]",
-        "candidate_limit": 40,
+        "candidate_limit": 80,
         "limit": 5,
         "model_name": "text-embedding-3-large",
+        "per_paper_cap": 3,
     }
+    assert _named_params(sql) == set(params)
+
+
+def test_global_query_caps_chunks_per_paper_after_candidate_fetch():
+    normalized = _normalize_sql(build_vector_search_query(QUERY, limit=5)[0])
+
+    candidates, second_stage = normalized.split("ranked AS", 1)
+    assert "row_number()" not in candidates
+    assert (
+        "row_number() OVER ( PARTITION BY arxiv_id "
+        "ORDER BY (raw_similarity_score + content_role_adjustment + section_boost) DESC, id DESC ) AS paper_rank "
+        "FROM ranked WHERE content_role <> 'toc'"
+    ) in second_stage
+    assert "FROM kept WHERE paper_rank <= %(per_paper_cap)s ORDER BY" in second_stage
+
+
+def test_per_paper_cap_can_be_disabled():
+    sql, params = build_vector_search_query(QUERY, limit=5, per_paper_cap=None)
+    assert "per_paper_cap" not in params
+    assert "paper_rank <=" not in sql
     assert _named_params(sql) == set(params)
 
 
@@ -128,7 +154,7 @@ def test_query_without_model_or_scope_has_no_filters():
     normalized = _normalize_sql(sql)
     assert "model_name" not in normalized
     assert "FROM paper_embeddings e ORDER BY e.embedding <=> %(query)s::vector LIMIT %(candidate_limit)s" in normalized
-    assert _named_params(sql) == set(params) == {"query", "candidate_limit", "limit"}
+    assert _named_params(sql) == set(params) == {"query", "candidate_limit", "limit", "per_paper_cap"}
 
 
 def test_paper_scoped_query_is_exact_and_materialized():
@@ -142,6 +168,9 @@ def test_paper_scoped_query_is_exact_and_materialized():
     ) in normalized
     assert "FROM scoped ORDER BY distance ASC, chunk_id DESC LIMIT %(candidate_limit)s" in normalized
     assert "ORDER BY e.embedding <=>" not in normalized
+    assert "paper_rank <=" not in normalized
+    assert "per_paper_cap" not in params
+    assert params["candidate_limit"] == 40
     assert params["arxiv_id"] == "2401.00001"
     assert _named_params(sql) == set(params)
 
@@ -184,7 +213,8 @@ def test_search_maps_rows_to_the_public_shape():
             },
         }
     ]
-    assert len(cursor.executed) == 1
+    assert [sql for sql, _ in cursor.executed][0] == "SELECT set_config('hnsw.ef_search', %s, true)"
+    assert len(cursor.executed) == 2
 
 
 def test_search_uses_settings_model_and_min_similarity():
@@ -205,21 +235,23 @@ def test_search_tolerates_settings_without_optional_fields():
     assert "min_similarity" not in params
 
 
-def test_search_raises_ef_search_only_for_large_global_candidate_sets():
+def test_search_raises_ef_search_only_for_global_candidate_sets_above_default():
     cursor = RecordingCursor()
     repository = _repository(cursor)
 
     repository.search_paper_chunks(QUERY, limit=30)
-    assert cursor.executed[0] == ("SELECT set_config('hnsw.ef_search', %s, true)", ("120",))
-    assert cursor.executed[1][1]["candidate_limit"] == 120
+    assert cursor.executed[0] == ("SELECT set_config('hnsw.ef_search', %s, true)", ("240",))
+    assert cursor.executed[1][1]["candidate_limit"] == 240
 
     cursor.executed.clear()
     repository.search_paper_chunks(QUERY, limit=5)
-    assert len(cursor.executed) == 1
+    assert cursor.executed[0] == ("SELECT set_config('hnsw.ef_search', %s, true)", ("80",))
+    assert cursor.executed[1][1]["candidate_limit"] == 80
 
     cursor.executed.clear()
     repository.search_paper_chunks(QUERY, limit=30, arxiv_id="2401.00001")
     assert len(cursor.executed) == 1
+    assert cursor.executed[0][1]["candidate_limit"] == 120
 
 
 def test_upsert_embeddings_uses_execute_values_and_deduplicates(monkeypatch):

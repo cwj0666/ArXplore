@@ -1,0 +1,116 @@
+query_id,lang,source,category,expected_behavior,method,k,latency_ms,error,paper_hit@1,paper_hit@5,paper_hit@10,paper_mrr@10,paper_recall@10,chunk_hit@1,chunk_hit@5,chunk_hit@10,chunk_mrr@10,chunk_recall@10,noise_count,retrieved_arxiv_ids,retrieved_chunk_ids,retrieved_roles
+ki-2609.26355-ko,ko,known_item,,answer,lexical,10,3.5,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.26355-en,en,known_item,,answer,lexical,10,354.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.25053-ko,ko,known_item,,answer,lexical,10,2.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.25053-en,en,known_item,,answer,lexical,10,205.9,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.19554-ko,ko,known_item,,answer,lexical,10,5.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.19554-en,en,known_item,,answer,lexical,10,329.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.11317-ko,ko,known_item,,answer,lexical,10,45.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.11317-en,en,known_item,,answer,lexical,10,149.5,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.11317,222,body
+ki-2609.10715-ko,ko,known_item,,answer,lexical,10,1.9,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.10715-en,en,known_item,,answer,lexical,10,335.4,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.10715 2609.10715,5 6,body body
+ki-2609.06251-ko,ko,known_item,,answer,lexical,10,1.9,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.06251-en,en,known_item,,answer,lexical,10,187.7,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.06251 2609.06251 2609.06251 2609.06251 2609.06251 2609.06251,2175 2174 2173 2172 2170 2169,body body body body body body
+ki-2609.06986-ko,ko,known_item,,answer,lexical,10,1.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.06986-en,en,known_item,,answer,lexical,10,309.6,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.06986 2609.06986,4532 4531,body body
+ki-2609.21038-ko,ko,known_item,,answer,lexical,10,2.5,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.21346-ko,ko,known_item,,answer,lexical,10,8.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.21346-en,en,known_item,,answer,lexical,10,270.2,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.21346 2609.21346 2609.21346 2609.21346 2609.21346 2609.21346 2609.21346 2609.21346 2609.21346 2609.21346,9683 9685 9686 9684 9690 9704 9691 9707 9708 9724,body body body body body body body body body body
+ki-2609.18323-ko,ko,known_item,,answer,lexical,10,5.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.18323-en,en,known_item,,answer,lexical,10,207.6,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.18323 2609.18323 2609.18323 2609.18323 2609.18323 2609.18323 2609.18323 2609.18323,7927 7928 7930 7929 7932 7931 7934 7933,body body body body body body body body
+ki-2609.24815-ko,ko,known_item,,answer,lexical,10,2.2,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.24815-en,en,known_item,,answer,lexical,10,206.5,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.24815 2609.24815,15800 15801,body body
+ki-2609.13770-ko,ko,known_item,,answer,lexical,10,2.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.13770-en,en,known_item,,answer,lexical,10,204.9,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.13770 2609.23377,5633 11288,body body
+ki-2609.23377-ko,ko,known_item,,answer,lexical,10,2.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.23377-en,en,known_item,,answer,lexical,10,321.1,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.23377 2609.23377 2609.23377 2609.23377 2609.23377 2609.23377 2609.23377 2609.23377 2609.23377 2609.23377,11280 11284 11281 11283 11285 11282 11296 11288 11286 11295,body body body body body body body body body body
+ki-2609.26793-ko,ko,known_item,,answer,lexical,10,15.0,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.26793-en,en,known_item,,answer,lexical,10,152.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15078-ko,ko,known_item,,answer,lexical,10,4.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15078-en,en,known_item,,answer,lexical,10,176.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.24308-ko,ko,known_item,,answer,lexical,10,64.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.24308-en,en,known_item,,answer,lexical,10,227.0,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.24308 2609.19143 2609.24308 2609.19143 2609.24308 2609.24308 2609.24308 2609.24308 2609.24308 2609.19143,14271 7455 14274 7456 14278 14272 14277 14276 14275 7460,body body body body body body body body body body
+ki-2609.19969-ko,ko,known_item,,answer,lexical,10,14.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.19969-en,en,known_item,,answer,lexical,10,196.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.20744-ko,ko,known_item,,answer,lexical,10,1.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.20744-en,en,known_item,,answer,lexical,10,203.5,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.20744 2609.20744 2609.20744 2609.20744 2609.20744 2609.20744 2609.20744 2609.20744 2609.20744 2609.20744,8416 8418 8417 8428 8419 8437 8449 8453 8452 8451,body body body body body body body body body body
+ki-2609.15029-ko,ko,known_item,,answer,lexical,10,2.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15029-en,en,known_item,,answer,lexical,10,146.0,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.15029,4091,body
+ki-2609.21996-ko,ko,known_item,,answer,lexical,10,1.5,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.21996-en,en,known_item,,answer,lexical,10,192.0,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15975-ko,ko,known_item,,answer,lexical,10,1.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15975-en,en,known_item,,answer,lexical,10,177.1,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.15975,5806,body
+ki-2608.30597-ko,ko,known_item,,answer,lexical,10,1.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2608.30597-en,en,known_item,,answer,lexical,10,173.7,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2608.30597,1997,body
+ki-2609.27334-ko,ko,known_item,,answer,lexical,10,49.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.27334-en,en,known_item,,answer,lexical,10,289.8,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.27334,14590,body
+ki-2609.23169-ko,ko,known_item,,answer,lexical,10,16.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.23169-en,en,known_item,,answer,lexical,10,274.6,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.23169 2609.23169 2609.23169 2609.23169 2609.23169 2609.23169 2609.23169 2609.23169 2609.23169 2609.23169,12584 12582 12585 12583 12592 12591 12590 12586 12602 12607,body body body body body body body body body body
+ki-2609.27656-ko,ko,known_item,,answer,lexical,10,2.0,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.27656-en,en,known_item,,answer,lexical,10,218.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.14302-ko,ko,known_item,,answer,lexical,10,2.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15478-ko,ko,known_item,,answer,lexical,10,2.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.15478-en,en,known_item,,answer,lexical,10,201.4,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.15478 2609.15478 2609.15478 2609.15478 2609.15478 2609.15478 2609.15478 2609.15478 2609.15478 2609.15478,3209 3208 3207 3227 3226 3228 3212 3225 3214 3224,body body body body body body body body body body
+ki-2609.25165-ko,ko,known_item,,answer,lexical,10,1.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.20816-ko,ko,known_item,,answer,lexical,10,2.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.20816-en,en,known_item,,answer,lexical,10,324.2,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.20816,9642,body
+ki-2609.20804-ko,ko,known_item,,answer,lexical,10,1.6,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ki-2609.20804-en,en,known_item,,answer,lexical,10,346.2,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.20804 2609.20804 2609.20804 2609.20804 2609.20804 2609.20804 2609.20804 2609.20804 2609.20804 2609.20804,8018 8021 8020 8019 8102 8100 8099 8090 8089 8088,body body body body body body body body body body
+cs-1220,en,llm_synth,,answer,lexical,10,90.6,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-2121,ko,llm_synth,,answer,lexical,10,3.6,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-2065,en,llm_synth,,answer,lexical,10,312.2,,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,0,2609.12036,2065,body
+cs-11328,ko,llm_synth,,answer,lexical,10,21.8,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-15375,en,llm_synth,,answer,lexical,10,181.3,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-12667,ko,llm_synth,,answer,lexical,10,20.9,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-14863,en,llm_synth,,answer,lexical,10,138.3,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-11002,ko,llm_synth,,answer,lexical,10,2.7,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-1430,en,llm_synth,,answer,lexical,10,205.0,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-3005,ko,llm_synth,,answer,lexical,10,2.0,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-4978,ko,llm_synth,,answer,lexical,10,33.9,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-15748,en,llm_synth,,answer,lexical,10,354.1,,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,0,2609.25187,15748,body
+cs-7154,ko,llm_synth,,answer,lexical,10,118.1,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-472,en,llm_synth,,answer,lexical,10,174.1,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+cs-14000,ko,llm_synth,,answer,lexical,10,1.9,,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0,,,
+ev-abstract,ko,manual,evidence_location,answer,lexical,10,217.6,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-method,en,manual,evidence_location,answer,lexical,10,355.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,2609.15659 2609.26774 2609.11699 2609.06986 2609.24972 2609.19144 2609.06986 2609.22682 2609.15195,3480 13043 593 4531 10983 7265 4530 15268 5073,body body body body body body body body body
+ev-results-table,ko,manual,evidence_location,answer,lexical,10,202.6,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-results-en,en,manual,evidence_location,answer,lexical,10,321.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-limitations-en,en,manual,evidence_location,answer,lexical,10,256.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-limitations-ko,ko,manual,evidence_location,answer,lexical,10,203.5,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-appendix,ko,manual,evidence_location,answer,lexical,10,336.0,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-figure-caption,en,manual,evidence_location,answer,lexical,10,244.9,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+ev-references-list,ko,manual,evidence_location,answer,lexical,10,211.5,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+lang-ko,ko,manual,language,answer,lexical,10,3.0,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+lang-en,en,manual,language,answer,lexical,10,204.0,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,2609.19144 2609.19144,7242 7264,body body
+lang-mixed-rag,ko,manual,language,answer,lexical,10,3.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+lang-mixed-moe,ko,manual,language,answer,lexical,10,41.2,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+lang-ko-typo,ko,manual,language,answer,lexical,10,2.2,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+lang-abbr-dpo,en,manual,language,answer,lexical,10,19.7,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2608.30597 2608.30597 2608.30597 2608.30597 2608.30597 2608.30597 2608.30597 2608.30597 2608.30597 2608.30597,2032 2010 2008 2040 2045 2012 2006 2022 2041 2034,body body body figure_caption body body body body body body
+lang-abbr-rlhf,en,manual,language,answer,lexical,10,13.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,2608.30597 2608.30597 2609.19144 2609.26489 2609.26489 2609.19144 2609.15078 2609.13058 2609.09076 2609.11063,2041 2032 7242 15603 15597 7248 3880 4228 1340 12372,body body body body body body body body body body
+lang-abbr-rag,en,manual,language,answer,lexical,10,22.5,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.24220 2609.08365 2609.08365 2609.24220 2609.08365 2609.08365 2609.08365 2609.08365 2609.08365 2609.08365,11220 2657 2656 11232 2698 2697 2696 2695 2694 2693,body body body body body body body body body body
+lang-romanized-ko,ko,manual,language,answer,lexical,10,3.2,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+lang-en-lowercase-keywords,en,manual,language,answer,lexical,10,119.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+mp-compare-ko,ko,manual,multi_paper,answer,lexical,10,312.6,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+mp-compare-en,en,manual,multi_paper,answer,lexical,10,325.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+mp-list-topic-ko,ko,manual,multi_paper,answer,lexical,10,1.8,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+mp-list-topic-en,en,manual,multi_paper,answer,lexical,10,181.9,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+mp-first-proposed-ko,ko,manual,multi_paper,answer,lexical,10,54.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+mp-first-proposed-en,en,manual,multi_paper,answer,lexical,10,261.2,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,2609.21094 2609.19144 2609.19144 2609.19144,10643 7242 7264 7265,body body body body
+qf-single-word-en,en,manual,query_form,answer,lexical,10,154.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,2609.13287 2609.13287 2609.23169 2609.13318 2609.23169 2609.13318 2609.13287 2609.13287 2609.13287 2609.13287,3575 3577 12582 4167 12586 4176 3576 3602 3578 3592,body body body body body body body body body body
+qf-single-word-ko,ko,manual,query_form,clarify,lexical,10,1.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-long-paragraph-ko,ko,manual,query_form,answer,lexical,10,23.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-long-paragraph-en,en,manual,query_form,answer,lexical,10,441.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,2609.26774 2609.27657 2609.13231 2609.13443 2609.10297 2609.22870 2609.18779 2609.18779 2609.21346 2609.08365,13076 15761 11828 3729 2445 11787 7613 7595 9705 2684,body body table_like body body body body body body body
+qf-statement-ko,ko,manual,query_form,answer,lexical,10,1.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-statement-en,en,manual,query_form,answer,lexical,10,195.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-exact-title,en,manual,query_form,answer,lexical,10,179.6,,1.0000,1.0000,1.0000,1.0000,1.0000,,,,,,0,2609.27490 2609.27490 2609.27490 2609.27490 2609.27490 2609.27490 2609.27490 2609.27490 2609.27490 2609.27490,15086 15089 15090 15088 15153 15152 15151 15150 15149 15148,body body body body body body body body body body
+qf-partial-title,ko,manual,query_form,answer,lexical,10,126.5,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-typo-key-term-ko,ko,manual,query_form,answer,lexical,10,18.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-typo-key-term-en,en,manual,query_form,answer,lexical,10,100.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-numbers-units-ko,ko,manual,query_form,answer,lexical,10,97.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+qf-numbers-units-en,en,manual,query_form,answer,lexical,10,159.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+sf-inject-embedded,ko,manual,safety,answer,lexical,10,29.1,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+sf-html-injection,ko,manual,safety,answer,lexical,10,5.7,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+sf-markdown-injection,en,manual,safety,answer,lexical,10,129.2,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+sf-control-chars-mixed,ko,manual,safety,answer,lexical,10,,ValueError: A string literal cannot contain NUL (0x00) characters.,,,,,,,,,,,0,,,
+sf-exactly-4000-chars,en,manual,safety,answer,lexical,10,448.3,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,
+sf-4000-chars-padded,en,manual,safety,answer,lexical,10,439.4,,0.0000,0.0000,0.0000,0.0000,0.0000,,,,,,0,,,

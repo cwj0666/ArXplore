@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from src.integrations.embedding_client import EmbeddingClient
-from src.integrations.paper_repository import PaperRepository
+from src.integrations.paper_repository import STRICT_MATCH_BONUS, PaperRepository
 from src.integrations.pdf_parser.section_roles import is_references_section_title
 from src.integrations.vector_repository import VectorRepository
 
@@ -11,6 +11,22 @@ _REFERENCE_INTENT_PATTERN = re.compile(
     r"\b(?:references?|bibliography|works\s+cited|cited\s+works)\b",
     re.IGNORECASE,
 )
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def normalize_search_query(query: str) -> str:
+    """NUL을 포함한 C0 제어 문자(\\n, \\t 제외)와 DEL을 지우고 공백을 한 칸으로 합친다."""
+    return " ".join(_CONTROL_CHARACTERS.sub("", str(query or "")).split())
+
+
+def candidate_fetch_limit(limit: int) -> int:
+    """전체 검색에서 저장소에 요청하는 후보 수. 저장소가 논문당 상한을 적용한 뒤의 행 수다."""
+    return max(max(1, int(limit)) * 5, 30)
+
+
+def hybrid_branch_limit(limit: int) -> int:
+    """hybrid 검색이 lexical/vector 경로 각각에서 받는 결과 수."""
+    return max(max(1, int(limit)) * 3, 10)
 
 
 class PaperRetriever:
@@ -34,9 +50,12 @@ class PaperRetriever:
         limit: int = 5,
         arxiv_id: str | None = None,
     ) -> list[dict]:
-        """공용 반환 shape로 청크를 조회한다."""
+        """공용 반환 shape로 청크를 조회한다. 제어 문자를 지운 질의가 비면 DB를 조회하지 않고 []를 반환한다."""
+        query = normalize_search_query(query)
+        if not query:
+            return []
         normalized_limit = max(1, limit)
-        fetch_limit = normalized_limit if arxiv_id else max(normalized_limit * 3, 10)
+        fetch_limit = normalized_limit if arxiv_id else candidate_fetch_limit(normalized_limit)
         candidates = self.repository.list_chunk_candidates_by_query(query, limit=fetch_limit, arxiv_id=arxiv_id)
         normalized_candidates = self._normalize_candidates(query, candidates, retrieval_method="lexical")
         reranked_candidates = self._rerank_lexical_candidates(query, normalized_candidates)
@@ -50,9 +69,12 @@ class PaperRetriever:
         arxiv_id: str | None = None,
         limit: int = 5,
     ) -> list[dict]:
-        """벡터 검색 결과를 공용 반환 shape로 정규화해 반환한다."""
+        """벡터 검색 결과를 공용 반환 shape로 정규화해 반환한다. 제어 문자를 지운 질의가 비면 []를 반환한다."""
+        query = normalize_search_query(query)
+        if not query:
+            return []
         normalized_limit = max(1, limit)
-        fetch_limit = normalized_limit if arxiv_id else max(normalized_limit * 3, 10)
+        fetch_limit = normalized_limit if arxiv_id else candidate_fetch_limit(normalized_limit)
         query_embedding = self.embedding_client.embed_texts([query])[0]
         candidates = self.vector_repository.search_paper_chunks(
             query_embedding,
@@ -72,17 +94,21 @@ class PaperRetriever:
         lexical_limit: int | None = None,
         vector_limit: int | None = None,
     ) -> list[dict]:
-        """lexical/vector 결과를 rank fusion으로 결합해 공용 retrieval shape로 반환한다."""
+        """lexical/vector 결과를 rank fusion으로 결합해 공용 retrieval shape로 반환한다.
+        제어 문자를 지운 질의가 비면 []를 반환한다."""
+        query = normalize_search_query(query)
+        if not query:
+            return []
         normalized_limit = max(1, limit)
         lexical_candidates = self.search_paper_chunks(
             query,
             arxiv_id=arxiv_id,
-            limit=lexical_limit or max(normalized_limit * 3, 10),
+            limit=lexical_limit or hybrid_branch_limit(normalized_limit),
         )
         vector_candidates = self.search_paper_chunks_by_vector(
             query,
             arxiv_id=arxiv_id,
-            limit=vector_limit or max(normalized_limit * 3, 10),
+            limit=vector_limit or hybrid_branch_limit(normalized_limit),
         )
         return self._merge_hybrid_candidates(
             query,
@@ -301,7 +327,17 @@ class PaperRetriever:
         arxiv_id: str | None,
         limit: int,
     ) -> list[dict]:
-        """lexical/vector 결과를 reciprocal rank fusion으로 병합한다."""
+        """lexical/vector 결과를 reciprocal rank fusion으로 병합한다.
+
+        vector 결과가 있으면 lexical 결과 중 일부 lexeme만 일치한 행(`strict_match`가 False)은 융합에서 뺀다.
+        vector 결과가 없으면 lexical 결과를 모두 쓴다.
+        """
+        if vector_candidates:
+            lexical_candidates = [
+                candidate
+                for candidate in lexical_candidates
+                if (candidate.get("score_breakdown") or {}).get("strict_match") is not False
+            ]
         rank_constant = 60.0
         method_weights = self._resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates)
         merged: dict[int, dict] = {}
@@ -375,7 +411,8 @@ class PaperRetriever:
         arxiv_id: str | None,
         max_chunks_per_paper: int = 2,
     ) -> list[dict]:
-        """같은 논문의 chunk가 top-k를 과점하지 않도록 보수적으로 분산한다."""
+        """논문마다 앞에서부터 `max_chunks_per_paper`개까지만 고르고, 후보가 모자랄 때만
+        상한을 넘긴 청크를 원래 순서대로 채운다. 논문 범위 검색이나 후보가 `limit` 이하면 순서대로 자른다."""
         normalized_limit = max(1, limit)
         if arxiv_id or len(candidates) <= normalized_limit:
             return candidates[:normalized_limit]
@@ -415,7 +452,7 @@ class PaperRetriever:
             "lexical": 1.0,
             "vector": 1.0,
         }
-        lexical_top_score = self._to_float(lexical_candidates[0].get("score")) if lexical_candidates else 0.0
+        lexical_top_score = self._lexical_confidence(lexical_candidates[0]) if lexical_candidates else 0.0
         query_tokens = self._query_tokens(query)
         lexical_top_ids = {int(candidate.get("chunk_id") or 0) for candidate in lexical_candidates[:5]}
         vector_top_ids = {int(candidate.get("chunk_id") or 0) for candidate in vector_candidates[:5]}
@@ -441,9 +478,9 @@ class PaperRetriever:
 
     def _candidate_hybrid_quality_weight(self, method: str, candidate: dict) -> float:
         """RRF에 후보 자체의 confidence를 반영한다."""
-        score = self._to_float(candidate.get("score"))
         if method != "lexical":
             return 1.0
+        score = self._lexical_confidence(candidate)
         if score < 0.2:
             return 0.2
         if score < 0.3:
@@ -453,6 +490,17 @@ class PaperRetriever:
         if score < 0.8:
             return 0.85
         return 1.0
+
+    def _lexical_confidence(self, candidate: dict) -> float:
+        """hybrid 가중치 판단에 쓰는 lexical 점수. strict 일치 행은 `STRICT_MATCH_BONUS`를 뺀 점수,
+        일부 lexeme만 일치한 행은 0이다. `strict_match`가 없는 후보는 점수를 그대로 쓴다."""
+        score = self._to_float(candidate.get("score"))
+        strict_match = (candidate.get("score_breakdown") or {}).get("strict_match")
+        if strict_match is None:
+            return score
+        if not strict_match:
+            return 0.0
+        return score - STRICT_MATCH_BONUS
 
     def _section_intent_bonus(self, query: str):
         """명시적 section-intent 질의에서만 해당 섹션을 밀어준다."""

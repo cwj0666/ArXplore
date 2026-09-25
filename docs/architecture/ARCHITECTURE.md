@@ -193,9 +193,10 @@ raw 저장 규칙:
 
 인덱스 관련 사실:
 
-- lexical 후보는 질의 lexeme 중 하나라도 가진 행을 두 GIN 인덱스(`chunk_vector`, `title_abstract_vector`)로 각각 찾아 UNION한다. 최종 판정과 `ts_rank_cd`는 `title_abstract_vector || chunk_vector`에 원래 질의를 적용한다(이전 행별 `to_tsvector` 식과 같은 tsvector). 전체 질의 `ILIKE`는 후보 조건이 아니라 점수 보너스로만 쓰고, `%`·`_`는 이스케이프한다
+- lexical 후보는 질의 lexeme 중 하나라도 가진 행을 두 GIN 인덱스(`chunk_vector`, `title_abstract_vector`)로 각각 찾아 UNION한다. 후보마다 `title_abstract_vector || chunk_vector`에 원래 질의(모든 lexeme 요구)가 맞는지(`strict_match`)와 질의 lexeme 비율(`coverage`)을 계산한다. strict 행은 기존 `ts_rank_cd` 합 + 1.0, 나머지는 coverage 상위 `max(limit*20, 500)`개만 골라 `coverage × ts_rank_cd(OR 질의, 정규화 32)`(1 미만)로 점수를 매기므로, 긴 자연어 질의도 결과가 비지 않고 strict 행이 앞에 온다. 전체 질의 `ILIKE`는 strict 행에만 점수 보너스로 쓰고, `%`·`_`는 이스케이프한다
+- 전체(논문 범위가 아닌) lexical·vector 검색은 SQL 안에서 논문마다 점수 상위 3청크만 남긴다(`row_number() over (partition by arxiv_id ...)`). retriever는 `max(limit*5, 30)`개를 요청하고, 마지막에 `_apply_paper_diversity`가 논문당 2청크를 우선한다
 - 이전 `idx_paper_chunks_fts`(식 인덱스)는 `ensure_schema()`가 지운다
-- 벡터 검색은 2단계다. 1단계는 `ORDER BY embedding <=> 질의 LIMIT max(limit*4, 40)`로 HNSW를 타고(`model_name` 필터, 후보가 40개를 넘으면 트랜잭션 범위로 `hnsw.ef_search`를 올림), 2단계는 후보에만 섹션·`content_role` 보정과 `VECTOR_MIN_SIMILARITY` 하한을 적용해 정렬한다
+- 벡터 검색은 2단계다. 1단계는 `ORDER BY embedding <=> 질의 LIMIT max(limit*8, 80)`(논문 범위는 `max(limit*4, 40)`)로 HNSW를 타고(`model_name` 필터, 후보가 40개를 넘으면 트랜잭션 범위로 `hnsw.ef_search`를 올림), 2단계는 후보에만 섹션·`content_role` 보정과 `VECTOR_MIN_SIMILARITY` 하한, 논문당 3청크 상한을 적용해 정렬한다
 - 논문 범위(`arxiv_id`) 벡터 검색은 HNSW 사후 필터가 결과를 잃을 수 있어 그 논문의 청크만 모아 정확 정렬한다
 - 인덱스 사용 여부와 실행 시간은 `python scripts/explain_retrieval.py --query "..."`로 실제 DB에서 확인한다(`EXPLAIN (ANALYZE, BUFFERS)`)
 - 기존 DB에 처음 `migrate_schema.py`를 돌리면 생성 컬럼 추가로 `papers`·`paper_chunks`를 다시 쓰고 HNSW를 빌드한다. prepare-worker를 멈춘 상태에서 실행한다
@@ -225,8 +226,8 @@ prepare 단계의 보호 장치:
 
 | 경로 | 제품 사용 | 구현 |
 | --- | --- | --- |
-| hybrid | 기본 경로(`RETRIEVAL_MODE=hybrid`이고 질의 임베딩 키가 있을 때) | lexical + vector를 RRF(k=60)와 방법별·후보 품질 가중치로 합침 |
-| lexical | 폴백(키 없음, 임베딩 호출 `OpenAIError`, `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector + `websearch_to_tsquery`/`plainto_tsquery` `ts_rank_cd`, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌 유사 텍스트 필터, 논문 다양성, 인접 청크 병합 |
+| hybrid | 기본 경로(`RETRIEVAL_MODE=hybrid`이고 질의 임베딩 키가 있을 때) | lexical + vector를 RRF(k=60)와 방법별·후보 품질 가중치로 합침. vector 결과가 있으면 lexical의 부분 일치(`strict_match=False`) 행은 빼고 합친다 |
+| lexical | 폴백(키 없음, 임베딩 호출 `OpenAIError`, `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector + `websearch_to_tsquery`/`plainto_tsquery` `ts_rank_cd`(strict 일치) 또는 OR 질의 × lexeme coverage(부분 일치), ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌 유사 텍스트 필터, 논문 다양성, 인접 청크 병합 |
 | vector | hybrid 구성 요소 | `paper_embeddings` 코사인 거리, 섹션·`content_role` 감점 후 rerank, `VECTOR_MIN_SIMILARITY` 하한 |
 
 - 질의 임베딩 키는 서버 `OPENAI_API_KEY`다. `override_openai_runtime`으로 요청 범위 키를 넣으면(평가 스크립트) 그 키가 우선한다

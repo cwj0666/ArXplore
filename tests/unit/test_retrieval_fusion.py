@@ -4,6 +4,7 @@ import itertools
 
 import pytest
 
+from src.integrations.paper_repository import STRICT_MATCH_BONUS
 from src.integrations.paper_retriever import PaperRetriever
 
 RRF_K = 60.0
@@ -220,3 +221,55 @@ class TestCandidateQualityWeight:
 
     def test_unparseable_score_is_treated_as_zero(self):
         assert _retriever()._candidate_hybrid_quality_weight("lexical", {"score": "n/a"}) == 0.2
+
+
+def _lexical(chunk_id: int, score: float, *, strict: bool, coverage: float = 1.0) -> dict:
+    return {
+        **_candidate(chunk_id, score),
+        "score_breakdown": {"strict_match": strict, "coverage": coverage},
+    }
+
+
+class TestTwoTierLexicalCandidates:
+    def test_strict_rows_are_weighted_without_the_tier_bonus(self):
+        retriever = _retriever()
+
+        assert retriever._lexical_confidence(_lexical(1, STRICT_MATCH_BONUS + 0.25, strict=True)) == pytest.approx(0.25)
+        assert (
+            retriever._candidate_hybrid_quality_weight("lexical", _lexical(1, STRICT_MATCH_BONUS + 0.25, strict=True))
+            == 0.4
+        )
+        assert (
+            retriever._candidate_hybrid_quality_weight("lexical", _lexical(1, STRICT_MATCH_BONUS + 0.9, strict=True))
+            == 1.0
+        )
+
+    def test_partial_rows_have_zero_confidence(self):
+        retriever = _retriever()
+        partial = _lexical(1, 0.87, strict=False, coverage=0.8)
+
+        assert retriever._lexical_confidence(partial) == 0.0
+        assert retriever._candidate_hybrid_quality_weight("lexical", partial) == 0.2
+
+    def test_rows_without_tier_information_keep_their_score(self):
+        assert _retriever()._lexical_confidence(_candidate(1, 0.6)) == 0.6
+
+    def test_partial_lexical_rows_are_dropped_when_vector_has_results(self):
+        lexical = [_lexical(1, STRICT_MATCH_BONUS + 0.5, strict=True), _lexical(2, 0.8, strict=False, coverage=0.7)]
+        vector = [_candidate(2, 0.8), _candidate(3, 0.7)]
+
+        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+
+        by_id = {candidate["chunk_id"]: candidate for candidate in merged}
+        assert set(by_id) == {1, 2, 3}
+        assert by_id[2]["matched_methods"] == ["vector"]
+        assert "cross_method_overlap_bonus" not in by_id[2]["score_breakdown"]
+        assert by_id[1]["matched_methods"] == ["lexical"]
+
+    def test_partial_lexical_rows_are_kept_without_vector_results(self):
+        lexical = [_lexical(1, 0.8, strict=False, coverage=0.7), _lexical(2, 0.6, strict=False, coverage=0.5)]
+
+        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, [], arxiv_id=None, limit=10)
+
+        assert _ids(merged) == [1, 2]
+        assert all(candidate["matched_methods"] == ["lexical"] for candidate in merged)

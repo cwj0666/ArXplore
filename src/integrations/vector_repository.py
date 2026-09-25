@@ -6,9 +6,11 @@ from typing import Any
 from psycopg2.extras import execute_values
 
 from src.integrations.db import get_connection
+from src.integrations.paper_repository import PER_PAPER_CANDIDATE_CAP
 from src.shared import AppSettings, build_postgres_connection_params, get_settings
 
-MIN_VECTOR_CANDIDATES = 40
+MIN_VECTOR_CANDIDATES = 80
+MIN_SCOPED_VECTOR_CANDIDATES = 40
 MAX_HNSW_EF_SEARCH = 1000
 DEFAULT_HNSW_EF_SEARCH = 40
 
@@ -45,8 +47,13 @@ def vector_literal(values: Sequence[float]) -> str:
     return "[" + ",".join(f"{float(value):.12f}" for value in values) + "]"
 
 
-def resolve_candidate_limit(limit: int) -> int:
-    return max(max(1, int(limit)) * 4, MIN_VECTOR_CANDIDATES)
+def resolve_candidate_limit(limit: int, *, scoped: bool = False) -> int:
+    """1단계 후보 수. 전체 검색은 논문당 상한으로 잘려 나갈 몫까지 `limit`의 8배(최소 80)를,
+    논문 범위 검색은 4배(최소 40)를 가져온다."""
+    normalized_limit = max(1, int(limit))
+    if scoped:
+        return max(normalized_limit * 4, MIN_SCOPED_VECTOR_CANDIDATES)
+    return max(normalized_limit * 8, MIN_VECTOR_CANDIDATES)
 
 
 def resolve_hnsw_ef_search(candidate_limit: int) -> int | None:
@@ -63,20 +70,26 @@ def build_vector_search_query(
     arxiv_id: str | None = None,
     model_name: str | None = None,
     min_similarity: float = 0.0,
+    per_paper_cap: int | None = PER_PAPER_CANDIDATE_CAP,
 ) -> tuple[str, dict[str, Any]]:
     """2단계 벡터 검색 SQL과 파라미터를 만든다.
 
     1단계(candidates)는 순수 코사인 거리 순으로 `candidate_limit`개를 뽑는다. 전체 검색에서는
     `ORDER BY e.embedding <=> query`가 HNSW 인덱스를 탄다. 논문 범위 검색은 HNSW 사후 필터가 결과를
     잃을 수 있어 그 논문의 청크만 MATERIALIZED CTE로 모은 뒤 정확히 정렬한다.
-    2단계는 후보에만 섹션·content_role 보정을 적용하고 최종 정렬한다.
+    2단계는 후보에만 섹션·content_role 보정을 적용한다. 전체 검색이고 `per_paper_cap`이 양수면
+    보정 점수 기준으로 논문마다 상위 `per_paper_cap`개만 남긴 뒤 최종 정렬한다.
     """
-    candidate_limit = resolve_candidate_limit(limit)
+    candidate_limit = resolve_candidate_limit(limit, scoped=bool(arxiv_id))
     params: dict[str, Any] = {
         "query": vector_literal(query_embedding),
         "candidate_limit": candidate_limit,
         "limit": max(1, int(limit)),
     }
+    cap_filter_sql = ""
+    if not arxiv_id and per_paper_cap is not None and int(per_paper_cap) > 0:
+        params["per_paper_cap"] = int(per_paper_cap)
+        cap_filter_sql = "WHERE paper_rank <= %(per_paper_cap)s"
     if model_name:
         params["model_name"] = model_name
 
@@ -129,6 +142,17 @@ def build_vector_search_query(
             FROM candidates k
             JOIN paper_chunks c ON c.id = k.chunk_id
             JOIN papers p ON p.arxiv_id = c.arxiv_id
+        ),
+        kept AS (
+            SELECT
+                ranked.*,
+                row_number() OVER (
+                    PARTITION BY arxiv_id
+                    ORDER BY (raw_similarity_score + content_role_adjustment + section_boost) DESC, id DESC
+                ) AS paper_rank
+            FROM ranked
+            WHERE content_role <> 'toc'
+                {min_similarity_sql}
         )
         SELECT
             id,
@@ -143,9 +167,8 @@ def build_vector_search_query(
             content_role,
             content_role_adjustment,
             section_boost
-        FROM ranked
-        WHERE content_role <> 'toc'
-            {min_similarity_sql}
+        FROM kept
+        {cap_filter_sql}
         ORDER BY (raw_similarity_score + content_role_adjustment + section_boost) DESC, id DESC
         LIMIT %(limit)s
     """

@@ -10,7 +10,9 @@ import pytest
 
 from src.integrations import paper_repository as paper_repository_module
 from src.integrations.paper_repository import (
+    PER_PAPER_CANDIDATE_CAP,
     REFERENCES_SECTION_TITLE_SQL_REGEX,
+    STRICT_MATCH_BONUS,
     PaperRepository,
     build_lexical_candidates_query,
     escape_like,
@@ -21,6 +23,10 @@ from src.integrations.pdf_parser.section_roles import is_references_section_titl
 
 def _normalize_sql(sql: str) -> str:
     return " ".join(sql.split())
+
+
+def _named_params(sql: str) -> set[str]:
+    return set(re.findall(r"%\((\w+)\)s", sql))
 
 
 class RecordingCursor:
@@ -215,7 +221,7 @@ def test_lexical_query_uses_full_title_references_rule():
     _repository_with_cursor(cursor).list_chunk_candidates_by_query("direct preference optimization", limit=3)
 
     sql, params = cursor.executed[0]
-    assert f"WHEN c.section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08" in sql
+    assert f"WHEN section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08" in sql
     assert "ILIKE '%%References%%'" not in sql
     assert "%" not in REFERENCES_SECTION_TITLE_SQL_REGEX
     assert "'" not in REFERENCES_SECTION_TITLE_SQL_REGEX
@@ -239,29 +245,102 @@ def test_lexical_candidates_come_from_indexed_generated_columns():
         "fts_query": "retrieval augmented generation",
         "like_pattern": "%retrieval-augmented generation%",
         "limit": 7,
+        "partial_pool": 500,
+        "per_paper_cap": 3,
     }
 
 
-def test_lexical_scoring_matches_previous_weights_and_breakdown():
+def test_lexical_scoring_is_two_tier_strict_then_coverage():
     normalized = _normalize_sql(build_lexical_candidates_query("dpo", limit=5)[0])
 
     assert (
-        "(p.title_abstract_vector || c.chunk_vector) @@ websearch_to_tsquery('english', %(query)s) "
-        "OR (p.title_abstract_vector || c.chunk_vector) @@ plainto_tsquery('english', %(fts_query)s)"
+        "CROSS JOIN LATERAL ( SELECT p.title_abstract_vector || c.chunk_vector AS search_vector OFFSET 0 ) v"
     ) in normalized
     assert (
-        "ts_rank_cd( p.title_abstract_vector || c.chunk_vector, websearch_to_tsquery('english', %(query)s) ) + "
-        "0.65 * ts_rank_cd( p.title_abstract_vector || c.chunk_vector, plainto_tsquery('english', %(fts_query)s) )"
+        "( v.search_vector @@ websearch_to_tsquery('english', %(query)s) "
+        "OR v.search_vector @@ plainto_tsquery('english', %(fts_query)s) ) AS strict_match"
     ) in normalized
     assert (
-        "WHEN p.title ILIKE %(like_pattern)s THEN 0.45 WHEN p.abstract ILIKE %(like_pattern)s THEN 0.2 "
-        "WHEN c.chunk_text ILIKE %(like_pattern)s THEN 0.15"
+        "(length(v.search_vector) - length(ts_delete(v.search_vector, q.lexemes)))::double precision "
+        "/ GREATEST(q.lexeme_count, 1) AS coverage"
     ) in normalized
     assert (
-        "WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01"
+        "CASE WHEN strict_match THEN ts_rank_cd(search_vector, websearch_to_tsquery('english', %(query)s)) "
+        "+ 0.65 * ts_rank_cd(search_vector, plainto_tsquery('english', %(fts_query)s)) + 1.0 "
+        "ELSE coverage * ts_rank_cd(search_vector, any_term, 32) END AS fts_score"
+    ) in normalized
+    assert "@@ websearch_to_tsquery('english', %(query)s) OR" not in normalized.split("AS strict_match")[1]
+    assert "WHERE (p.title_abstract_vector || c.chunk_vector) @@" not in normalized
+    assert "array_agg(lexeme) AS lexemes, count(*) AS lexeme_count" in normalized
+    assert STRICT_MATCH_BONUS == 1.0
+
+
+def test_lexical_scores_only_strict_rows_and_a_bounded_partial_pool():
+    sql, params = build_lexical_candidates_query("token level credit assignment", limit=50)
+    normalized = _normalize_sql(sql)
+
+    assert params["partial_pool"] == 1000
+    assert build_lexical_candidates_query("x", limit=5)[1]["partial_pool"] == 500
+    screened = normalized.split("screened AS MATERIALIZED (", 1)[1].split("pool AS (", 1)[0]
+    assert "ts_rank_cd" not in screened
+    assert "ILIKE" not in screened
+    assert (
+        "pool AS ( SELECT chunk_id, strict_match, coverage FROM screened WHERE strict_match UNION ALL "
+        "( SELECT chunk_id, strict_match, coverage FROM screened WHERE NOT strict_match "
+        "ORDER BY coverage DESC, chunk_id DESC LIMIT %(partial_pool)s ) )"
+    ) in normalized
+    assert "FROM pool k JOIN paper_chunks c ON c.id = k.chunk_id" in normalized
+
+
+def test_lexical_scoring_keeps_bonuses_and_breakdown():
+    normalized = _normalize_sql(build_lexical_candidates_query("dpo", limit=5)[0])
+
+    assert (
+        "WHEN NOT strict_match THEN 0 WHEN paper_title ILIKE %(like_pattern)s THEN 0.45 "
+        "WHEN paper_abstract ILIKE %(like_pattern)s THEN 0.2 WHEN chunk_text ILIKE %(like_pattern)s THEN 0.15"
+    ) in normalized
+    assert (
+        "(fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score"
         in normalized
     )
-    assert normalized.endswith("ORDER BY score DESC, chunk_id DESC LIMIT %(limit)s")
+    assert "WHERE score > 0.01" in normalized
+    assert "WHERE coalesce(c.metadata->>'content_role', '') <> 'toc'" in normalized
+    assert (
+        "t.fts_score, t.ilike_bonus, t.content_role_adjustment, t.section_boost, t.structural_adjustment, "
+        "t.score, t.strict_match, t.coverage FROM top_hits t"
+    ) in normalized
+    assert normalized.endswith("ORDER BY t.score DESC, t.chunk_id DESC")
+
+
+def test_lexical_query_caps_chunks_per_paper():
+    sql, params = build_lexical_candidates_query("quantization", limit=30)
+    normalized = _normalize_sql(sql)
+
+    assert params["per_paper_cap"] == PER_PAPER_CANDIDATE_CAP == 3
+    assert (
+        "row_number() OVER (PARTITION BY arxiv_id ORDER BY score DESC, chunk_id DESC) AS paper_rank "
+        "FROM scored WHERE score > 0.01"
+    ) in normalized
+    assert (
+        "FROM kept WHERE paper_rank <= %(per_paper_cap)s ORDER BY score DESC, chunk_id DESC LIMIT %(limit)s"
+    ) in normalized
+    assert "scored AS MATERIALIZED" in normalized
+    assert _named_params(sql) == set(params)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"arxiv_id": "2401.00001"}, {"per_paper_cap": None}, {"per_paper_cap": 0}],
+    ids=["scoped", "disabled", "zero"],
+)
+def test_lexical_per_paper_cap_is_skipped(kwargs):
+    sql, params = build_lexical_candidates_query("quantization", limit=10, **kwargs)
+    normalized = _normalize_sql(sql)
+
+    assert "per_paper_cap" not in params
+    assert "paper_rank <=" not in normalized
+    assert "FROM kept ORDER BY score DESC, chunk_id DESC LIMIT %(limit)s" in normalized
+    assert _named_params(sql) == set(params)
 
 
 def test_lexical_query_scopes_both_candidate_branches():
@@ -292,7 +371,24 @@ def test_blank_lexical_query_skips_the_database():
 
 
 def test_lexical_rows_keep_the_public_shape():
-    row = ("c1", "2401.00001", "Title", "Abstract", "chunk", 4, "Method", "body", 0.3, 0.15, 0.0, 0.04, 0.0, 0.49)
+    row = (
+        "c1",
+        "2401.00001",
+        "Title",
+        "Abstract",
+        "chunk",
+        4,
+        "Method",
+        "body",
+        0.3,
+        0.15,
+        0.0,
+        0.04,
+        0.0,
+        0.49,
+        True,
+        1.0,
+    )
     cursor = RecordingCursor(fetchall_results=[[row]])
     result = _repository_with_cursor(cursor).list_chunk_candidates_by_query("chunk", limit=3)[0]
 
@@ -312,8 +408,31 @@ def test_lexical_rows_keep_the_public_shape():
         "content_role_adjustment": 0.0,
         "section_boost": 0.04,
         "structural_adjustment": 0.0,
+        "coverage": 1.0,
+        "strict_match": True,
     }
     assert result["retrieval_method"] == "lexical"
+
+
+def test_lexical_rows_report_partial_matches():
+    row = ("c2", "2401.00002", "T", "A", "chunk", 1, "Method", "body", 0.42, 0, 0, 0.04, 0, 0.46, False, 0.6)
+    cursor = RecordingCursor(fetchall_results=[[row]])
+    result = _repository_with_cursor(cursor).list_chunk_candidates_by_query("a b c d e", limit=3)[0]
+
+    assert result["score_breakdown"]["strict_match"] is False
+    assert result["score_breakdown"]["coverage"] == 0.6
+    assert result["score"] == 0.46
+
+
+def test_repository_passes_per_paper_cap_to_the_query():
+    cursor = RecordingCursor(fetchall_results=[[], []])
+    repository = _repository_with_cursor(cursor)
+
+    repository.list_chunk_candidates_by_query("loss", limit=30)
+    repository.list_chunk_candidates_by_query("loss", limit=30, per_paper_cap=None)
+
+    assert cursor.executed[0][1]["per_paper_cap"] == 3
+    assert "per_paper_cap" not in cursor.executed[1][1]
 
 
 def test_save_paper_chunks_uses_one_bulk_insert(monkeypatch):

@@ -177,8 +177,8 @@ PAPERS = [
 ]
 
 
-def _seed(repository: PaperRepository) -> None:
-    for paper in PAPERS:
+def _seed(repository: PaperRepository, papers: list[dict[str, Any]] | None = None) -> None:
+    for paper in PAPERS if papers is None else papers:
         repository.save_paper({"arxiv_id": paper["arxiv_id"], "title": paper["title"], "abstract": paper["abstract"]})
         repository.save_paper_chunks(
             paper["arxiv_id"],
@@ -262,7 +262,11 @@ def test_lexical_search_uses_generated_columns(dsn):
         "content_role_adjustment",
         "section_boost",
         "structural_adjustment",
+        "coverage",
+        "strict_match",
     }
+    assert results[0]["score_breakdown"]["strict_match"] is True
+    assert results[0]["score_breakdown"]["coverage"] == pytest.approx(1.0)
     assert ids[("2601.00001", 2)] not in {row["chunk_id"] for row in results}
 
     title_only = repository.list_chunk_candidates_by_query("rewards", limit=5)
@@ -273,6 +277,145 @@ def test_lexical_search_uses_generated_columns(dsn):
 
     assert repository.list_chunk_candidates_by_query("50%_off", limit=5)[0]["score_breakdown"]["ilike_bonus"] == 0.15
     assert repository.list_chunk_candidates_by_query("50%off", limit=5)[0]["score_breakdown"]["ilike_bonus"] == 0.0
+
+
+CREDIT_PAPERS = [
+    {
+        "arxiv_id": "2602.00001",
+        "title": "Token-Level Credit Assignment for Critic Alignment",
+        "abstract": "We assign token-level credit to align the critic in reinforcement learning.",
+        "chunks": [
+            ("1 Introduction", "Credit assignment over tokens improves the critic in reinforcement learning.", "body"),
+        ],
+    },
+    {
+        "arxiv_id": "2602.00002",
+        "title": "Graph Partitioning with Caches",
+        "abstract": "Sorting networks and cache-aware partitioning.",
+        "chunks": [("1 Introduction", "Partitioning large graphs with caches.", "body")],
+    },
+]
+
+
+def test_long_query_returns_partial_matches(dsn):
+    repository = DsnPaperRepository(dsn)
+    repository.ensure_schema()
+    _seed(repository, CREDIT_PAPERS)
+    query = "Study defining token-level credit and improving reinforcement learning with PACT method"
+
+    results = repository.list_chunk_candidates_by_query(query, limit=5)
+
+    assert [row["arxiv_id"] for row in results] == ["2602.00001"]
+    breakdown = results[0]["score_breakdown"]
+    assert breakdown["strict_match"] is False
+    assert 0.3 < breakdown["coverage"] < 1.0
+    assert breakdown["ilike_bonus"] == 0.0
+    assert results[0]["score"] > 0.01
+
+    retriever = PaperRetriever(repository=repository, embedding_client=object(), vector_repository=object())
+    contexts = retriever.search_paper_contexts(query, limit=3)
+    assert contexts[0]["arxiv_id"] == "2602.00001"
+
+
+def test_strict_match_ranks_above_partial_match(dsn):
+    repository = DsnPaperRepository(dsn)
+    repository.ensure_schema()
+    _seed(
+        repository,
+        [
+            {
+                "arxiv_id": "2603.00001",
+                "title": "Sparse Routing",
+                "abstract": "Experts are routed sparsely.",
+                "chunks": [("2 Method", "Sparse expert routing with a load balancing loss.", "body")],
+            },
+            {
+                "arxiv_id": "2603.00002",
+                "title": "Sparse Expert Routing Everywhere",
+                "abstract": "Sparse experts and routing, routing, routing for sparse expert models.",
+                "chunks": [("Abstract", "Sparse expert routing sparse expert routing sparse expert routing.", "body")],
+            },
+        ],
+    )
+
+    results = repository.list_chunk_candidates_by_query("sparse expert routing balancing loss", limit=5)
+
+    assert [row["arxiv_id"] for row in results] == ["2603.00001", "2603.00002"]
+    assert [row["score_breakdown"]["strict_match"] for row in results] == [True, False]
+    assert results[1]["score_breakdown"]["coverage"] == pytest.approx(0.6)
+    assert results[0]["score"] > results[1]["score"]
+
+
+QUANT_PAPERS = [
+    {
+        "arxiv_id": f"2604.0000{paper}",
+        "title": title,
+        "abstract": "We study post-training quantization of neural networks.",
+        "chunks": [
+            (
+                "3 Method",
+                f"Step {index} keeps activations stable. " + "Quantization error shrinks. " * (4 - paper),
+                "body",
+            )
+            for index in range(8)
+        ],
+    }
+    for paper, title in enumerate(
+        ("Quantization for Attention", "Stable Vector Quantization", "Cellpose Post-Training Methods"), start=1
+    )
+]
+
+
+def test_per_paper_cap_spreads_top_k_across_papers(dsn):
+    repository = DsnPaperRepository(dsn)
+    repository.ensure_schema()
+    _seed(repository, QUANT_PAPERS)
+
+    capped = repository.list_chunk_candidates_by_query("quantization", limit=10)
+    counts: dict[str, int] = {}
+    for row in capped:
+        counts[row["arxiv_id"]] = counts.get(row["arxiv_id"], 0) + 1
+    assert counts == {"2604.00001": 3, "2604.00002": 3, "2604.00003": 3}
+
+    uncapped = repository.list_chunk_candidates_by_query("quantization", limit=10, per_paper_cap=None)
+    assert [row["arxiv_id"] for row in uncapped[:8]] == ["2604.00001"] * 8
+
+    scoped = repository.list_chunk_candidates_by_query("quantization", limit=10, arxiv_id="2604.00002")
+    assert len(scoped) == 8
+
+    retriever = PaperRetriever(repository=repository, embedding_client=object(), vector_repository=object())
+    contexts = retriever.search_paper_contexts("quantization", limit=10)
+    assert len({context["arxiv_id"] for context in contexts}) >= 3
+    assert contexts[0]["arxiv_id"] == "2604.00001"
+
+
+def test_vector_per_paper_cap_spreads_top_k_across_papers(dsn):
+    repository = DsnPaperRepository(dsn)
+    repository.ensure_schema()
+    _seed(repository, QUANT_PAPERS)
+    ids = _chunk_ids(dsn)
+    rows = []
+    for (arxiv_id, index), chunk_id in ids.items():
+        paper = int(arxiv_id[-1])
+        rows.append(
+            {
+                "chunk_id": chunk_id,
+                "embedding": _basis_vector((0, 1.0), (paper, 0.1 * paper + 0.01 * index)),
+                "model_name": EMBEDDING_MODEL,
+            }
+        )
+    DsnVectorRepository(dsn).upsert_paper_embeddings(rows)
+    query = _basis_vector((0, 1.0))
+
+    results = DsnVectorRepository(dsn).search_paper_chunks(query, limit=10)
+    counts: dict[str, int] = {}
+    for row in results:
+        counts[row["arxiv_id"]] = counts.get(row["arxiv_id"], 0) + 1
+    assert counts == {"2604.00001": 3, "2604.00002": 3, "2604.00003": 3}
+    assert [row["arxiv_id"] for row in results[:3]] == ["2604.00001"] * 3
+
+    scoped = DsnVectorRepository(dsn).search_paper_chunks(query, limit=10, arxiv_id="2604.00001")
+    assert len(scoped) == 8
 
 
 def test_lexical_candidate_query_can_use_gin_indexes(dsn):

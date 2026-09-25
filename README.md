@@ -73,7 +73,7 @@ flowchart TD
 | 경로 | 상태 | 내용 |
 | --- | --- | --- |
 | hybrid | **제품 경로** (`RETRIEVAL_MODE=hybrid`, 기본값) | lexical과 vector 결과를 RRF(k=60)와 방법별 가중치로 합칩니다. 질의 임베딩 키(서버 `OPENAI_API_KEY`)가 있을 때만 씁니다. |
-| lexical | **폴백 경로** (키가 없거나 임베딩 호출 실패, 또는 `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector에 `websearch_to_tsquery` + `plainto_tsquery`로 `ts_rank_cd` 점수를 매기고, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌처럼 보이는 텍스트 필터, 논문 다양성 보정, 인접 청크 병합을 거칩니다. |
+| lexical | **폴백 경로** (키가 없거나 임베딩 호출 실패, 또는 `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector에 `websearch_to_tsquery` + `plainto_tsquery`로 `ts_rank_cd` 점수를 매기고(모든 lexeme이 맞지 않는 긴 질의는 OR 질의 순위 × lexeme coverage로 아래 등급 점수), 논문당 3청크 상한, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌처럼 보이는 텍스트 필터, 논문 다양성 보정, 인접 청크 병합을 거칩니다. |
 | vector | hybrid의 구성 요소 | `paper_embeddings` 코사인 거리(`<=>`)와 섹션·`content_role` 감점. `VECTOR_MIN_SIMILARITY`(기본 0)로 낮은 유사도를 거를 수 있습니다. |
 
 - 상세 챗은 같은 경로를 `arxiv_id`로 한정해 호출하고, 결과가 비면 논문의 앞 청크로 대신합니다(응답의 `retrieval_mode`가 `hybrid` / `lexical` / `first_chunks` 중 하나).
