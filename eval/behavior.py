@@ -32,7 +32,7 @@ BEHAVIOR_METRIC_DESCRIPTIONS = {
     "refusal_correct": "refuse 케이스: 거절 문구가 있고, 검색 hit·citation에 없는 arXiv 링크가 없음",
     "no_fabricated_links": "답변이 있는 모든 케이스: 답변 속 arXiv 링크가 모두 검색 hit·citation의 논문을 가리킴",
     "must_not_contain_ok": "`must_not_contain`이 있는 케이스: 금지 문자열이 답변에 하나도 없음(대소문자 무시)",
-    "mentions_required_ids": "`must_mention_arxiv_ids`가 있는 케이스: 필수 arXiv ID 중 답변(링크 포함)에 나온 비율",
+    "mentions_required_ids": "`must_mention_arxiv_ids`가 있는 케이스: 필수 arXiv ID 중 답변에 ID·링크 또는 인용된 논문 제목으로 나온 비율",
     "rejected_as_expected": "입력 거부를 기대했거나 실제로 거부된 케이스: 기대와 결과가 일치",
 }
 
@@ -244,6 +244,12 @@ def behavior_scores(
     _, normalize_arxiv_id = _citation_helpers()
     required = {normalize_arxiv_id(str(value)) for value in record.get("must_mention_arxiv_ids") or [] if value}
     if required:
-        mentioned = mentioned_arxiv_ids(answer)
+        mentioned = set(mentioned_arxiv_ids(answer))
+        lowered_answer = answer.lower()
+        for citation in record.get("citations") or []:
+            cited_id = normalize_arxiv_id(str(citation.get("arxiv_id") or ""))
+            title = str(citation.get("title") or "").strip().lower()
+            if cited_id in required and (citation.get("in_answer") or (len(title) >= 12 and title in lowered_answer)):
+                mentioned.add(cited_id)
         scores["mentions_required_ids"] = len(required & mentioned) / len(required)
     return outcome, scores

@@ -925,3 +925,19 @@ class TestScripts:
         assert "검색 평가 제외: 4개" in markdown
         assert "케이스 카테고리: language 2, query_form 1" in markdown
         assert "| lexical | category:language | 2 |" in markdown
+
+
+def test_required_id_counts_when_cited_paper_title_appears_in_answer():
+    from eval.behavior import behavior_scores
+
+    record = {
+        "expected_behavior": "answer",
+        "must_mention_arxiv_ids": ["2609.24220"],
+        "answer": "**Document Retrieval-Aware Chunking (D-RAC)** 논문의 실험 결과는 다음과 같습니다.",
+        "outcome": "answered",
+        "citations": [
+            {"arxiv_id": "2609.24220", "title": "Document Retrieval-Aware Chunking (D-RAC)", "in_answer": False}
+        ],
+    }
+    _, scores = behavior_scores(record)
+    assert scores["mentions_required_ids"] == 1.0
