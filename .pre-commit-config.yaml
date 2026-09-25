@@ -17,3 +17,12 @@ repos:
     rev: v8.30.1
     hooks:
       - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: worklog-check
+        name: worklog-check
+        entry: python scripts/worklog.py check
+        language: system
+        pass_filenames: false
+        files: ^(docs/worklog/|scripts/worklog\.py$)

@@ -241,3 +241,4 @@ Vite 프록시는 `frontend/vite.config.ts`에서 `arxplore-django:8001`로 포�
 5. `docs/management/ROLES.md` — 5인 팀 역할 분담, 공용 계약 (팀 프로젝트 당시 문서)
 6. `docs/management/TEAM_SETUP.md` — 원격 서버 모드 환경 설정 절차 (팀 프로젝트 당시 문서)
 7. `.env.example` — 환경 변수 전체 목록
+8. `docs/worklog/` — 결정 이유는 docs/worklog. 페이즈별 `INDEX.md`와 트러블슈팅 모음 `TROUBLESHOOTING.md`는 `python scripts/worklog.py index`가 생성하고 `check`가 CI·pre-commit에서 검사한다

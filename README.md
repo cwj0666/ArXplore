@@ -184,7 +184,7 @@ GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 
 | 잡 | 내용 |
 | --- | --- |
-| python | ruff, `pytest tests/unit`, `manage.py check`, `makemigrations --check` |
+| python | ruff, worklog 검사, `pytest tests/unit`, `manage.py check`, `makemigrations --check` |
 | integration | pgvector 서비스 컨테이너로 `pytest tests/integration` |
 | frontend | `npm run typecheck`, `npm run build` |
 | infra | 더미 `.env`로 두 compose 파일 `docker compose config`, hadolint |
@@ -263,6 +263,7 @@ docs/               아키텍처와 팀 운영 문서
 - [Architecture](./docs/architecture/ARCHITECTURE.md): 런타임 구성, 모듈 경계, 테이블 스키마, 큐 동작
 - [AI Rules](./docs/architecture/AGENTS.md): AI 도구 작업 규칙과 공용 계약
 - [Workflow](./docs/management/WORKFLOW.md), [Roles](./docs/management/ROLES.md), [Team Setup](./docs/management/TEAM_SETUP.md): 팀 프로젝트 당시 운영 문서
+- [Worklog](./docs/worklog/README.md): 페이즈별 결정과 근거, 트레이드오프, 트러블슈팅. [트러블슈팅 모음](./docs/worklog/TROUBLESHOOTING.md)은 `python scripts/worklog.py index`가 항목에서 생성합니다
 - [`.env.example`](./.env.example): 전체 환경 변수와 필수·선택 구분
 
 ## License

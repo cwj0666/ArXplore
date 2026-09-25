@@ -50,6 +50,8 @@ jobs:
         run: ruff check --output-format=github .
       - name: Ruff format
         run: ruff format --check .
+      - name: worklog-check
+        run: python scripts/worklog.py check
 
       - name: Unit tests
         run: pytest tests/unit -q
