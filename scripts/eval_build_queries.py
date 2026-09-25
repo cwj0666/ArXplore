@@ -3,6 +3,8 @@
     python scripts/eval_build_queries.py                                   # 표본·프롬프트만 출력(LLM 미호출)
     python scripts/eval_build_queries.py --generate --papers 20 --chunks 10
     python scripts/eval_build_queries.py --generate --mode chunk_synth --chunks 10 --append
+    python scripts/eval_build_queries.py --attach-ids                       # 케이스 카탈로그 자리표시자 후보만 출력
+    python scripts/eval_build_queries.py --attach-ids --write               # eval/queries.cases.jsonl로 기록
 
 known_item: 청크가 있는 논문을 표본 추출해 초록(+paper_ai_overviews.key_findings)을 바꿔 말한 질의를
             논문당 ko/en 1개씩 만든다. 정답은 해당 arxiv_id.
@@ -12,11 +14,18 @@ chunk_synth: 본문(content_role=body) 청크를 표본 추출해 그 청크로�
 표본은 --seed로 결정적이다(같은 DB 상태 + 같은 seed → 같은 표본). LLM 출력은 결정적이지 않다.
 입력과 5단어 이상 연속으로 겹치는 질의(--max-shared-words)는 버리고 개수를 보고한다.
 PostgreSQL이 필요하고, --generate에는 OPENAI_API_KEY가 필요하다.
+
+attach-ids: eval/cases/*.jsonl의 자리표시자 arxiv_id(0000.0000a 형식)를 eval/cases/placeholders.json의 조건
+(제목 키워드, 최소 청크 수, 섹션·content_role·본문 패턴)에 맞는 DB 논문으로 채운다. 자리표시자마다 서로 다른 논문을
+고르고(최신 순), 제목 템플릿 {{title:ID}}·{{title_head:ID:N}}도 실제 제목으로 바꾼다. --set 0000.0000a=2405.01234로
+직접 지정할 수 있다. 채우지 못한 자리표시자가 남은 케이스와 코퍼스에 있으면 안 되는 논문(absent)이 실제로 있는
+케이스는 빼고 보고한다. 원본 카탈로그는 고치지 않는다. 기본은 미리보기이고 --write일 때만 --attach-out에 쓴다.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 from dataclasses import dataclass
@@ -29,12 +38,16 @@ sys.path.insert(0, str(REPO_ROOT))
 from eval.dataset import (  # noqa: E402
     CHUNK_SYNTH_SYSTEM_PROMPT,
     KNOWN_ITEM_SYSTEM_PROMPT,
+    PLACEHOLDER_PATTERN,
     DatasetError,
     EvalQuery,
     build_chunk_synth_prompt,
     build_known_item_prompt,
     chunk_synth_query,
+    dataset_files,
     dump_queries,
+    fill_placeholders,
+    find_placeholders,
     known_item_queries,
     load_queries,
     longest_shared_word_run,
@@ -42,6 +55,10 @@ from eval.dataset import (  # noqa: E402
 
 EXIT_PRECONDITION = 2
 CHUNK_PROMPT_MAX_CHARS = 3000
+DEFAULT_CASES_DIR = REPO_ROOT / "eval" / "cases"
+DEFAULT_ATTACH_OUT = REPO_ROOT / "eval" / "queries.cases.jsonl"
+PLACEHOLDER_REGISTRY_NAME = "placeholders.json"
+REGISTRY_FILTER_KEYS = ("title_keyword", "min_chunks", "section_keyword", "content_role", "chunk_pattern")
 
 PAPER_IDS_SQL = """
     SELECT p.arxiv_id
@@ -98,8 +115,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     write_mode.add_argument("--overwrite", action="store_true")
     write_mode.add_argument("--append", action="store_true", help="기존 파일에 새 id만 추가")
     parser.add_argument("--show-prompts", action="store_true", help="dry-run에서 모든 프롬프트를 출력")
+    attach = parser.add_argument_group("attach-ids (케이스 카탈로그 자리표시자 채우기)")
+    attach.add_argument("--attach-ids", action="store_true", help="카탈로그 자리표시자를 DB 논문 id로 채운다")
+    attach.add_argument("--cases", default=str(DEFAULT_CASES_DIR), help="카탈로그 JSONL 파일 또는 디렉터리")
+    attach.add_argument(
+        "--placeholders", default=None, help=f"자리표시자 조건 파일(기본: <cases>/{PLACEHOLDER_REGISTRY_NAME})"
+    )
+    attach.add_argument("--attach-out", default=str(DEFAULT_ATTACH_OUT))
+    attach.add_argument("--set", action="append", default=[], metavar="PLACEHOLDER=ARXIV_ID", help="직접 지정")
+    attach.add_argument("--candidates", type=int, default=5, help="자리표시자마다 보여 줄 후보 수")
+    attach.add_argument("--write", action="store_true", help="--attach-ids 결과를 --attach-out에 쓴다")
     parser.set_defaults(generate=False)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.write and not args.attach_ids:
+        parser.error("--write는 --attach-ids와 함께만 씁니다")
+    if args.candidates < 1:
+        parser.error("--candidates must be >= 1")
+    return args
 
 
 def sample_ids(ids: list[Any], count: int, *, seed: int, stream: str) -> list[Any]:
@@ -304,8 +336,209 @@ def merge_with_existing(out_path: Path, records: list[EvalQuery], *, append: boo
     return existing + fresh, len(records) - len(fresh)
 
 
+def load_placeholder_registry(path: str | Path) -> dict[str, Any]:
+    """자리표시자 조건 파일을 읽고 검증한다.
+
+    형식: `{"placeholders": {"0000.0000a": {"title_keyword": "...", "need": "...", ...}}, "absent": {케이스 id: 제목 키워드}}`.
+    """
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    placeholders = payload.get("placeholders") if isinstance(payload, dict) else None
+    absent = payload.get("absent", {}) if isinstance(payload, dict) else None
+    if not isinstance(placeholders, dict) or not isinstance(absent, dict):
+        raise DatasetError(f"{path}: 'placeholders'와 'absent'는 객체여야 합니다.")
+    for key, entry in placeholders.items():
+        if not PLACEHOLDER_PATTERN.fullmatch(key):
+            raise DatasetError(f"{path}: 자리표시자 {key!r}는 0000.0000a 형식이어야 합니다.")
+        if not isinstance(entry, dict) or not isinstance(entry.get("title_keyword", ""), str):
+            raise DatasetError(f"{path}: {key}의 조건은 title_keyword(문자열)를 가진 객체여야 합니다.")
+        unknown = set(entry) - {*REGISTRY_FILTER_KEYS, "need"}
+        if unknown:
+            raise DatasetError(f"{path}: {key}에 알 수 없는 키 {sorted(unknown)}")
+    if not all(isinstance(value, str) and value.strip() for value in absent.values()):
+        raise DatasetError(f"{path}: 'absent' 값은 비어 있지 않은 제목 키워드여야 합니다.")
+    return {"placeholders": placeholders, "absent": absent}
+
+
+def candidate_sql(entry: dict[str, Any], limit: int) -> tuple[str, list[Any]]:
+    """자리표시자 조건에 맞는 논문(arxiv_id, title)을 최신 순으로 고르는 SQL과 인자.
+
+    title_keyword는 제목 ILIKE `%키워드%`(키워드 안의 `%`는 와일드카드), min_chunks는 청크 수 하한(기본 1),
+    section_keyword·content_role·chunk_pattern은 조건을 만족하는 청크가 하나 이상 있어야 한다는 뜻이다.
+    """
+    clauses = ["p.title ILIKE %s", "(SELECT COUNT(*) FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id) >= %s"]
+    params: list[Any] = [f"%{entry.get('title_keyword') or ''}%", max(1, int(entry.get("min_chunks") or 1))]
+    if entry.get("section_keyword"):
+        clauses.append(
+            "EXISTS (SELECT 1 FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id AND c.section_title ILIKE %s)"
+        )
+        params.append(f"%{entry['section_keyword']}%")
+    if entry.get("content_role"):
+        clauses.append(
+            "EXISTS (SELECT 1 FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id "
+            "AND coalesce(nullif(c.metadata->>'content_role', ''), 'body') = %s)"
+        )
+        params.append(entry["content_role"])
+    if entry.get("chunk_pattern"):
+        clauses.append("EXISTS (SELECT 1 FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id AND c.chunk_text ILIKE %s)")
+        params.append(f"%{entry['chunk_pattern']}%")
+    sql = (
+        "SELECT p.arxiv_id, p.title FROM papers p WHERE "
+        + " AND ".join(clauses)
+        + " ORDER BY p.published_at DESC NULLS LAST, p.arxiv_id LIMIT %s"
+    )
+    params.append(limit)
+    return sql, params
+
+
+def choose_distinct(candidates: dict[str, list[tuple[str, str]]]) -> dict[str, tuple[str, str]]:
+    """자리표시자 이름순으로 후보 목록의 앞에서부터, 앞선 자리표시자가 이미 고른 논문은 피해 하나씩 고른다."""
+    chosen: dict[str, tuple[str, str]] = {}
+    used: set[str] = set()
+    for placeholder in sorted(candidates):
+        for arxiv_id, title in candidates[placeholder]:
+            if arxiv_id not in used:
+                chosen[placeholder] = (arxiv_id, title)
+                used.add(arxiv_id)
+                break
+    return chosen
+
+
+def attach_catalogue(
+    payloads: list[dict[str, Any]], papers: dict[str, tuple[str, str]], *, absent_present: dict[str, str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """카탈로그 케이스의 자리표시자를 채운 사본과 뺀 케이스 설명을 돌려준다.
+
+    `absent_present`(케이스 id → 코퍼스에서 발견된 논문 설명)에 있는 케이스와, 채운 뒤에도 자리표시자가 남은 케이스는 뺀다.
+    """
+    attached: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    for payload in payloads:
+        case_id = str(payload.get("id"))
+        if case_id in absent_present:
+            dropped.append(f"{case_id}: 코퍼스에 없어야 할 논문이 있습니다 ({absent_present[case_id]})")
+            continue
+        filled = fill_placeholders(payload, papers)
+        remaining = sorted(find_placeholders(filled))
+        if remaining:
+            dropped.append(f"{case_id}: 채우지 못한 자리표시자 {remaining}")
+            continue
+        attached.append(filled)
+    return attached, dropped
+
+
+def read_case_payloads(path: str | Path) -> list[dict[str, Any]]:
+    """카탈로그를 검증(`load_queries`)한 뒤 원본 JSON 객체를 파일·줄 순서대로 읽는다."""
+    load_queries(path)
+    payloads: list[dict[str, Any]] = []
+    for file_path in dataset_files(path):
+        with file_path.open(encoding="utf-8") as handle:
+            payloads.extend(json.loads(line) for line in handle if line.strip())
+    return payloads
+
+
+def parse_overrides(values: list[str]) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for value in values:
+        placeholder, sep, arxiv_id = value.partition("=")
+        if not sep or not PLACEHOLDER_PATTERN.fullmatch(placeholder.strip()) or not arxiv_id.strip():
+            raise DatasetError(f"--set 형식은 0000.0000a=ARXIV_ID 입니다: {value!r}")
+        overrides[placeholder.strip()] = arxiv_id.strip()
+    return overrides
+
+
+def run_attach(args: argparse.Namespace) -> int:
+    cases_path = Path(args.cases)
+    registry_path = Path(args.placeholders) if args.placeholders else cases_path / PLACEHOLDER_REGISTRY_NAME
+    out_path = Path(args.attach_out)
+    try:
+        payloads = read_case_payloads(cases_path)
+        registry = load_placeholder_registry(registry_path)
+        overrides = parse_overrides(args.set)
+    except (FileNotFoundError, DatasetError, json.JSONDecodeError) as exc:
+        print(f"카탈로그를 읽을 수 없습니다: {exc}", file=sys.stderr)
+        return EXIT_PRECONDITION
+    if args.write and out_path.exists() and not args.overwrite:
+        print(f"{out_path}가 이미 있습니다. --overwrite를 지정하세요.", file=sys.stderr)
+        return EXIT_PRECONDITION
+
+    needed = sorted(find_placeholders(payloads))
+    unknown = [value for value in needed if value not in registry["placeholders"] and value not in overrides]
+    if unknown:
+        print(f"조건 파일에 없는 자리표시자: {unknown}", file=sys.stderr)
+        return EXIT_PRECONDITION
+    case_ids = {str(payload.get("id")) for payload in payloads}
+
+    try:
+        connection = _connect()
+    except Exception as exc:
+        print(f"PostgreSQL에 연결할 수 없습니다: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_PRECONDITION
+    candidates: dict[str, list[tuple[str, str]]] = {}
+    absent_present: dict[str, str] = {}
+    try:
+        with connection, connection.cursor() as cursor:
+            if overrides:
+                cursor.execute(
+                    "SELECT arxiv_id, title FROM papers WHERE arxiv_id = ANY(%s)", (sorted(set(overrides.values())),)
+                )
+                titles = {row[0]: row[1] or "" for row in cursor.fetchall()}
+                missing = sorted({value for value in overrides.values() if value not in titles})
+                if missing:
+                    print(f"--set으로 지정한 arxiv_id가 papers에 없습니다: {missing}", file=sys.stderr)
+                    return EXIT_PRECONDITION
+            for placeholder in needed:
+                if placeholder in overrides:
+                    candidates[placeholder] = [(overrides[placeholder], titles[overrides[placeholder]])]
+                    continue
+                sql, params = candidate_sql(registry["placeholders"][placeholder], args.candidates)
+                cursor.execute(sql, params)
+                candidates[placeholder] = [(row[0], row[1] or "") for row in cursor.fetchall()]
+            for case_id, keyword in registry["absent"].items():
+                if case_id not in case_ids:
+                    continue
+                cursor.execute(
+                    "SELECT arxiv_id, title FROM papers WHERE title ILIKE %s ORDER BY arxiv_id LIMIT 1",
+                    (f"%{keyword}%",),
+                )
+                row = cursor.fetchone()
+                if row:
+                    absent_present[case_id] = f"{row[0]} {row[1]}"
+    except Exception as exc:
+        print(f"후보 조회가 실패했습니다: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_PRECONDITION
+    finally:
+        connection.close()
+
+    papers = choose_distinct(candidates)
+    print("자리표시자 → 선택한 논문 (후보는 최신 순, 사람이 확인할 것)")
+    for placeholder in needed:
+        need = registry["placeholders"].get(placeholder, {}).get("need", "--set 지정")
+        chosen = papers.get(placeholder)
+        label = f"{chosen[0]}  {chosen[1][:90]}" if chosen else "(후보 없음)"
+        print(f"  {placeholder}  {label}\n      조건: {need}")
+        for arxiv_id, title in candidates.get(placeholder, [])[1:]:
+            print(f"      다른 후보: {arxiv_id}  {title[:80]}")
+
+    attached, dropped = attach_catalogue(payloads, papers, absent_present=absent_present)
+    print(f"\n케이스 {len(payloads)}개 중 {len(attached)}개를 채웠고 {len(dropped)}개를 뺐습니다.")
+    for line in dropped:
+        print(f"  뺌: {line}")
+    if not args.write:
+        print("\n미리보기: 파일을 쓰지 않았습니다. 쓰려면 --write.")
+        return 0
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        "".join(json.dumps(payload, ensure_ascii=False) + "\n" for payload in attached), encoding="utf-8"
+    )
+    load_queries(out_path)
+    print(f"{out_path}에 {len(attached)}개 케이스를 썼습니다. 답이 실제 논문과 맞는지 훑어보고 쓰세요.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.attach_ids:
+        return run_attach(args)
     out_path = Path(args.out)
     if args.generate and out_path.exists() and not (args.overwrite or args.append):
         print(f"{out_path}가 이미 있습니다. --overwrite 또는 --append를 지정하세요.", file=sys.stderr)

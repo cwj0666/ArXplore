@@ -1,0 +1,10 @@
+{"id": "lang-ko", "category": "language", "query": "보상 모델을 따로 학습하지 않고 선호 쌍 데이터로 언어 모델을 정렬하는 방법은 어떻게 작동하나요?", "lang": "ko", "relevant_arxiv_ids": ["0000.0000a"], "source": "manual", "notes": "순수 한국어 질의"}
+{"id": "lang-en", "category": "language", "query": "How does preference optimization align a language model without training a separate reward model?", "lang": "en", "relevant_arxiv_ids": ["0000.0000a"], "source": "manual", "notes": "순수 영어 질의"}
+{"id": "lang-mixed-rag", "category": "language", "query": "RAG 파이프라인에서 retriever가 가져온 passage를 generator가 어떻게 활용하는지 설명해줘", "lang": "ko", "relevant_arxiv_ids": ["0000.0000c"], "source": "manual", "notes": "한국어 문장 + 영어 기술 용어 혼용"}
+{"id": "lang-mixed-moe", "category": "language", "query": "MoE 모델에서 expert routing의 load balancing 문제를 어떻게 해결했나요?", "lang": "ko", "relevant_arxiv_ids": ["0000.0000d"], "source": "manual", "notes": "한국어 문장 + 영어 약어·용어 혼용"}
+{"id": "lang-ko-typo", "category": "language", "query": "검색 증강 생성에서 검섹 결과를 생성 모델이 어떻게 활용하나여?", "lang": "ko", "relevant_arxiv_ids": ["0000.0000c"], "source": "manual", "notes": "한국어 오타(검섹, 하나여)"}
+{"id": "lang-abbr-dpo", "category": "language", "query": "DPO", "lang": "en", "relevant_arxiv_ids": ["0000.0000a"], "source": "manual", "mode": "agent", "notes": "영어 약어만. 목록 답변 또는 되묻기 모두 허용"}
+{"id": "lang-abbr-rlhf", "category": "language", "query": "RLHF", "lang": "en", "relevant_arxiv_ids": ["0000.0000p"], "source": "manual", "mode": "agent", "notes": "영어 약어만. 목록 답변 또는 되묻기 모두 허용"}
+{"id": "lang-abbr-rag", "category": "language", "query": "RAG", "lang": "en", "relevant_arxiv_ids": ["0000.0000c"], "source": "manual", "mode": "agent", "notes": "영어 약어만. 목록 답변 또는 되묻기 모두 허용"}
+{"id": "lang-romanized-ko", "category": "language", "query": "geomsaek jeung-gang saengseong nonmun chajajwo", "lang": "ko", "relevant_arxiv_ids": ["0000.0000c"], "source": "manual", "mode": "agent", "notes": "로마자로 적은 한국어('검색 증강 생성 논문 찾아줘')"}
+{"id": "lang-en-lowercase-keywords", "category": "language", "query": "mixture of experts load balancing without aux loss", "lang": "en", "relevant_arxiv_ids": ["0000.0000d"], "source": "manual", "mode": "agent", "notes": "소문자 키워드 나열, 약어(aux)"}

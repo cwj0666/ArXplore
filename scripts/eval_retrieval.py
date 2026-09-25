@@ -4,8 +4,12 @@
     python scripts/eval_retrieval.py --methods lexical --limit 5      # 키 없이 lexical만, 5개 질의
     python scripts/eval_retrieval.py --ablations all --keep-going     # ablation 포함, 개별 실패는 기록 후 계속
 
+    python scripts/eval_retrieval.py --queries eval/queries.cases.jsonl --category language,query_form
+
 PostgreSQL이 필요하고 vector/hybrid 계열은 OPENAI_API_KEY(질의 임베딩)가 필요하다.
-DB에 연결할 수 없거나, 질의셋의 정답 arxiv_id/chunk_id가 DB에 없으면 아무것도 쓰지 않고 종료 코드 2로 끝난다.
+--queries는 JSONL 파일 또는 *.jsonl이 모인 디렉터리. 거절·입력 거부 기대, 상세 챗 전용, 대화 이력 케이스는 검색 평가에서 뺀다.
+DB에 연결할 수 없거나, 질의셋의 정답 arxiv_id/chunk_id가 DB에 없거나, 자리표시자 id가 남아 있으면
+아무것도 쓰지 않고 종료 코드 2로 끝난다.
 결과: eval/results/<timestamp>.csv(질의별), <timestamp>_summary.csv(집계), <timestamp>.md(README용 표).
 """
 
@@ -23,9 +27,16 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from eval.dataset import DatasetError, EvalQuery, load_queries  # noqa: E402
+from eval.dataset import DatasetError, EvalQuery, dataset_digest, find_placeholders, load_queries  # noqa: E402
 from eval.report import render_markdown, write_query_csv, write_summary_csv  # noqa: E402
-from eval.runner import METHODS, aggregate, resolve_methods, run_evaluation, run_query  # noqa: E402
+from eval.runner import (  # noqa: E402
+    METHODS,
+    aggregate,
+    resolve_methods,
+    run_evaluation,
+    run_query,
+    split_retrieval_queries,
+)
 
 EXIT_PRECONDITION = 2
 
@@ -45,6 +56,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--adjacency-window", type=int, default=1, help="제품 경로와 같은 문맥 창(지연 측정에 포함)")
     parser.add_argument("--limit", type=int, default=None, help="파일 순서대로 앞 N개 질의만 실행")
     parser.add_argument("--lang", choices=("ko", "en"), default=None)
+    parser.add_argument("--category", default=None, help="쉼표 구분 케이스 카테고리만 실행(eval/cases 참고)")
     parser.add_argument("--warmup", type=int, default=1, help="방식별로 버리는 워밍업 질의 수")
     parser.add_argument("--keep-going", action="store_true", help="질의 단위 예외를 errors 열에 기록하고 계속")
     parser.add_argument("--out-dir", default=str(REPO_ROOT / "eval" / "results"))
@@ -56,9 +68,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def select_queries(queries: list[EvalQuery], *, lang: str | None, limit: int | None) -> list[EvalQuery]:
-    selected = [query for query in queries if lang is None or query.lang == lang]
+def parse_categories(value: str | None) -> set[str] | None:
+    if value is None:
+        return None
+    names = {name.strip() for name in value.split(",") if name.strip()}
+    return names or None
+
+
+def select_queries(
+    queries: list[EvalQuery], *, lang: str | None, limit: int | None, categories: set[str] | None = None
+) -> list[EvalQuery]:
+    selected = [
+        query
+        for query in queries
+        if (lang is None or query.lang == lang) and (categories is None or query.category in categories)
+    ]
     return selected[:limit] if limit is not None else selected
+
+
+def placeholder_problems(queries: list[EvalQuery]) -> list[str]:
+    """자리표시자 arxiv_id(`0000.0000a` 형식)나 제목 템플릿이 남은 질의 id."""
+    return [
+        query.id
+        for query in queries
+        if find_placeholders([query.query, *query.relevant_arxiv_ids, *query.must_mention_arxiv_ids])
+    ]
 
 
 def _connect(settings: Any):
@@ -149,6 +183,8 @@ def git_revision() -> str:
 
 
 def file_digest(path: Path) -> str:
+    if path.is_dir():
+        return dataset_digest(path)
     return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
 
@@ -161,12 +197,13 @@ def build_meta(
     args: argparse.Namespace,
     corpus: dict[str, Any],
     settings: Any,
+    skipped: list[EvalQuery] | None = None,
 ) -> dict[str, str]:
     langs = Counter(query.lang for query in queries)
     sources = Counter(query.source for query in queries)
     sources_text = ", ".join(f"{key} {value}" for key, value in sorted(sources.items()))
     fulltext_text = ", ".join(f"{key} {value}" for key, value in corpus["fulltext_sources"].items()) or "없음"
-    return {
+    meta = {
         "실행 시각": started_at.strftime("%Y-%m-%d %H:%M:%S"),
         "커밋": git_revision(),
         "질의셋": f"`{queries_path.name}` sha256:{file_digest(queries_path)} — {len(queries)}개 "
@@ -177,6 +214,16 @@ def build_meta(
         "본문 source": fulltext_text,
         "임베딩 모델": f"{settings.openai_embedding_model} ({settings.openai_embedding_dimensions}d)",
     }
+    categories = Counter(query.category for query in queries if query.category)
+    if categories:
+        meta["케이스 카테고리"] = ", ".join(f"{key} {value}" for key, value in sorted(categories.items()))
+    if skipped:
+        meta["검색 평가 제외"] = (
+            f"{len(skipped)}개 (거절·입력 거부 기대, 정답 논문 없음, 상세 챗 전용, 대화 이력 케이스): "
+            + ", ".join(query.id for query in skipped[:20])
+            + (" ..." if len(skipped) > 20 else "")
+        )
+    return meta
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -184,15 +231,31 @@ def main(argv: list[str] | None = None) -> int:
     queries_path = Path(args.queries)
 
     try:
-        queries = select_queries(load_queries(queries_path), lang=args.lang, limit=args.limit)
+        selected = select_queries(
+            load_queries(queries_path),
+            lang=args.lang,
+            limit=args.limit,
+            categories=parse_categories(args.category),
+        )
     except FileNotFoundError:
         print(f"질의셋이 없습니다: {queries_path}. scripts/eval_build_queries.py로 먼저 만드세요.", file=sys.stderr)
         return EXIT_PRECONDITION
     except DatasetError as exc:
         print(f"질의셋 형식 오류: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION
+    queries, skipped = split_retrieval_queries(selected)
+    if skipped:
+        print(f"검색 평가 대상이 아닌 케이스 {len(skipped)}개를 건너뜁니다.", file=sys.stderr)
     if not queries:
         print("실행할 질의가 없습니다.", file=sys.stderr)
+        return EXIT_PRECONDITION
+    unresolved = placeholder_problems(queries)
+    if unresolved:
+        print(
+            f"자리표시자 id가 남은 질의 {len(unresolved)}개: {unresolved[:10]}. "
+            "scripts/eval_build_queries.py --attach-ids로 실제 id를 채운 파일을 쓰세요.",
+            file=sys.stderr,
+        )
         return EXIT_PRECONDITION
 
     try:
@@ -255,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         args=args,
         corpus=corpus,
         settings=settings,
+        skipped=skipped,
     )
     markdown = render_markdown(aggregates, title=f"Retrieval evaluation {stamp}", meta=meta)
     write_query_csv(results, out_dir / f"{stamp}.csv")

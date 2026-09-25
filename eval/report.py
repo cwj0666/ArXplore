@@ -116,7 +116,17 @@ def render_markdown(aggregates: Sequence[AggregateRow], *, title: str, meta: Map
     return "\n".join(lines) + "\n"
 
 
-QUERY_CSV_BASE_FIELDS = ["query_id", "lang", "source", "method", "k", "latency_ms", "error"]
+QUERY_CSV_BASE_FIELDS = [
+    "query_id",
+    "lang",
+    "source",
+    "category",
+    "expected_behavior",
+    "method",
+    "k",
+    "latency_ms",
+    "error",
+]
 
 
 def write_query_csv(results: Sequence[QueryResult], path: str | Path) -> None:
@@ -139,6 +149,8 @@ def write_query_csv(results: Sequence[QueryResult], path: str | Path) -> None:
                 "query_id": row.query_id,
                 "lang": row.lang,
                 "source": row.source,
+                "category": row.category,
+                "expected_behavior": row.expected_behavior,
                 "method": row.method,
                 "k": row.k,
                 "latency_ms": "" if row.latency_ms is None else f"{row.latency_ms:.1f}",

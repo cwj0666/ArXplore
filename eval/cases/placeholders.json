@@ -1,0 +1,83 @@
+{
+  "placeholders": {
+    "0000.0000a": {
+      "title_keyword": "Preference Optimization",
+      "need": "선호 최적화(DPO 계열) 논문. 초록·실험·참고문헌이 있는 것"
+    },
+    "0000.0000b": {
+      "title_keyword": "Preference",
+      "need": "a와 다른 선호 학습·정렬 논문(비교용)"
+    },
+    "0000.0000c": {
+      "title_keyword": "Retriev",
+      "need": "검색 증강 생성(RAG) 논문"
+    },
+    "0000.0000d": {
+      "title_keyword": "Expert",
+      "need": "mixture-of-experts 라우팅·부하 분산 논문"
+    },
+    "0000.0000e": {
+      "title_keyword": "Context",
+      "need": "긴 문맥(long-context) 언어 모델 논문"
+    },
+    "0000.0000f": {
+      "title_keyword": "Video",
+      "need": "비디오 생성 논문"
+    },
+    "0000.0000g": {
+      "title_keyword": "Benchmark",
+      "need": "벤치마크 논문(제목 전체 질의용)"
+    },
+    "0000.0000h": {
+      "title_keyword": "Diffusion",
+      "need": "확산 모델 논문(초록만으로 답할 질문용)"
+    },
+    "0000.0000i": {
+      "title_keyword": "Agent",
+      "need": "LLM 에이전트·도구 사용 논문"
+    },
+    "0000.0000j": {
+      "title_keyword": "Reasoning",
+      "need": "추론(reasoning) 논문"
+    },
+    "0000.0000k": {
+      "title_keyword": "",
+      "min_chunks": 25,
+      "section_keyword": "Conclusion",
+      "need": "청크 25개 이상이고 Conclusion 섹션이 있는 논문"
+    },
+    "0000.0000l": {
+      "title_keyword": "",
+      "section_keyword": "Limitation",
+      "need": "Limitations 섹션이 있는 논문"
+    },
+    "0000.0000m": {
+      "title_keyword": "",
+      "content_role": "appendix",
+      "need": "appendix 청크가 있는 논문"
+    },
+    "0000.0000n": {
+      "title_keyword": "",
+      "chunk_pattern": "Figure 1",
+      "need": "본문에 Figure 1 캡션이 있는 논문"
+    },
+    "0000.0000o": {
+      "title_keyword": "",
+      "section_keyword": "Experiment",
+      "chunk_pattern": "Table",
+      "need": "Experiments 섹션과 결과 표가 있는 논문"
+    },
+    "0000.0000p": {
+      "title_keyword": "Reward",
+      "need": "RLHF·보상 모델 논문"
+    },
+    "0000.0000q": {
+      "title_keyword": "Quantiz",
+      "need": "양자화(quantization) 논문"
+    }
+  },
+  "absent": {
+    "oc-real-not-in-corpus-ko": "ImageNet Classification with Deep Convolutional",
+    "oc-real-not-in-corpus-en": "Attention Is All You Need"
+  }
+}

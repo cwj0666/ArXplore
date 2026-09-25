@@ -2,6 +2,7 @@
 
 retriever는 주입받는다. 기본 방식(lexical/vector/hybrid)은 공개 `search_paper_contexts*`만 호출하고,
 ablation은 `PaperRetriever`의 하위 단계를 코드 수정 없이 다시 조합한다(ABLATIONS 참고).
+정답 논문이 없는 케이스(거절·입력 거부 기대, 상세 챗 전용, 대화 이력)는 검색 평가에서 뺀다(`split_retrieval_queries`).
 """
 
 from __future__ import annotations
@@ -183,6 +184,8 @@ class QueryResult:
     chunk_metrics: dict[str, float | None] = field(default_factory=dict)
     noise_count: int = 0
     error: str | None = None
+    category: str = ""
+    expected_behavior: str = "answer"
 
     @property
     def ok(self) -> bool:
@@ -209,6 +212,8 @@ def score_hits(query: EvalQuery, method: str, hits: Sequence[dict], *, k: int, l
         query_id=query.id,
         lang=query.lang,
         source=query.source,
+        category=query.category,
+        expected_behavior=query.expected_behavior,
         method=method,
         k=k,
         latency_ms=latency_ms,
@@ -238,9 +243,26 @@ def run_query(
     except Exception as exc:
         if not keep_going:
             raise
-        return QueryResult(query.id, query.lang, query.source, method, k, None, error=f"{type(exc).__name__}: {exc}")
+        return QueryResult(
+            query.id,
+            query.lang,
+            query.source,
+            method,
+            k,
+            None,
+            error=f"{type(exc).__name__}: {exc}",
+            category=query.category,
+            expected_behavior=query.expected_behavior,
+        )
     latency_ms = (clock() - started) * 1000.0
     return score_hits(query, method, hits, k=k, latency_ms=latency_ms)
+
+
+def split_retrieval_queries(queries: Sequence[EvalQuery]) -> tuple[list[EvalQuery], list[EvalQuery]]:
+    """검색 평가 대상(`EvalQuery.retrieval_eligible`)과 제외 대상으로 나눈다. 순서는 유지한다."""
+    kept = [query for query in queries if query.retrieval_eligible]
+    skipped = [query for query in queries if not query.retrieval_eligible]
+    return kept, skipped
 
 
 def run_evaluation(
@@ -254,10 +276,14 @@ def run_evaluation(
     keep_going: bool = False,
     progress: Callable[[int, int, str, EvalQuery], None] | None = None,
 ) -> list[QueryResult]:
-    """질의 순서대로 모든 방식을 실행한다(방식 간 캐시 영향이 한쪽에 몰리지 않도록 질의 단위로 교차)."""
+    """질의 순서대로 모든 방식을 실행한다(방식 간 캐시 영향이 한쪽에 몰리지 않도록 질의 단위로 교차).
+
+    검색 평가 대상이 아닌 케이스(`split_retrieval_queries`의 제외 대상)는 실행하지 않는다.
+    """
     for method in methods:
         if method not in METHODS:
             raise ValueError(f"unknown method {method!r}")
+    queries, _ = split_retrieval_queries(queries)
     total = len(queries) * len(methods)
     results: list[QueryResult] = []
     for query in queries:
@@ -320,6 +346,8 @@ def _aggregate_group(method: str, subset: str, k: int, rows: list[QueryResult]) 
 
 
 SUBSETS = ("all", "ko", "en", "known_item", "llm_synth", "manual")
+CATEGORY_PREFIX = "category:"
+BEHAVIOR_PREFIX = "behavior:"
 
 
 def in_subset(result: QueryResult, subset: str) -> bool:
@@ -327,14 +355,31 @@ def in_subset(result: QueryResult, subset: str) -> bool:
         return True
     if subset in ("ko", "en"):
         return result.lang == subset
+    if subset.startswith(CATEGORY_PREFIX):
+        return result.category == subset[len(CATEGORY_PREFIX) :]
+    if subset.startswith(BEHAVIOR_PREFIX):
+        return result.expected_behavior == subset[len(BEHAVIOR_PREFIX) :]
     return result.source == subset
 
 
-def aggregate(results: Sequence[QueryResult], *, subsets: Sequence[str] = SUBSETS) -> list[AggregateRow]:
-    """방식 × 부분집합(전체, 언어, 질의 출처)별 평균. 해당 질의가 없는 부분집합은 생략한다."""
+def build_subsets(results: Sequence[QueryResult], base: Sequence[str] = SUBSETS) -> list[str]:
+    """기본 부분집합 + 비어 있지 않은 `category:<이름>` + `behavior:<기대 행동>`(두 종류 이상일 때만)."""
+    categories = sorted({row.category for row in results if row.category})
+    behaviors = sorted({row.expected_behavior for row in results})
+    subsets = [*base, *(f"{CATEGORY_PREFIX}{name}" for name in categories)]
+    if len(behaviors) > 1:
+        subsets.extend(f"{BEHAVIOR_PREFIX}{name}" for name in behaviors)
+    return subsets
+
+
+def aggregate(results: Sequence[QueryResult], *, subsets: Sequence[str] | None = None) -> list[AggregateRow]:
+    """방식 × 부분집합(전체, 언어, 질의 출처, 케이스 카테고리, 기대 행동)별 평균.
+
+    `subsets`를 주지 않으면 `build_subsets`로 정한다. 해당 질의가 없는 부분집합은 생략한다.
+    """
     methods = list(dict.fromkeys(row.method for row in results))
     aggregates: list[AggregateRow] = []
-    for subset in subsets:
+    for subset in build_subsets(results) if subsets is None else subsets:
         for method in methods:
             rows = [row for row in results if row.method == method and in_subset(row, subset)]
             if rows:
