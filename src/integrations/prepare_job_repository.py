@@ -379,6 +379,7 @@ class PrepareJobRepository:
                     claimed_at = CASE WHEN %s THEN claimed_at ELSE NULL END,
                     finished_at = CASE WHEN %s THEN NOW() ELSE NULL END,
                     heartbeat_at = NULL,
+                    payload = CASE WHEN %s THEN payload - 'force' ELSE payload END,
                     updated_at = NOW()
                 WHERE id = %s
                 RETURNING mode, target_date
@@ -389,6 +390,7 @@ class PrepareJobRepository:
                     transition["backoff_seconds"],
                     transition["backoff_seconds"],
                     error,
+                    is_final,
                     is_final,
                     is_final,
                     is_final,

@@ -120,6 +120,21 @@ def test_lower_ranked_source_does_not_overwrite_existing_fulltext(existing_sourc
     assert "save_paper" in repository.calls
 
 
+def test_lower_ranked_source_is_saved_when_existing_fulltext_has_no_chunks():
+    repository = FakeRepository(existing_source="layout_pdf", existing_hash=None, existing_chunk_count=0)
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source="pdf"),
+        paper_repository=repository,
+    )
+
+    assert "skipped_lower_rank_overwrite" not in result
+    assert result["saved_fulltext"] == 1
+    assert result["saved_chunks"] > 0
+    assert repository.existing["source"] == "pdf"
+
+
 def test_force_overwrites_with_lower_ranked_source():
     repository = FakeRepository(existing_source="layout_pdf", existing_hash="old")
 

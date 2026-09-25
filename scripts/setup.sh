@@ -114,7 +114,7 @@ docker compose ps
 echo
 echo "[arxplore] 접속 정보"
 echo "Web:      http://localhost:$(env_value PROD_HTTP_PORT 80)   (nginx)"
-echo "Vite:     http://localhost:$(env_value FRONTEND_PORT 5173)  (프론트 수정 확인용)"
+echo "Vite:     docker compose --profile dev up -d vite 후 http://127.0.0.1:$(env_value FRONTEND_PORT 5173)"
 echo
 echo "내리기:              docker compose down"
 echo "parser + worker:    docker compose --profile parser up -d --build"

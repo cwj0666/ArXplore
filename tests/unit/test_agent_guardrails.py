@@ -481,3 +481,27 @@ class TestHistoryCap:
         prepared = services.prepare_agent_chat("질문", [], user=_User(), session_api_key="sk-secret")
 
         assert "sk-secret" not in repr(prepared)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://arxiv.org/abs/2401.00001", "2401.00001"),
+        ("http://export.arxiv.org/pdf/2401.00001v3.pdf", "2401.00001"),
+        ("https://arxiv.org/abs/hep-th/9901001", "hep-th/9901001"),
+        ("https://notarxiv.org/abs/2401.00001", None),
+        ("https://evil.example/?u=https://arxiv.org/abs/2401.00001", None),
+        ("https://arxiv.org.evil.example/abs/2401.00001", None),
+        ("javascript:arxiv.org/abs/2401.00001", None),
+    ],
+)
+def test_arxiv_id_from_url_requires_real_arxiv_host(url, expected):
+    from src.core.agent.citations import arxiv_id_from_url
+
+    assert arxiv_id_from_url(url) == expected
+
+
+def test_lookalike_domain_is_not_attributed_to_an_arxiv_hit():
+    hits = [{"arxiv_id": "2401.00001", "title": "A", "url": "https://arxiv.org/abs/2401.00001", "section_title": None, "chunk_id": None}]
+    citations = verify_agent_citations("[A](https://notarxiv.org/abs/2401.00001)", hits)
+    assert all(not citation["in_answer"] for citation in citations)

@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.core.rag_types import Citation, to_citation
 
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 _tool_hits: ContextVar[list[dict[str, Any]] | None] = ContextVar("agent_tool_hits", default=None)
 
 _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\[\]]+)\]\((https?://[^)\s]+)\)")
-_ARXIV_URL_PATTERN = re.compile(r"arxiv\.org/(?:abs|pdf)/([^\s?#)]+)", re.IGNORECASE)
+_ARXIV_PATH_PATTERN = re.compile(r"^/(?:abs|pdf)/([^\s?#)/]+(?:/[^\s?#)/]+)?)/?$", re.IGNORECASE)
+_ARXIV_HOSTS = {"arxiv.org", "www.arxiv.org", "export.arxiv.org"}
 _VERSION_SUFFIX = re.compile(r"v\d+$")
 _SOURCE_REF_PATTERN = re.compile(r"\[(\d+(?:\s*[,，]\s*\d+)*)\](?!\()")
 
@@ -55,7 +57,13 @@ def normalize_arxiv_id(value: str) -> str:
 
 
 def arxiv_id_from_url(url: str) -> str | None:
-    match = _ARXIV_URL_PATTERN.search(url or "")
+    try:
+        parts = urlsplit(str(url or "").strip())
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in {"http", "https"} or (parts.hostname or "").lower() not in _ARXIV_HOSTS:
+        return None
+    match = _ARXIV_PATH_PATTERN.match(parts.path or "")
     if not match:
         return None
     return normalize_arxiv_id(match.group(1))

@@ -418,7 +418,7 @@ def test_fail_below_max_attempts_schedules_backoff_retry():
     assert normalized.startswith("UPDATE prepare_jobs SET status = %s, attempt_count = %s")
     assert "NOW() + (%s::integer * INTERVAL '1 second')" in normalized
     assert normalized.endswith("WHERE id = %s RETURNING mode, target_date")
-    assert params == ("pending", 2, 120, 120, "boom", False, False, False, 5)
+    assert params == ("pending", 2, 120, 120, "boom", False, False, False, False, 5)
     assert _notifies(cursor) == []
 
 
@@ -430,7 +430,7 @@ def test_fail_at_max_attempts_marks_failed():
 
     assert applied is True
     _, params = _fail_update(cursor)
-    assert params == ("failed", 3, None, None, "boom", True, True, True, 5)
+    assert params == ("failed", 3, None, None, "boom", True, True, True, True, 5)
     assert _notifies(cursor) == []
 
 
@@ -442,7 +442,7 @@ def test_fail_with_pending_refresh_retries_immediately():
 
     assert applied is True
     _, params = _fail_update(cursor)
-    assert params == ("pending", 0, None, None, "boom", False, False, False, 5)
+    assert params == ("pending", 0, None, None, "boom", False, False, False, False, 5)
     assert _notifies(cursor) == [("arxplore_prepare_jobs", "auto:2026-04-07")]
 
 

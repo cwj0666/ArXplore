@@ -116,7 +116,7 @@ flowchart TD
 ### `src/core`
 
 - `models.py`: `PaperRef`, `PaperDetailDocument`
-- `prompts/`: overview, key_findings, summary, translation, answer 프롬프트
+- `prompts/`: overview, key_findings, summary, translation, agent, paper_chat 프롬프트
 - `paper_chains.py`: 개요·핵심 포인트 생성 chain
 - `summary_graph.py`: 섹션을 배경·방법·실험·한계 버킷으로 묶어 요약하는 LangGraph 상세 요약 그래프
 - `translation_chains.py`: `build_summary`(상세 요약 진입점), `translate_chunk`(구현만 있고 호출하는 엔드포인트 없음)

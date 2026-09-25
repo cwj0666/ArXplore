@@ -23,6 +23,11 @@ _TEST_ENV_DEFAULTS = {
     "OPENAI_API_KEY": "sk-test-dummy",
     "LANGSMITH_TRACING": "false",
     "LANGSMITH_API_KEY": "",
+    "RETRIEVAL_MODE": "hybrid",
+    "AGENT_RECURSION_LIMIT": "12",
+    "AGENT_STREAM_BUFFER_CHARS": "120",
+    "PREPARE_JOB_MAX_ATTEMPTS": "3",
+    "VECTOR_MIN_SIMILARITY": "0",
 }
 for key, value in _TEST_ENV_DEFAULTS.items():
     os.environ.setdefault(key, value)

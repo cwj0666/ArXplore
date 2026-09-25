@@ -351,13 +351,14 @@ def prepare_single_paper(
     existing_source = existing.get("source") if existing else None
     skipped_lower_rank_overwrite = False
     skipped_unchanged = False
+    existing_chunk_count = int(existing.get("chunk_count") or 0) if existing else 0
     if existing and not force:
-        if fulltext_source_rank(fulltext.source) < fulltext_source_rank(existing_source):
+        if fulltext_source_rank(fulltext.source) < fulltext_source_rank(existing_source) and existing_chunk_count > 0:
             skipped_lower_rank_overwrite = True
         elif (
             existing_source == fulltext.source
             and existing.get("content_hash") == content_hash
-            and int(existing.get("chunk_count") or 0) > 0
+            and existing_chunk_count > 0
         ):
             skipped_unchanged = True
 
@@ -390,7 +391,7 @@ def prepare_single_paper(
         "arxiv_id": arxiv_id,
         "title": prepared.get("title", ""),
         "primary_category": prepared.get("primary_category"),
-        "chunk_count": len(chunks),
+        "chunk_count": len(chunks) if (saved_chunks or skipped_unchanged) else (existing_chunk_count if skipped_lower_rank_overwrite else 0),
         "fulltext_source": fulltext.source,
         "fallback_used": fulltext_quality_metrics.get("fallback_used"),
         "section_count": fulltext_quality_metrics.get("section_count", 0),
