@@ -1,4 +1,5 @@
 import { toInternalPaperHref } from "../../helpers/assistant/renderAssistantContent";
+import { isSameOriginPathname } from "../../helpers/safeRedirect";
 import type { Citation } from "../../types/assistant";
 import "./chat-content.css";
 
@@ -12,7 +13,14 @@ function resolveCitationHref(citation: Citation): string {
     return toInternalPaperHref(url) ?? url;
   }
   if (url.startsWith("/") && !url.startsWith("//")) {
-    return url;
+    try {
+      const parsed = new URL(url, window.location.origin);
+      if (parsed.origin === window.location.origin && isSameOriginPathname(parsed.pathname)) {
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      }
+    } catch {
+      // Fall through to the paper detail link.
+    }
   }
   return `/papers/${encodeURIComponent(citation.arxiv_id)}/`;
 }

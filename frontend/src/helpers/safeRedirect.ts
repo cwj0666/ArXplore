@@ -1,5 +1,19 @@
 const UNSAFE_CHARACTERS = /[\\\u0000-\u001F\u007F]/;
 
+/** Rejects paths a browser or router could resolve off-origin (`//host`, backslashes), including percent-encoded forms. */
+export function isSameOriginPathname(pathname: string): boolean {
+  if (pathname.startsWith("//") || UNSAFE_CHARACTERS.test(pathname)) {
+    return false;
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  return !decoded.startsWith("//") && !UNSAFE_CHARACTERS.test(decoded);
+}
+
 export function sanitizeNextPath(raw: string | null | undefined, fallback = "/"): string {
   if (!raw) {
     return fallback;
@@ -21,7 +35,7 @@ export function sanitizeNextPath(raw: string | null | undefined, fallback = "/")
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return fallback;
   }
-  if (parsed.origin !== origin) {
+  if (parsed.origin !== origin || !isSameOriginPathname(parsed.pathname)) {
     return fallback;
   }
 

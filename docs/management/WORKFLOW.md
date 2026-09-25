@@ -199,14 +199,15 @@ LangSmith는 공용 프로젝트 기준으로 trace를 축적한다. 현재 주�
 - `collect_papers`
 - `backfill_collect_papers`
 - `prepare_papers`
+- `backfill_prepare_papers`
 - `consume_prepare_queue`
 - `embed_papers`
 - `enrich_papers_metadata`
-- `analyze_paper_detail`
 - `paper_overview`
 - `paper_key_findings`
 - `summary`
-- `rag_answer`
+- `paper_chat`
+- `agent_chat`
 
 ## 10. 통합 확인 순서
 

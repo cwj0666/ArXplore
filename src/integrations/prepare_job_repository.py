@@ -404,11 +404,15 @@ class PrepareJobRepository:
         mode: str,
         since_date: str | None = None,
         dry_run: bool = True,
+        force: bool = False,
     ) -> list[dict[str, Any]]:
         """failed 상태 작업을 조회하고, dry_run이 아니면 시도 횟수를 초기화해 pending으로 되돌린다.
 
+        force면 payload에 "force": true를 넣어 재처리 시 본문 source 순위·content_hash 검사를 건너뛰게 하고,
+        아니면 payload의 force 키를 지운다.
         반환값은 대상(또는 실제로 전환된) 작업의 id, target_date, 전환 전 attempt_count 목록이다.
         """
+        payload_sql = "j.payload || '{\"force\": true}'::jsonb" if force else "j.payload - 'force'"
         normalized_since = date_cls.fromisoformat(since_date.strip()).isoformat() if since_date else None
         where_sql = "WHERE mode = %s AND status = 'failed'"
         params: list[Any] = [mode]
@@ -440,6 +444,7 @@ class PrepareJobRepository:
                     UPDATE prepare_jobs j
                     SET
                         status = 'pending',
+                        payload = {payload_sql},
                         attempt_count = 0,
                         next_attempt_at = NULL,
                         pending_refresh = FALSE,

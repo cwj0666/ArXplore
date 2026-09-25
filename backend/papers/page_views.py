@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.views.decorators.http import require_GET
 
+from .ratelimit import rate_limit
 from .services import (
     AuthenticationRequiredError,
     PaperNotFoundError,
@@ -19,6 +20,9 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 DATA_LOAD_ERROR_MESSAGE = "논문 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+
+# 익명 데모 트래픽도 관련 논문 합성 과정에서 arXiv 검색을 호출하므로 IP당으로 제한한다.
+detail_rate_limit = rate_limit("detail", limit_setting="RATE_LIMIT_DETAIL_PER_MINUTE", per="ip")
 
 
 def paper_list(request: HttpRequest) -> HttpResponse:
@@ -56,6 +60,7 @@ def paper_detail(request: HttpRequest, arxiv_id: str) -> HttpResponse:
 
 
 @require_GET
+@detail_rate_limit
 def paper_detail_data(request: HttpRequest, arxiv_id: str) -> JsonResponse:
     try:
         return JsonResponse(build_paper_detail_payload(arxiv_id, user=request.user))

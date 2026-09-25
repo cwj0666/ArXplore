@@ -149,6 +149,18 @@ def test_requeue_apply_resets_fields_and_notifies():
     ]
 
 
+def test_requeue_apply_sets_or_clears_force_in_payload():
+    cursor = RecordingCursor(rows=[(11, "2026-04-07", 3)])
+    _repository_with_cursor(cursor).requeue_failed_prepare_jobs(mode="auto", dry_run=False, force=True)
+    forced_sql, forced_params = cursor.executed[0]
+    assert """payload = j.payload || '{"force": true}'::jsonb""" in _normalize_sql(forced_sql)
+    assert forced_params == ("auto",)
+
+    cursor = RecordingCursor(rows=[(11, "2026-04-07", 3)])
+    _repository_with_cursor(cursor).requeue_failed_prepare_jobs(mode="auto", dry_run=False)
+    assert "payload = j.payload - 'force'" in _normalize_sql(cursor.executed[0][0])
+
+
 def test_requeue_without_since_has_no_date_predicate():
     cursor = RecordingCursor()
     assert _repository_with_cursor(cursor).requeue_failed_prepare_jobs(mode="auto") == []
@@ -432,15 +444,15 @@ class FakeJobRepository:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def requeue_failed_prepare_jobs(self, *, mode, since_date=None, dry_run=True):
-        self.calls.append({"mode": mode, "since_date": since_date, "dry_run": dry_run})
+    def requeue_failed_prepare_jobs(self, *, mode, since_date=None, dry_run=True, force=False):
+        self.calls.append({"mode": mode, "since_date": since_date, "dry_run": dry_run, "force": force})
         return [{"id": 1, "target_date": "2026-04-07", "attempt_count": 1}]
 
 
 def test_requeue_cli_defaults_to_dry_run(capsys):
     repository = FakeJobRepository()
     assert requeue_script.main(["--since", "2026-04-07", "--mode", "auto"], repository=repository) == 0
-    assert repository.calls == [{"mode": "auto", "since_date": "2026-04-07", "dry_run": True}]
+    assert repository.calls == [{"mode": "auto", "since_date": "2026-04-07", "dry_run": True, "force": False}]
     output = capsys.readouterr().out
     assert "[DRY-RUN]" in output
     assert "target_date=2026-04-07" in output
@@ -450,4 +462,12 @@ def test_requeue_cli_apply(capsys):
     repository = FakeJobRepository()
     assert requeue_script.main(["--since", "2026-04-07", "--mode", "auto", "--apply"], repository=repository) == 0
     assert repository.calls[0]["dry_run"] is False
+    assert repository.calls[0]["force"] is False
     assert "[APPLY]" in capsys.readouterr().out
+
+
+def test_requeue_cli_force_is_passed_through(capsys):
+    repository = FakeJobRepository()
+    assert requeue_script.main(["--apply", "--force"], repository=repository) == 0
+    assert repository.calls[0]["force"] is True
+    assert "force=True" in capsys.readouterr().out

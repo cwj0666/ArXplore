@@ -8,7 +8,15 @@ function getCsrfTokenFromCookie(): string {
     .map((part) => part.trim())
     .find((part) => part.startsWith("csrftoken="));
 
-  return token ? decodeURIComponent(token.split("=")[1] ?? "") : "";
+  if (!token) {
+    return "";
+  }
+  const value = token.split("=")[1] ?? "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 

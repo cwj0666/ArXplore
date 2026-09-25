@@ -62,7 +62,7 @@ PostgreSQL(15432), MongoDB(17017), Airflow(18080) 포트는 `TAILSCALE_SERVER_IP
 
 ### 로컬 서비스 런타임
 
-단일 `docker-compose.yml`의 기본 서비스는 `arxplore-nginx`, `arxplore-django`다. nginx는 React 빌드를 서빙하고 API 경로만 Django로 프록시하며(SPA 경로는 `index.html`), 보안 헤더와 gzip을 붙인다. SSE 경로는 버퍼링을 끄고 읽기 제한을 300초로 둔다. Django admin 경로는 프록시하지 않는다. Django는 gunicorn(gthread, 워커 4 × 스레드 8)으로 root가 아닌 `app` 사용자로 돌고, nginx는 django의 TCP healthcheck가 통과한 뒤 시작한다. 프론트엔드 수정용 Vite dev server(`arxplore-vite`)는 `dev` 프로필이다.
+로컬 `docker-compose.yml`의 기본 서비스는 `arxplore-nginx`, `arxplore-django`다. nginx는 React 빌드를 서빙하고 API 경로만 Django로 프록시하며(SPA 경로는 `index.html`), 보안 헤더와 gzip을 붙인다. SSE 경로는 버퍼링을 끄고 읽기 제한을 300초로 둔다. Django admin 경로는 프록시하지 않는다. Django는 gunicorn(gthread, 워커 4 × 스레드 8)으로 root가 아닌 `app` 사용자로 돌고, nginx는 django의 TCP healthcheck가 통과한 뒤 시작한다. 프론트엔드 수정용 Vite dev server(`arxplore-vite`)는 `dev` 프로필이다.
 
 원격 서버 없이 웹만 띄울 때는 `local-db` 프로필의 `postgres-local`(pgvector/pgvector:pg16, `127.0.0.1:${SERVER_POSTGRES_PORT:-15432}`)을 함께 올린다. 같은 compose 기본 네트워크에 있으므로 django는 `PROD_POSTGRES_HOST=postgres-local:5432`로 접속한다. 수집 계층이 없으므로 이 모드의 DB는 비어 있다.
 
@@ -102,7 +102,7 @@ flowchart TD
 - `paper_retriever.py`: lexical, vector, hybrid를 합치는 retrieval 인터페이스
 - `db.py`: 프로세스별 PostgreSQL 연결 풀
 
-생성자는 DDL을 실행하지 않는다. 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다.
+생성자는 DDL을 실행하지 않는다. 스키마는 `scripts/migrate_schema.py`(또는 prepare-worker 시작 시 `ensure_schema`)가 만든다. DAG 태스크는 스키마가 이미 있다고 가정한다.
 
 ### `src/pipeline`
 
@@ -180,7 +180,7 @@ raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 
 | 테이블 | 키 | 주요 컬럼 | 인덱스·제약 |
 | --- | --- | --- | --- |
 | `papers` | `arxiv_id` PK | `title`, `authors` JSONB, `abstract`, `primary_category`, `categories` JSONB, `pdf_url`, `published_at`, `upvotes`, `github_url`, `source`, `title_abstract_vector` tsvector 생성 컬럼(제목 A + 초록 B, `english`) | `idx_papers_title_abstract_vector` GIN(`title_abstract_vector`) |
-| `paper_fulltexts` | `arxiv_id` PK, FK -> `papers` (CASCADE) | `text`, `sections` JSONB, `source`(`layout_pdf` / `pdf` / `fallback_abstract`), `quality_metrics`, `artifacts`, `parser_metadata` JSONB | PK만 |
+| `paper_fulltexts` | `arxiv_id` PK, FK -> `papers` (CASCADE) | `text`, `sections` JSONB, `source`(`layout_pdf` / `pdf` / `fallback_abstract`), `quality_metrics`, `artifacts`, `parser_metadata` JSONB, `content_hash` TEXT | PK만 |
 | `paper_chunks` | `id` BIGSERIAL PK, FK `arxiv_id` -> `papers` (CASCADE) | `chunk_index`, `chunk_text`, `section_title`, `token_count`, `metadata` JSONB(`content_role` 포함), `chunk_vector` tsvector 생성 컬럼(청크 C, `english`) | `UNIQUE(arxiv_id, chunk_index)`, `idx_paper_chunks_chunk_vector` GIN(`chunk_vector`) |
 | `paper_embeddings` | `chunk_id` PK, FK -> `paper_chunks` (CASCADE) | `embedding VECTOR(1536)`, `model_name` | `paper_embeddings_embedding_hnsw` HNSW(`embedding vector_cosine_ops`). pgvector 0.5.0 미만이면 경고만 남기고 생략 |
 | `paper_ai_overviews` | `arxiv_id` PK, FK -> `papers` | `overview`, `key_findings` JSONB, `model`(기록용) | PK만 |
@@ -214,7 +214,7 @@ raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 
 prepare 단계의 보호 장치:
 
 - 논문 단위 격리: 한 논문의 예외는 결과에 기록하고 나머지를 계속 처리한다. 날짜 잡은 모든 논문이 실패했을 때만 실패로 기록한다
-- 폴백 보호: 새 결과가 `fallback_abstract`이고 기존 `paper_fulltexts.source`가 `layout_pdf` 또는 `pdf`이면 본문·청크·임베딩을 교체하지 않는다. 청크 DELETE가 임베딩을 CASCADE로 지우기 때문이다
+- 멱등 재처리: source 순위 `layout_pdf > pdf > fallback_abstract`에서 하향 저장을 막고, 같은 source + 같은 `content_hash`면 저장을 건너뛴다. 청크 텍스트가 같으면 id와 임베딩을 보존한 채 메타데이터만 갱신한다. `--force`로 우회한다. 논문 단위 실패가 있는 날짜 잡은 backoff 후 재시도된다
 - 임베딩 backlog: prepare 성공 여부와 상관없이 매 루프 `EMBED_BACKLOG_MAX_CHUNKS`(기본 400)까지 누락 임베딩을 채운다. backlog 오류는 worker를 멈추지 않는다
 
 ## 8. retrieval 계층
@@ -234,7 +234,7 @@ prepare 단계의 보호 장치:
 
 ## 9. 에이전트와 상세 챗
 
-- **어시스턴트 페이지**: `src/core/agent/chatbot.py`의 LangGraph ReAct 에이전트(`create_react_agent`, `stream_mode="messages"`). Django `/papers/assistant/stream/`이 `StreamingHttpResponse` + `text/event-stream`으로 내보내고, React는 fetch ReadableStream으로 읽으며 중지 버튼으로 요청을 abort한다. 인증·키·입력 검증은 스트림 시작 전에 끝나서 401/400이 그대로 나간다
+- **어시스턴트 페이지**: `src/core/agent/chatbot.py`의 LangGraph ReAct 에이전트(`create_react_agent`, `stream_mode=["messages", "updates"]`). Django `/papers/assistant/stream/`이 `StreamingHttpResponse` + `text/event-stream`으로 내보내고, React는 fetch ReadableStream으로 읽으며 중지 버튼으로 요청을 abort한다. 인증·키·입력 검증은 스트림 시작 전에 끝나서 401/400이 그대로 나간다
 - **도구**(`src/core/agent/tools.py`)
   - `search_paper_chunks_tool`: `retrieve_contexts`(hybrid → lexical)로 5개 문맥을 찾아 `[번호] 제목 | arxiv_id | 섹션 | chunk_id` 헤더, 출처 URL, 본문으로 LLM에 넘기고 hit을 요청 범위 레지스트리에 기록한다
   - `get_trending_papers_tool`: 최근 논문 10편을 추천수 순으로 정렬해 돌려준다
@@ -270,6 +270,10 @@ class PaperDetailDocument(BaseModel):
 
 ## 11. 추적
 
-LangSmith trace metadata에 쓰는 stage 이름은 다음과 같다: `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `consume_prepare_queue`, `embed_papers`, `enrich_papers_metadata`, `analyze_paper_detail`, `paper_overview`, `paper_key_findings`, `summary`, `rag_answer`, `paper_chat`(상세 챗), `agent_chat`(에이전트).
+LangSmith trace metadata에 쓰는 stage 이름은 다음과 같다.
+
+- 파이프라인(`src/pipeline/tracing.py`): `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `backfill_prepare_papers`, `consume_prepare_queue`, `embed_papers`, `enrich_papers_metadata`
+- 생성·챗(`src/core/tracing.py`): `paper_overview`, `paper_key_findings`(상세 분석 `analyze_paper_detail`이 두 체인을 호출), `summary`(상세 요약 그래프), `paper_chat`(상세 챗), `agent_chat`(에이전트)
+- `translation`, `rag_answer`, `analyze_paper_detail`, `paper_detail_document`는 `build_analysis_trace_config`의 허용 목록에만 있고 현재 이 stage로 trace를 남기는 호출 경로는 없다
 
 적재·큐 상태는 PostgreSQL에서 직접 확인한다. 예: `SELECT status, count(*) FROM prepare_jobs GROUP BY status;`, `SELECT count(*) FROM paper_chunks c LEFT JOIN paper_embeddings e ON e.chunk_id = c.id WHERE e.chunk_id IS NULL;`

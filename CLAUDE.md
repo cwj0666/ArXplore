@@ -98,7 +98,7 @@ HF Daily Papers / arXiv
 
 ### Docker Compose 구조
 
-단일 `docker-compose.yml`로 모든 서비스를 관리합니다.
+로컬 서비스는 `docker-compose.yml`, 서버 인프라는 `docker-compose.server.yml`로 나눠 관리합니다. `docker-compose.yml`의 서비스는 다음과 같습니다.
 
 | 서비스 | 프로필 | 설명 |
 |--------|--------|------|
@@ -123,7 +123,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 
 **prepare-worker는 Airflow가 아닌 로컬에서 실행** — GPU가 필요한 HURIDOCS 파싱을 로컬에서 처리하고 결과를 서버 DB에 직접 적재한다. 임베딩은 GPU가 아니라 OpenAI API(`text-embedding-3-large`, 1536차원)로 만든다. 이 분리를 깨지 말 것.
 
-**스키마는 `scripts/migrate_schema.py`가 만든다.** `PaperRepository()`·`PrepareJobRepository()` 생성자는 DDL을 실행하지 않는다(요청 경로에서 DDL 금지). prepare-worker는 시작할 때 `ensure_schema()`를 1회 호출한다.
+**스키마는 `scripts/migrate_schema.py`가 만든다.** `PaperRepository()`·`PrepareJobRepository()` 생성자는 DDL을 실행하지 않는다(요청 경로에서 DDL 금지). prepare-worker는 시작할 때 `ensure_schema()`를 1회 호출한다. DAG 태스크는 스키마가 이미 있다고 가정한다.
 
 ### Module Responsibilities
 
@@ -150,7 +150,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 
 청크에 `content_role`, `section_title`, `parser_metadata`, `quality_metrics` 저장. 청킹은 글자 수 기준(1800자, 겹침 200자).
 
-새 결과가 `fallback_abstract`이고 기존 본문 source가 `layout_pdf`/`pdf`이면 본문·청크·임베딩을 교체하지 않는다(청크 DELETE가 임베딩을 CASCADE 삭제하기 때문).
+재처리는 멱등하다. source 순위 `layout_pdf > pdf > fallback_abstract`에서 기존보다 낮은 순위 결과는 저장하지 않고, 같은 source에 `content_hash`(정규화 본문 + 섹션 제목의 sha256)까지 같으면 본문·청크 교체를 건너뛴다. 청크 텍스트가 같으면 DELETE/INSERT 없이 메타데이터만 갱신해 청크 id와 임베딩을 보존한다. 강제 재처리는 `--force`(worker CLI, requeue 스크립트 `--apply --force`, job payload `force: true`). 날짜 잡에서 논문 1건이라도 실패하면 잡은 backoff 후 재시도되고, 성공했던 논문은 unchanged로 건너뛴다.
 
 ### Retrieval
 
@@ -167,7 +167,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 
 ### Agent
 
-`src/core/agent/chatbot.py` — LangGraph ReAct Agent (`stream_mode="messages"`, `recursion_limit=AGENT_RECURSION_LIMIT` 기본 12, 초과 시 안내 문구로 종료)
+`src/core/agent/chatbot.py` — LangGraph ReAct Agent (`stream_mode=["messages", "updates"]`, `recursion_limit=AGENT_RECURSION_LIMIT` 기본 12, 초과 시 안내 문구로 종료) / AGENT_STREAM_BUFFER_CHARS=120(도구 호출 전 서두 누출 방지 버퍼; 120자 넘는 서두 뒤 도구 호출은 막지 못함)
 - `search_paper_chunks_tool` — `retrieve_contexts`(hybrid → lexical) 기반 청크 검색 5개. hit을 요청 범위 레지스트리에 기록
 - `get_trending_papers_tool` — 트렌딩 논문 통계
 - `citations.py` — 답변 속 링크(에이전트)·`[n]` 번호(상세 챗)를 도구 hit과 대조해 `citations` 이벤트(`in_answer`)를 만든다
@@ -222,7 +222,7 @@ DJANGO_ADMIN_ENABLED=false / DJANGO_ADMIN_PATH=admin/
 DEMO_MODE=true
 SESSION_KEY_ENCRYPTION_KEY= # 비우면 DJANGO_SECRET_KEY에서 유도. 바꾸면 저장된 세션 키 폐기
 REDIS_URL=                  # rate limit 공유 캐시. 비우면 프로세스별 LocMem
-RATE_LIMIT_ENABLED=true / RATE_LIMIT_AUTH_PER_MINUTE=10 / RATE_LIMIT_LLM_PER_MINUTE=30 / RATE_LIMIT_IP_HEADER=X-Real-IP
+RATE_LIMIT_ENABLED=true / RATE_LIMIT_AUTH_PER_MINUTE=10 / RATE_LIMIT_LLM_PER_MINUTE=30 / RATE_LIMIT_DETAIL_PER_MINUTE=60 / RATE_LIMIT_IP_HEADER=X-Real-IP
 RETRIEVAL_MODE=hybrid       # hybrid | lexical
 VECTOR_MIN_SIMILARITY=0
 AGENT_RECURSION_LIMIT=12    # 최소 4

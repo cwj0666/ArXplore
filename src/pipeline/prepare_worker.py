@@ -25,7 +25,8 @@ def _normalize_optional_positive_int(value: int | str | None, default: int) -> i
 def _collect_prepared_arxiv_ids(prepare_result: dict[str, Any]) -> list[str]:
     seen: set[str] = set()
     collected: list[str] = []
-    for success in prepare_result.get("successes", []):
+    # 일부 논문이 실패해 재시도로 넘어간 날짜도 이미 적재된 논문은 바로 임베딩한다.
+    for success in [*prepare_result.get("successes", []), *prepare_result.get("failures", [])]:
         if not isinstance(success, dict):
             continue
         for value in success.get("prepared_arxiv_ids", []):
@@ -157,6 +158,7 @@ def _run_once(args: argparse.Namespace) -> dict[str, Any]:
             worker_id=normalized_worker_id,
             max_jobs_per_run=max(1, int(args.max_jobs_per_run)),
             max_papers=normalized_max_papers,
+            force=bool(args.force),
         )
         if args.skip_embed:
             prepare_result["embed"] = {
@@ -197,6 +199,7 @@ def _run_once(args: argparse.Namespace) -> dict[str, Any]:
         batch_days=max(1, int(args.batch_days)),
         state_name=normalized_worker_id,
         max_papers=normalized_max_papers,
+        force=bool(args.force),
     )
 
 
@@ -222,13 +225,18 @@ def main() -> int:
     parser.add_argument(
         "--embed-backlog-max-chunks",
         type=int,
-        default=0,
-        help="auto 모드에서 run마다 추가로 태울 backlog 임베딩 최대 청크 수(신규 prepare 성공 여부와 무관). 기본값은 0이다.",
+        default=400,
+        help="auto 모드에서 run마다 추가로 태울 backlog 임베딩 최대 청크 수(신규 prepare 성공 여부와 무관). 기본값은 400이고 0이면 끈다.",
     )
     parser.add_argument(
         "--skip-embed",
         action="store_true",
         help="auto 모드에서 prepare 성공 후 자동 임베딩을 비활성화한다.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="본문 source 순위·content_hash 검사를 건너뛰고 파싱 결과로 본문·청크를 교체한다.",
     )
     parser.add_argument("--worker-id", default="default", help="큐 작업 선점에 사용하는 워커 식별자.")
     parser.add_argument("--state-name", default="", help="deprecated: --worker-id를 사용한다.")

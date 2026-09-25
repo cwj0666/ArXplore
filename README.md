@@ -94,7 +94,7 @@ HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker 
 **2026-09 점검(Phase 0)에서 추가한 보호 장치**
 
 - 논문 단위 격리: 한 논문의 예외는 기록만 하고 나머지 논문을 계속 처리합니다. 날짜 잡은 모든 논문이 실패했을 때만 실패로 봅니다.
-- 폴백 보호: 새 결과가 초록 폴백(`fallback_abstract`)이고 기존 본문이 PDF(`layout_pdf`, `pdf`)면 본문·청크·임베딩을 교체하지 않습니다. 일시적인 다운로드 실패가 기존 임베딩을 CASCADE로 지우던 문제를 막습니다.
+- 멱등 재처리: 본문 source 순위(`layout_pdf` > `pdf` > `fallback_abstract`)에서 낮은 순위 결과로는 덮어쓰지 않고, 같은 source에 내용 해시까지 같으면 저장을 건너뜁니다. 청크 텍스트가 같으면 청크 id와 임베딩을 보존합니다. 일시적인 다운로드·파서 실패가 기존 임베딩을 CASCADE로 지우던 문제를 막고, 강제 재처리는 `--force`로 합니다. 논문 1건이라도 실패한 날짜 잡은 backoff 후 재시도됩니다.
 - 임베딩 backlog: prepare 성공 여부와 상관없이 매 루프에서 누락된 임베딩을 `EMBED_BACKLOG_MAX_CHUNKS`(기본 400)까지 채우고, backlog 오류가 worker를 멈추지 않습니다.
 - 참고문헌 판정: 섹션 제목이 참고문헌 제목과 정확히 맞을 때만 `references`로 분류합니다. "Direct Preference Optimization" 같은 본문 섹션이 검색에서 빠지던 문제를 고쳤습니다.
 - 운영 스크립트는 모두 dry-run이 기본입니다: `scripts/requeue_failed_prepare_jobs.py --since YYYY-MM-DD [--apply]`, `scripts/backfill_content_roles.py [--apply]`.
@@ -106,7 +106,7 @@ HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker 
 | 프로필 | 서비스 | 용도 |
 | --- | --- | --- |
 | (기본) | `django`, `nginx` | 웹 앱. nginx는 django healthcheck가 통과한 뒤 뜹니다. |
-| `dev` | `vite` | 프론트엔드 HMR 개발 서버(`http://localhost:5173`) |
+| `dev` | `vite` | 프론트엔드 HMR 개발 서버(`http://localhost:5173`, 호스트 127.0.0.1에만 바인딩) |
 | `parser` | `layout-parser`, `prepare-worker` | GPU PDF 파서와 prepare 큐 worker. worker는 파서 healthcheck 통과 뒤 뜹니다. |
 | `local-db` | `postgres-local` | 원격 서버 없이 쓰는 로컬 PostgreSQL(pgvector) |
 
@@ -130,6 +130,7 @@ docker compose --profile local-db --profile dev up -d vite  # (선택) Vite HMR:
 ```
 
 - 데모 모드가 기본이라 로그인 없이 목록과 상세를 볼 수 있습니다. 회원가입 → 설정에서 개인 OpenAI API 키를 등록하면 생성과 챗이 열립니다.
+- `DJANGO_CSRF_TRUSTED_ORIGINS`에는 앱에 접속하는 모든 origin이 들어가야 합니다. 기본값은 `http://localhost`, `http://127.0.0.1`과 Vite dev 서버(`:5173`)이며, `PROD_HTTP_PORT`·`FRONTEND_PORT`를 바꾸거나 다른 호스트명으로 접속하면 해당 origin(포트 포함)을 추가하지 않는 한 로그인 등 POST 요청이 403으로 막힙니다.
 - `DJANGO_SECRET_KEY`가 비어 있으면 Django가 시작하지 않습니다. `DJANGO_DEBUG`는 기본으로 꺼져 있고 값이 `true`일 때만 켜집니다(compose는 항상 끕니다).
 - 접속 주소: `postgres-local`은 django·worker와 같은 compose 기본 네트워크에 있으므로 컨테이너는 `PROD_POSTGRES_HOST=postgres-local:5432`로 접속합니다(`host.docker.internal`이나 `extra_hosts`가 필요 없습니다). 호스트에서 돌리는 스크립트는 `POSTGRES_HOST=localhost`와 `SERVER_POSTGRES_PORT=15432`를 씁니다. `.env.example`의 기본값이 이 구성입니다.
 - `PROD_POSTGRES_HOST`와 `POSTGRES_HOST`는 `host` 또는 `host:port` 형식입니다. 포트를 생략하면 `SERVER_POSTGRES_PORT`(`.env.example` 값 15432)를 씁니다.

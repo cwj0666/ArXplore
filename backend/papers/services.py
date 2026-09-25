@@ -734,6 +734,7 @@ def _search_external_related_papers(
             return []
         external_papers = client.search_arxiv_papers(query, max_results=max(limit * 2, 5))
     except Exception:
+        logger.warning("arXiv 관련 논문 검색 실패: arxiv_id=%s", paper.get("arxiv_id"), exc_info=True)
         return []
 
     related: list[dict[str, Any]] = []

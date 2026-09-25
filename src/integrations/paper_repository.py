@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from collections.abc import Sequence
@@ -52,6 +53,11 @@ VECTOR_INDEX_DDL = (
 )
 
 _LIKE_SPECIAL_CHARS = re.compile(r"([\\%_])")
+
+
+def _chunk_text_hash(chunk_text: str) -> str:
+    """PostgreSQL md5(chunk_text)와 같은 값. 변경 감지용이다."""
+    return hashlib.md5(str(chunk_text or "").encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def escape_like(value: str) -> str:
@@ -279,6 +285,7 @@ class PaperRepository:
         quality_metrics: dict[str, Any] | None = None,
         artifacts: dict[str, Any] | None = None,
         parser_metadata: dict[str, Any] | None = None,
+        content_hash: str | None = None,
     ) -> None:
         """논문 본문 텍스트를 저장한다."""
         sanitized_text = self._sanitize_text(text)
@@ -290,9 +297,9 @@ class PaperRepository:
             cursor.execute(
                 """
                 INSERT INTO paper_fulltexts (
-                    arxiv_id, text, sections, source, quality_metrics, artifacts, parser_metadata, updated_at
+                    arxiv_id, text, sections, source, quality_metrics, artifacts, parser_metadata, content_hash, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (arxiv_id)
                 DO UPDATE SET
                     text = EXCLUDED.text,
@@ -301,6 +308,7 @@ class PaperRepository:
                     quality_metrics = EXCLUDED.quality_metrics,
                     artifacts = EXCLUDED.artifacts,
                     parser_metadata = EXCLUDED.parser_metadata,
+                    content_hash = EXCLUDED.content_hash,
                     updated_at = NOW()
                 """,
                 (
@@ -311,16 +319,62 @@ class PaperRepository:
                     Json(sanitized_quality_metrics),
                     Json(sanitized_artifacts),
                     Json(sanitized_parser_metadata),
+                    content_hash,
                 ),
             )
 
-    def save_paper_chunks(self, arxiv_id: str, chunks: list[dict[str, Any]]) -> None:
-        """논문 청크 목록을 저장한다."""
+    def save_paper_chunks(self, arxiv_id: str, chunks: list[dict[str, Any]]) -> bool:
+        """논문 청크 목록을 저장하고, 청크를 교체했으면 True를 반환한다.
+
+        chunk_text 순서열이 기존과 같으면 DELETE/INSERT 없이 section_title·token_count·metadata만 갱신해
+        청크 id와 임베딩(ON DELETE CASCADE)을 보존하고 False를 반환한다.
+        """
         if not chunks:
-            return
+            return False
         sanitized_chunks = self._sanitize_json_value(chunks)
+        ordered_chunks = sorted(sanitized_chunks, key=lambda chunk: int(chunk.get("chunk_index", 0)))
+        new_text_hashes = [_chunk_text_hash(chunk.get("chunk_text", "")) for chunk in ordered_chunks]
 
         with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT chunk_index, md5(chunk_text) FROM paper_chunks WHERE arxiv_id = %s ORDER BY chunk_index ASC",
+                (arxiv_id,),
+            )
+            existing = cursor.fetchall()
+            existing_indexes = [int(row[0]) for row in existing]
+            new_indexes = [int(chunk.get("chunk_index", 0)) for chunk in ordered_chunks]
+            if existing and existing_indexes == new_indexes and [row[1] for row in existing] == new_text_hashes:
+                execute_values(
+                    cursor,
+                    """
+                    UPDATE paper_chunks AS c
+                    SET
+                        section_title = v.section_title,
+                        token_count = v.token_count,
+                        metadata = v.metadata,
+                        updated_at = NOW()
+                    FROM (VALUES %s) AS v(arxiv_id, chunk_index, section_title, token_count, metadata)
+                    WHERE c.arxiv_id = v.arxiv_id
+                      AND c.chunk_index = v.chunk_index
+                      AND (
+                        c.section_title IS DISTINCT FROM v.section_title
+                        OR c.token_count <> v.token_count
+                        OR c.metadata <> v.metadata
+                      )
+                    """,
+                    [
+                        (
+                            arxiv_id,
+                            int(chunk.get("chunk_index", 0)),
+                            chunk.get("section_title"),
+                            int(chunk.get("token_count", 0)),
+                            Json(chunk.get("metadata", {})),
+                        )
+                        for chunk in ordered_chunks
+                    ],
+                    template="(%s::text, %s::integer, %s::text, %s::integer, %s::jsonb)",
+                )
+                return False
             cursor.execute("DELETE FROM paper_chunks WHERE arxiv_id = %s", (arxiv_id,))
             execute_values(
                 cursor,
@@ -341,6 +395,7 @@ class PaperRepository:
                 ],
                 template="(%s, %s, %s, %s, %s, %s, NOW())",
             )
+        return True
 
     def list_recent_papers(self, *, limit: int = 200) -> list[dict[str, Any]]:
         """최근 저장 논문을 조회한다."""
@@ -501,6 +556,18 @@ class PaperRepository:
             "parser_metadata": row[6] or {},
             "updated_at": row[7].isoformat() if row[7] else None,
         }
+
+    def get_paper_fulltext_state(self, arxiv_id: str) -> dict[str, Any] | None:
+        """저장된 fulltext의 source와 content_hash만 조회한다. fulltext가 없으면 None."""
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT source, content_hash FROM paper_fulltexts WHERE arxiv_id = %s",
+                (arxiv_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return {"source": row[0], "content_hash": row[1]}
 
     def get_paper_fulltext_source(self, arxiv_id: str) -> str | None:
         """저장된 fulltext의 source 값만 조회한다. fulltext가 없으면 None."""
@@ -762,6 +829,7 @@ class PaperRepository:
                 ADD COLUMN IF NOT EXISTS parser_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
                 """
             )
+            cursor.execute("ALTER TABLE paper_fulltexts ADD COLUMN IF NOT EXISTS content_hash TEXT NULL;")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS paper_chunks (

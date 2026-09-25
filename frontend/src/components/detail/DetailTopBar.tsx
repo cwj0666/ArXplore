@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
+import { toSafeHttpUrl } from "../../helpers/safeUrl";
 import type { BootstrapPayload } from "../../types/app";
 import { AccountMenu, type SettingsTab } from "../account/AccountMenu";
 
@@ -73,7 +74,10 @@ export function DetailTopBar({
         <button
           type="button"
           className="layout-ctrl-btn"
-          onClick={() => window.open(pdfUrl, "_blank", "noopener")}
+          onClick={() => {
+            const safePdfUrl = toSafeHttpUrl(pdfUrl);
+            if (safePdfUrl) window.open(safePdfUrl, "_blank", "noopener");
+          }}
         >
           <svg
             className="btn-icon"

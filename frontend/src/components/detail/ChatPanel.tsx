@@ -169,6 +169,7 @@ export function ChatPanel({ arxivId, access, onOpenSettings }: ChatPanelProps) {
     let accumulated = "";
     let citations: Citation[] = [];
     let notice = "";
+    let failed = false;
 
     try {
       let answered = false;
@@ -207,10 +208,11 @@ export function ChatPanel({ arxivId, access, onOpenSettings }: ChatPanelProps) {
         notice = "응답이 비어 있습니다.";
       }
     } catch (error) {
+      failed = true;
       if (controller.signal.aborted) {
-        if (!accumulated) {
-          notice = "답변이 중단되었습니다.";
-        }
+        notice = accumulated
+          ? "답변이 중단되었습니다. 이 답변은 이후 대화 맥락에 포함되지 않습니다."
+          : "답변이 중단되었습니다.";
       } else if (error instanceof ApiError || error instanceof StreamEventError) {
         notice = `오류: ${error.message}`;
       } else {
@@ -235,8 +237,10 @@ export function ChatPanel({ arxivId, access, onOpenSettings }: ChatPanelProps) {
         : prev.filter((msg) => msg.id !== replyId);
       return notice ? [...next, createMessage("notice", notice)] : next;
     });
-    if (answer) {
+    if (answer && !failed) {
       setHistory((prev) => [...prev, { role: "assistant", content: answer }]);
+    } else {
+      setHistory((prev) => prev.filter((turn) => turn !== userChat));
     }
     setIsSending(false);
     inputRef.current?.focus();

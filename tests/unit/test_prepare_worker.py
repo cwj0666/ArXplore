@@ -16,6 +16,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
         "embed_max_chunks": 200,
         "embed_backlog_max_chunks": 400,
         "skip_embed": False,
+        "force": False,
         "cursor_date": "",
         "oldest_date": "",
         "batch_days": 3,
@@ -169,3 +170,69 @@ def test_main_ensures_schema_once_at_startup(monkeypatch):
 
     assert prepare_worker.main() == 0
     assert calls == ["papers", "prepare_jobs"]
+
+
+def test_papers_prepared_in_a_partially_failed_job_are_embedded(monkeypatch):
+    embed = FakeEmbed()
+    prepare_result = _prepare_result(status="failed")
+    prepare_result["failures"] = [{"date": "2026-04-07", "error": "1 of 3 paper(s) failed", "prepared_arxiv_ids": ["a", "b"]}]
+    _patch(monkeypatch, prepare_result, embed)
+
+    result = prepare_worker._run_once(_args(embed_backlog_max_chunks=0))
+
+    assert [call["arxiv_id"] for call in embed.calls] == ["a", "b"]
+    assert result["embed"]["embedded_arxiv_count"] == 2
+
+
+_REAL_RUN_ONCE = prepare_worker._run_once
+
+
+def _parsed_main_args(monkeypatch, argv: list[str]) -> argparse.Namespace:
+    captured: list[argparse.Namespace] = []
+
+    class FakeRepository:
+        def ensure_schema(self):
+            pass
+
+    def fake_run_once(args):
+        captured.append(args)
+        return {"status": "no_op"}
+
+    monkeypatch.setattr(prepare_worker, "PaperRepository", FakeRepository)
+    monkeypatch.setattr(prepare_worker, "PrepareJobRepository", FakeRepository)
+    monkeypatch.setattr(prepare_worker, "_run_once", fake_run_once)
+    monkeypatch.setattr("sys.argv", ["prepare_worker", *argv])
+    prepare_worker.main()
+    return captured[0]
+
+
+def test_cli_defaults_embed_backlog_to_400_and_force_off(monkeypatch):
+    args = _parsed_main_args(monkeypatch, ["--mode", "auto"])
+    assert args.embed_backlog_max_chunks == 400
+    assert args.force is False
+
+
+def test_cli_force_is_passed_to_queue_consumer(monkeypatch):
+    args = _parsed_main_args(monkeypatch, ["--mode", "auto", "--force", "--skip-embed"])
+    received: dict[str, Any] = {}
+
+    def fake_consume(**kwargs):
+        received.update(kwargs)
+        return _prepare_result(status="no_op")
+
+    monkeypatch.setattr(prepare_worker, "run_consume_prepare_queue", fake_consume)
+    _REAL_RUN_ONCE(args)
+    assert received["force"] is True
+
+
+def test_cli_force_is_passed_to_backfill(monkeypatch):
+    args = _parsed_main_args(monkeypatch, ["--mode", "backfill", "--force"])
+    received: dict[str, Any] = {}
+
+    def fake_backfill(**kwargs):
+        received.update(kwargs)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(prepare_worker, "run_backfill_prepare_papers", fake_backfill)
+    _REAL_RUN_ONCE(args)
+    assert received["force"] is True

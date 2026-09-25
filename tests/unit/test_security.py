@@ -15,7 +15,7 @@ from django.test import RequestFactory, override_settings
 from django.urls import Resolver404, resolve
 
 from arxplore_web import urls as root_urls
-from papers import api_views, ratelimit, secret_box, services
+from papers import api_views, page_views, ratelimit, secret_box, services
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -194,6 +194,7 @@ def rate_limits_on(settings):
     settings.RATE_LIMIT_ENABLED = True
     settings.RATE_LIMIT_AUTH_PER_MINUTE = 10
     settings.RATE_LIMIT_LLM_PER_MINUTE = 30
+    settings.RATE_LIMIT_DETAIL_PER_MINUTE = 60
     settings.RATE_LIMIT_IP_HEADER = "X-Real-IP"
 
 
@@ -304,6 +305,29 @@ class TestRateLimitedViews:
         assert response.status_code == 429
         assert hit.call_args.args[0] == "llm"
 
+    def _detail(self, ip: str):
+        request = RequestFactory().get("/papers/2401.00001/detail.json", HTTP_X_REAL_IP=ip)
+        request.user = AnonymousUser()
+        with patch.object(page_views, "build_paper_detail_payload", return_value={"paper": {}}) as build:
+            return page_views.paper_detail_data(request, "2401.00001"), build
+
+    def test_detail_json_is_limited_per_ip(self):
+        statuses = [self._detail("198.51.100.1")[0].status_code for _ in range(61)]
+
+        assert statuses[:60] == [200] * 60
+        response, build = self._detail("198.51.100.1")
+        assert response.status_code == 429
+        build.assert_not_called()
+        assert self._detail("198.51.100.2")[0].status_code == 200
+
+    def test_detail_json_rejects_non_get_before_counting(self):
+        for _ in range(70):
+            request = RequestFactory().post("/papers/2401.00001/detail.json", HTTP_X_REAL_IP="198.51.100.1")
+            request.user = AnonymousUser()
+            assert page_views.paper_detail_data(request, "2401.00001").status_code == 405
+
+        assert self._detail("198.51.100.1")[0].status_code == 200
+
     def test_disabled_rate_limit_never_blocks(self):
         with override_settings(RATE_LIMIT_ENABLED=False):
             statuses = {self._login("198.51.100.1").status_code for _ in range(15)}
@@ -383,7 +407,8 @@ def _load_settings_in_subprocess(env_overrides: dict[str, str]) -> dict:
         "print(json.dumps({k: getattr(s, k, None) for k in ["
         "'DEBUG','SESSION_COOKIE_SECURE','CSRF_COOKIE_SECURE','SECURE_PROXY_SSL_HEADER','SESSION_COOKIE_HTTPONLY',"
         "'SESSION_COOKIE_SAMESITE','X_FRAME_OPTIONS','SECURE_CONTENT_TYPE_NOSNIFF','SECURE_REFERRER_POLICY',"
-        "'ADMIN_ENABLED','ADMIN_PATH','DEMO_MODE','RATE_LIMIT_AUTH_PER_MINUTE','RATE_LIMIT_LLM_PER_MINUTE']} | "
+        "'ADMIN_ENABLED','ADMIN_PATH','DEMO_MODE','RATE_LIMIT_AUTH_PER_MINUTE','RATE_LIMIT_LLM_PER_MINUTE',"
+        "'RATE_LIMIT_DETAIL_PER_MINUTE']} | "
         "{'CACHE_BACKEND': type(caches['default']).__name__}))"
     )
     result = subprocess.run(
@@ -415,6 +440,7 @@ class TestProductionSettings:
         assert values["DEMO_MODE"] is True
         assert values["RATE_LIMIT_AUTH_PER_MINUTE"] == 10
         assert values["RATE_LIMIT_LLM_PER_MINUTE"] == 30
+        assert values["RATE_LIMIT_DETAIL_PER_MINUTE"] == 60
         assert values["CACHE_BACKEND"] == "LocMemCache"
 
     @pytest.mark.parametrize(("raw", "expected"), [("true", True), ("True", True), ("1", False), ("yes", False)])

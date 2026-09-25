@@ -7,7 +7,7 @@ export type SseEvent =
   | { type: "error"; message: string }
   | { type: "done" };
 
-/** 스트림 도중 서버가 `{"error": ...}` 이벤트를 보낸 경우. */
+/** 스트림 도중 서버가 `{"error": ...}` 이벤트를 보냈거나 `[DONE]` 없이 스트림이 끝난 경우. */
 export class StreamEventError extends Error {
   constructor(message: string) {
     super(message);
@@ -16,6 +16,7 @@ export class StreamEventError extends Error {
 }
 
 const DEFAULT_STREAM_ERROR = "답변을 생성하는 중 오류가 발생했습니다.";
+const TRUNCATED_STREAM_ERROR = "응답이 완료되기 전에 연결이 끊겼습니다.";
 
 function normalizeCitation(value: unknown): Citation | null {
   if (!value || typeof value !== "object") {
@@ -116,7 +117,7 @@ export interface StreamChatParams {
 
 /**
  * SSE 채팅 스트림을 끝까지 읽는다.
- * 스트림 시작 전 non-2xx는 ApiError, 스트림 중 error 이벤트는 StreamEventError로 던진다.
+ * 스트림 시작 전 non-2xx는 ApiError, 스트림 중 error 이벤트나 `[DONE]` 없는 종료는 StreamEventError로 던진다.
  */
 export async function streamChat({ endpoint, body, signal, onChunk, onCitations }: StreamChatParams): Promise<void> {
   const csrfToken = getCsrfTokenFromCookie();
@@ -175,8 +176,11 @@ export async function streamChat({ endpoint, body, signal, onChunk, onCitations 
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
-      await handle(parser.push(decoder.decode()).concat(parser.flush()));
-      return;
+      if (await handle(parser.push(decoder.decode()).concat(parser.flush()))) {
+        return;
+      }
+      signal.throwIfAborted();
+      throw new StreamEventError(TRUNCATED_STREAM_ERROR);
     }
     if (await handle(parser.push(decoder.decode(value, { stream: true })))) {
       return;

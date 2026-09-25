@@ -64,6 +64,7 @@ class AppSettings(BaseSettings):
 
     retrieval_mode: str = Field(default="hybrid", alias="RETRIEVAL_MODE")
     agent_recursion_limit: int = Field(default=12, ge=4, alias="AGENT_RECURSION_LIMIT")
+    agent_stream_buffer_chars: int = Field(default=120, ge=0, alias="AGENT_STREAM_BUFFER_CHARS")
     vector_min_similarity: float = Field(default=0.0, ge=0.0, le=1.0, alias="VECTOR_MIN_SIMILARITY")
     postgres_pool_max: int = Field(default=8, ge=1, alias="POSTGRES_POOL_MAX")
     postgres_pool_timeout: float = Field(default=30.0, gt=0, alias="POSTGRES_POOL_TIMEOUT")

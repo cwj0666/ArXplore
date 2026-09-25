@@ -78,7 +78,6 @@ def run_enrich_papers_metadata(
     normalized_limit = 30 if max_papers in (None, "") else max(1, int(str(max_papers)))
     if paper_repository is None:
         paper_repository = PaperRepository()
-        paper_repository.ensure_schema()
     search_client = search_client or PaperSearchClient()
 
     candidates = paper_repository.list_papers_missing_arxiv_metadata(limit=normalized_limit)

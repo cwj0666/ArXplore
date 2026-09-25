@@ -31,23 +31,35 @@ class FakeParser:
 
 
 class FakeRepository:
-    def __init__(self, existing_source: str | None = None) -> None:
-        self.existing_source = existing_source
+    def __init__(
+        self,
+        existing_source: str | None = None,
+        *,
+        existing_hash: str | None = None,
+        chunks_replaced: bool = True,
+    ) -> None:
+        self.existing = (
+            {"source": existing_source, "content_hash": existing_hash} if existing_source is not None else None
+        )
+        self.chunks_replaced = chunks_replaced
         self.calls: list[str] = []
+        self.saved_fulltexts: list[dict[str, Any]] = []
 
     def save_paper(self, prepared):
         self.calls.append("save_paper")
         return prepared["arxiv_id"]
 
-    def get_paper_fulltext_source(self, arxiv_id: str):
-        self.calls.append("get_paper_fulltext_source")
-        return self.existing_source
+    def get_paper_fulltext_state(self, arxiv_id: str):
+        self.calls.append("get_paper_fulltext_state")
+        return self.existing
 
     def save_paper_fulltext(self, arxiv_id, **kwargs):
         self.calls.append("save_paper_fulltext")
+        self.saved_fulltexts.append(kwargs)
 
     def save_paper_chunks(self, arxiv_id, chunks):
         self.calls.append("save_paper_chunks")
+        return self.chunks_replaced
 
 
 def _candidate(arxiv_id: str = "2604.00001") -> dict[str, Any]:
@@ -62,17 +74,27 @@ def _candidate(arxiv_id: str = "2604.00001") -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("existing_source", ["layout_pdf", "pdf"])
-def test_fallback_abstract_does_not_overwrite_existing_pdf_fulltext(existing_source):
-    repository = FakeRepository(existing_source=existing_source)
+PARSED_HASH = prepare_papers.compute_fulltext_content_hash("parsed text", [{"title": "Introduction"}])
+
+
+@pytest.mark.parametrize(
+    "existing_source,new_source",
+    [
+        ("layout_pdf", "fallback_abstract"),
+        ("pdf", "fallback_abstract"),
+        ("layout_pdf", "pdf"),
+    ],
+)
+def test_lower_ranked_source_does_not_overwrite_existing_fulltext(existing_source, new_source):
+    repository = FakeRepository(existing_source=existing_source, existing_hash="old")
 
     result = prepare_papers.prepare_single_paper(
         _candidate(),
-        parser=FakeParser(source="fallback_abstract"),
+        parser=FakeParser(source=new_source),
         paper_repository=repository,
     )
 
-    assert result["skipped_fallback_overwrite"] is True
+    assert result["skipped_lower_rank_overwrite"] is True
     assert result["existing_fulltext_source"] == existing_source
     assert result["saved_fulltext"] == 0
     assert result["saved_chunks"] == 0
@@ -81,60 +103,147 @@ def test_fallback_abstract_does_not_overwrite_existing_pdf_fulltext(existing_sou
     assert "save_paper" in repository.calls
 
 
-@pytest.mark.parametrize("existing_source", [None, "fallback_abstract"])
-def test_fallback_abstract_is_saved_when_no_pdf_fulltext_exists(existing_source):
-    repository = FakeRepository(existing_source=existing_source)
-
-    result = prepare_papers.prepare_single_paper(
-        _candidate(),
-        parser=FakeParser(source="fallback_abstract"),
-        paper_repository=repository,
-    )
-
-    assert "skipped_fallback_overwrite" not in result
-    assert result["saved_fulltext"] == 1
-    assert result["saved_chunks"] == 1
-    assert repository.calls.count("save_paper_fulltext") == 1
-    assert repository.calls.count("save_paper_chunks") == 1
-
-
-def test_pdf_result_overwrites_without_source_lookup():
-    repository = FakeRepository(existing_source="layout_pdf")
+def test_force_overwrites_with_lower_ranked_source():
+    repository = FakeRepository(existing_source="layout_pdf", existing_hash="old")
 
     result = prepare_papers.prepare_single_paper(
         _candidate(),
         parser=FakeParser(source="pdf"),
         paper_repository=repository,
+        force=True,
     )
 
-    assert "get_paper_fulltext_source" not in repository.calls
+    assert "skipped_lower_rank_overwrite" not in result
     assert result["saved_fulltext"] == 1
+    assert result["saved_chunks"] == 1
+    assert repository.saved_fulltexts[0]["source"] == "pdf"
+
+
+@pytest.mark.parametrize(
+    "existing_source,new_source",
+    [
+        (None, "fallback_abstract"),
+        ("fallback_abstract", "fallback_abstract"),
+        ("fallback_abstract", "pdf"),
+        ("pdf", "layout_pdf"),
+        ("layout_pdf", "layout_pdf"),
+        ("legacy_source", "fallback_abstract"),
+    ],
+)
+def test_equal_or_higher_ranked_changed_content_is_saved(existing_source, new_source):
+    repository = FakeRepository(existing_source=existing_source, existing_hash="different")
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source=new_source),
+        paper_repository=repository,
+    )
+
+    assert "skipped_lower_rank_overwrite" not in result
+    assert "skipped_unchanged" not in result
+    assert result["saved_fulltext"] == 1
+    assert result["saved_chunks"] == 1
+    assert repository.saved_fulltexts[0]["content_hash"] == PARSED_HASH
+    assert result["content_hash"] == PARSED_HASH
+
+
+def test_unchanged_content_skips_fulltext_and_chunk_replacement():
+    repository = FakeRepository(existing_source="layout_pdf", existing_hash=PARSED_HASH)
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source="layout_pdf"),
+        paper_repository=repository,
+    )
+
+    assert result["skipped_unchanged"] is True
+    assert result["saved_fulltext"] == 0
+    assert result["saved_chunks"] == 0
+    assert repository.calls == ["save_paper", "get_paper_fulltext_state"]
+
+
+def test_same_hash_from_different_source_is_not_treated_as_unchanged():
+    repository = FakeRepository(existing_source="pdf", existing_hash=PARSED_HASH)
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source="layout_pdf"),
+        paper_repository=repository,
+    )
+
+    assert "skipped_unchanged" not in result
+    assert result["saved_fulltext"] == 1
+
+
+def test_force_rewrites_unchanged_content():
+    repository = FakeRepository(existing_source="layout_pdf", existing_hash=PARSED_HASH)
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source="layout_pdf"),
+        paper_repository=repository,
+        force=True,
+    )
+
+    assert "skipped_unchanged" not in result
+    assert repository.calls.count("save_paper_fulltext") == 1
     assert repository.calls.count("save_paper_chunks") == 1
 
 
-def test_aggregate_counts_skipped_fallback_overwrites():
+def test_identical_chunks_are_reported_as_kept():
+    repository = FakeRepository(existing_source="layout_pdf", existing_hash=None, chunks_replaced=False)
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source="layout_pdf"),
+        paper_repository=repository,
+    )
+
+    assert result["saved_fulltext"] == 1
+    assert result["saved_chunks"] == 0
+    assert result["chunks_unchanged"] is True
+
+
+def test_content_hash_normalizes_whitespace_and_tracks_section_titles():
+    base = prepare_papers.compute_fulltext_content_hash("a  b\nc", [{"title": "Intro"}])
+    assert base == prepare_papers.compute_fulltext_content_hash(" a b c ", [{"title": " Intro "}])
+    assert base != prepare_papers.compute_fulltext_content_hash("a b c", [{"title": "Method"}])
+    assert base != prepare_papers.compute_fulltext_content_hash("a b d", [{"title": "Intro"}])
+
+
+def test_fulltext_source_rank_order():
+    ranks = [prepare_papers.fulltext_source_rank(source) for source in ("layout_pdf", "pdf", "fallback_abstract", None)]
+    assert ranks == sorted(ranks, reverse=True)
+    assert len(set(ranks)) == 4
+
+
+def test_aggregate_counts_skip_reasons():
     results = [
-        {"arxiv_id": "a", "saved_paper": 1, "skipped_fallback_overwrite": True, "fallback_used": True},
-        {"arxiv_id": "b", "saved_paper": 1},
+        {"arxiv_id": "a", "saved_paper": 1, "skipped_lower_rank_overwrite": True, "fallback_used": True},
+        {"arxiv_id": "b", "saved_paper": 1, "skipped_unchanged": True},
+        {"arxiv_id": "c", "saved_paper": 1, "saved_fulltext": 1, "chunks_unchanged": True},
     ]
     aggregated = prepare_papers.aggregate_prepare_results(
         results,
         normalized_date="2026-04-07",
-        raw_count=2,
-        deduplicated_ids=["a", "b"],
-        selected_ids=["a", "b"],
+        raw_count=3,
+        deduplicated_ids=["a", "b", "c"],
+        selected_ids=["a", "b", "c"],
         enriched_count=0,
         skipped_by_category=0,
         runtime="test",
         user=None,
     )
-    assert aggregated["skipped_fallback_overwrites"] == 1
+    assert aggregated["skipped_lower_rank_overwrites"] == 1
+    assert aggregated["skipped_unchanged"] == 1
+    assert aggregated["unchanged_chunk_sets"] == 1
     assert aggregated["status"] == "success"
-    assert aggregated["success_count"] == 2
+    assert aggregated["success_count"] == 3
     assert aggregated["failure_count"] == 0
 
 
-def _patch_prepare_run(monkeypatch, candidates, failing_ids: set[str]):
+def _patch_prepare_run(monkeypatch, candidates, failing_ids: set[str]) -> list[bool]:
+    forced: list[bool] = []
     monkeypatch.setattr(
         prepare_papers,
         "load_prepare_candidates",
@@ -151,12 +260,14 @@ def _patch_prepare_run(monkeypatch, candidates, failing_ids: set[str]):
     monkeypatch.setattr(prepare_papers, "PaperRepository", lambda: FakeRepository())
     monkeypatch.setattr(prepare_papers, "FulltextParser", lambda: FakeParser(source="layout_pdf"))
 
-    def fake_prepare_single_paper(candidate, *, parser, paper_repository):
+    def fake_prepare_single_paper(candidate, *, parser, paper_repository, force=False):
+        forced.append(force)
         if candidate["arxiv_id"] in failing_ids:
             raise NameError("name 'FulltextParser' is not defined")
         return {"arxiv_id": candidate["arxiv_id"], "saved_paper": 1, "saved_fulltext": 1, "saved_chunks": 3}
 
     monkeypatch.setattr(prepare_papers, "prepare_single_paper", fake_prepare_single_paper)
+    return forced
 
 
 def test_run_prepare_papers_isolates_per_paper_failures(monkeypatch):
@@ -196,8 +307,16 @@ def test_run_prepare_papers_empty_date_is_success(monkeypatch):
 
 
 class FakeJobRepository:
-    def __init__(self, dates: list[str], *, claim_valid: bool = True, heartbeat_alive: bool = True) -> None:
+    def __init__(
+        self,
+        dates: list[str],
+        *,
+        claim_valid: bool = True,
+        heartbeat_alive: bool = True,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         self.dates = list(dates)
+        self.payload = payload or {}
         self.claim_valid = claim_valid
         self.heartbeat_alive = heartbeat_alive
         self.generation = 0
@@ -214,6 +333,7 @@ class FakeJobRepository:
             "worker_id": worker_id,
             "claim_generation": self.generation,
             "date": self.dates.pop(0),
+            "payload": self.payload,
         }
 
     def heartbeat_prepare_job(self, *, job_id, worker_id, claim_generation):
@@ -242,23 +362,65 @@ def _prepare_result(status: str, success_count: int, failure_count: int) -> dict
     }
 
 
-def test_consume_queue_completes_job_on_partial_failure(monkeypatch):
+def test_consume_queue_retries_job_on_partial_failure(monkeypatch):
     job_repository = FakeJobRepository(["2026-04-07"])
     monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
     monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: _prepare_result("partial_failed", 2, 1))
 
     result = prepare_papers.run_consume_prepare_queue(runtime="test")
 
+    assert result["status"] == "failed"
+    assert job_repository.completed == []
+    assert len(job_repository.failed) == 1
+    assert job_repository.failed[0]["job_id"] == 101
+    assert job_repository.failed[0]["claim_generation"] == 1
+    error = job_repository.failed[0]["error"]
+    assert "1 of 3 paper(s) failed" in error
+    assert "success=2, failure=1" in error
+    assert "NameError: boom" in error
+    assert result["successes"] == []
+    assert result["failures"] == [{"date": "2026-04-07", "error": error, "prepared_arxiv_ids": ["id0", "id1"]}]
+
+
+def test_consume_queue_completes_job_only_without_paper_failures(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07"])
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: _prepare_result("success", 2, 0))
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test")
+
     assert result["status"] == "success"
     assert job_repository.failed == []
-    assert len(job_repository.completed) == 1
-    assert job_repository.completed[0]["job_id"] == 101
-    assert job_repository.completed[0]["claim_generation"] == 1
-    job_result = job_repository.completed[0]["result"]
-    assert job_result["success_count"] == 2
-    assert job_result["failure_count"] == 1
-    assert job_result["failures"][0]["arxiv_id"] == "bad0"
-    assert result["successes"][0]["paper_failure_count"] == 1
+    assert job_repository.completed[0]["result"]["success_count"] == 2
+    assert job_repository.completed[0]["result"]["failure_count"] == 0
+    assert result["successes"][0]["paper_failure_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "payload,argument,expected",
+    [
+        ({}, False, False),
+        ({"force": True}, False, True),
+        ({"force": "yes"}, False, False),
+        ({}, True, True),
+    ],
+)
+def test_consume_queue_plumbs_force_from_payload_or_argument(monkeypatch, payload, argument, expected):
+    job_repository = FakeJobRepository(["2026-04-07"], payload=payload)
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    forced = _patch_prepare_run(monkeypatch, [_candidate("a")], failing_ids=set())
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test", force=argument)
+
+    assert result["status"] == "success"
+    assert forced == [expected]
+
+
+def test_run_prepare_papers_defaults_to_not_forced(monkeypatch):
+    forced = _patch_prepare_run(monkeypatch, [_candidate("a")], failing_ids=set())
+    prepare_papers.run_prepare_papers(runtime="test", target_date="2026-04-07")
+    prepare_papers.run_prepare_papers(runtime="test", target_date="2026-04-07", force=True)
+    assert forced == [False, True]
 
 
 def test_consume_queue_fails_job_when_no_paper_succeeded(monkeypatch):

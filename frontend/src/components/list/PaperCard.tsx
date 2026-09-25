@@ -1,6 +1,7 @@
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { toSafeHttpUrl } from "../../helpers/safeUrl";
 import type { PaperListItem } from "../../pages/list/listTypes";
 
 function truncateText(text: string | undefined, max: number): string {
@@ -32,7 +33,7 @@ export function PaperCard({
 }: PaperCardProps) {
   const navigate = useNavigate();
   const detailLink = `/papers/${encodeURIComponent(paper.arxiv_id)}/`;
-  const pdfLink = paper.pdf_url || `https://arxiv.org/abs/${paper.arxiv_id}`;
+  const pdfLink = toSafeHttpUrl(paper.pdf_url, `https://arxiv.org/abs/${paper.arxiv_id}`);
 
   const handleTitleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.stopPropagation();

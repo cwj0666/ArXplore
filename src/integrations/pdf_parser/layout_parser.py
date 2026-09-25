@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import Any
 
@@ -8,6 +9,8 @@ import requests
 from src.integrations.layout_parser_client import LayoutParserClient
 
 from .types import FulltextParseResult
+
+logger = logging.getLogger(__name__)
 
 
 class LayoutIntegrationMixin:
@@ -19,7 +22,8 @@ class LayoutIntegrationMixin:
             return None
         try:
             segments = client.analyze_pdf_bytes(content)
-        except (requests.RequestException, ValueError):
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("layout parser unavailable: %s", exc)
             return None
         layout_text = self._build_layout_text(segments)
         if not layout_text:

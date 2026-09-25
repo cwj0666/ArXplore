@@ -27,7 +27,7 @@ env_value() {
   printf '%s' "${value:-${default}}"
 }
 
-for required in TAILSCALE_SERVER_IP AIRFLOW_FERNET_KEY AIRFLOW_ADMIN_USER; do
+for required in TAILSCALE_SERVER_IP AIRFLOW_FERNET_KEY AIRFLOW_ADMIN_USER AIRFLOW_API_SECRET_KEY AIRFLOW_API_AUTH_JWT_SECRET; do
   if [[ -z "$(env_value "${required}")" ]]; then
     echo "${required}가 설정되지 않았습니다. .env에 값을 추가하세요."
     exit 1

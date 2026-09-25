@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Callable
 from datetime import date as date_cls
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ALLOWED_CATEGORIES = {"cs.AI", "cs.CL", "cs.CV", "cs.LG", "cs.RO", "stat.ML"}
 FALLBACK_ABSTRACT_SOURCE = "fallback_abstract"
-PDF_FULLTEXT_SOURCES = frozenset({"layout_pdf", "pdf"})
+FULLTEXT_SOURCE_RANK = {"layout_pdf": 3, "pdf": 2, FALLBACK_ABSTRACT_SOURCE: 1}
 MAX_RECORDED_FAILURES = 50
 MAX_FAILURE_ERROR_CHARS = 500
 
@@ -291,13 +293,31 @@ def load_prepare_candidates(
     }
 
 
+def fulltext_source_rank(source: str | None) -> int:
+    return FULLTEXT_SOURCE_RANK.get(str(source or ""), 0)
+
+
+def compute_fulltext_content_hash(text: str, sections: list[dict[str, Any]]) -> str:
+    """공백을 정규화한 본문과 섹션 제목 순서열의 sha256."""
+    payload = {
+        "text": " ".join(str(text or "").split()),
+        "section_titles": [" ".join(str(section.get("title") or "").split()) for section in sections or []],
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
 def prepare_single_paper(
     candidate: dict[str, Any],
     *,
     parser: FulltextParser | None = None,
     paper_repository: PaperRepository | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
-    """후보 논문 1건을 저장, 파싱, 청크 생성까지 수행한다."""
+    """후보 논문 1건을 저장, 파싱, 청크 생성까지 수행한다.
+
+    force가 아니면 기존 본문보다 낮은 순위(layout_pdf > pdf > fallback_abstract)의 결과로 덮어쓰지 않고,
+    source와 content_hash가 기존과 같으면 본문·청크 교체를 건너뛴다.
+    """
     parser = parser or FulltextParser()
     paper_repository = paper_repository or PaperRepository()
 
@@ -324,16 +344,22 @@ def prepare_single_paper(
         **parser.summarize_chunks(chunks),
     }
 
-    # 일시적인 PDF 실패로 생긴 초록 폴백이 기존 PDF 본문을 덮어쓰면 청크 DELETE가 임베딩까지 CASCADE 삭제한다.
-    existing_source: str | None = None
-    skipped_fallback_overwrite = False
-    if fulltext.source == FALLBACK_ABSTRACT_SOURCE:
-        existing_source = paper_repository.get_paper_fulltext_source(arxiv_id)
-        skipped_fallback_overwrite = existing_source in PDF_FULLTEXT_SOURCES
+    # 청크 DELETE는 임베딩까지 CASCADE 삭제하므로 일시적인 파서 장애로 인한 하향 교체와 동일 내용 재적재를 막는다.
+    content_hash = compute_fulltext_content_hash(fulltext.text, fulltext.sections)
+    existing = paper_repository.get_paper_fulltext_state(arxiv_id)
+    existing_source = existing.get("source") if existing else None
+    skipped_lower_rank_overwrite = False
+    skipped_unchanged = False
+    if existing and not force:
+        if fulltext_source_rank(fulltext.source) < fulltext_source_rank(existing_source):
+            skipped_lower_rank_overwrite = True
+        elif existing_source == fulltext.source and existing.get("content_hash") == content_hash:
+            skipped_unchanged = True
 
     saved_fulltext = 0
     saved_chunks = 0
-    if not skipped_fallback_overwrite:
+    chunks_unchanged = False
+    if not (skipped_lower_rank_overwrite or skipped_unchanged):
         if fulltext.text:
             paper_repository.save_paper_fulltext(
                 arxiv_id,
@@ -343,11 +369,14 @@ def prepare_single_paper(
                 quality_metrics=fulltext_quality_metrics,
                 artifacts=fulltext.artifacts,
                 parser_metadata=fulltext.parser_metadata,
+                content_hash=content_hash,
             )
             saved_fulltext = 1
         if chunks:
-            paper_repository.save_paper_chunks(arxiv_id, chunks)
-            saved_chunks = len(chunks)
+            if paper_repository.save_paper_chunks(arxiv_id, chunks):
+                saved_chunks = len(chunks)
+            else:
+                chunks_unchanged = True
 
     result = {
         "arxiv_id": arxiv_id,
@@ -361,13 +390,18 @@ def prepare_single_paper(
         "saved_paper": 1,
         "saved_fulltext": saved_fulltext,
         "saved_chunks": saved_chunks,
+        "content_hash": content_hash,
         "artifacts": fulltext.artifacts,
         "parser_metadata": fulltext.parser_metadata,
         "quality_metrics": fulltext_quality_metrics,
     }
-    if skipped_fallback_overwrite:
-        result["skipped_fallback_overwrite"] = True
+    if skipped_lower_rank_overwrite:
+        result["skipped_lower_rank_overwrite"] = True
         result["existing_fulltext_source"] = existing_source
+    if skipped_unchanged:
+        result["skipped_unchanged"] = True
+    if chunks_unchanged:
+        result["chunks_unchanged"] = True
     return result
 
 
@@ -382,6 +416,7 @@ def prepare_candidates(
     parser: FulltextParser,
     paper_repository: PaperRepository,
     heartbeat: Callable[[], None] | None = None,
+    force: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """후보를 1건씩 처리하고, 한 논문의 예외가 나머지 처리를 막지 않도록 실패를 수집한다.
 
@@ -398,6 +433,7 @@ def prepare_candidates(
                     candidate,
                     parser=parser,
                     paper_repository=paper_repository,
+                    force=force,
                 )
             )
         except Exception as exc:
@@ -433,7 +469,9 @@ def aggregate_prepare_results(
         status = "partial_failed"
     else:
         status = "success"
-    skipped_fallback_overwrites = sum(1 for result in results if result.get("skipped_fallback_overwrite"))
+    skipped_lower_rank_overwrites = sum(1 for result in results if result.get("skipped_lower_rank_overwrite"))
+    skipped_unchanged = sum(1 for result in results if result.get("skipped_unchanged"))
+    unchanged_chunk_sets = sum(1 for result in results if result.get("chunks_unchanged"))
     fallback_fulltexts = sum(1 for result in results if result.get("fallback_used"))
     saved_papers = _sum_result_values(results, "saved_paper")
     saved_fulltexts = _sum_result_values(results, "saved_fulltext")
@@ -454,7 +492,9 @@ def aggregate_prepare_results(
         "prepared_arxiv_ids": prepared_arxiv_ids,
         "skipped_by_category": skipped_by_category,
         "fallback_fulltexts": fallback_fulltexts,
-        "skipped_fallback_overwrites": skipped_fallback_overwrites,
+        "skipped_lower_rank_overwrites": skipped_lower_rank_overwrites,
+        "skipped_unchanged": skipped_unchanged,
+        "unchanged_chunk_sets": unchanged_chunk_sets,
         "success_count": success_count,
         "failure_count": failure_count,
         "failures": failures[:MAX_RECORDED_FAILURES],
@@ -486,8 +526,9 @@ def run_prepare_papers(
     allowed_categories: set[str] | None = None,
     max_papers: int | str | None = None,
     heartbeat: Callable[[], None] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
-    """원본 payload를 읽어 arXiv 보강/본문 파싱/청크 생성/적재를 수행한다."""
+    """원본 payload를 읽어 arXiv 보강/본문 파싱/청크 생성/적재를 수행한다. force는 prepare_single_paper 참고."""
     prepare_context = load_prepare_candidates(
         target_date=target_date,
         max_papers=max_papers,
@@ -502,6 +543,7 @@ def run_prepare_papers(
         parser=parser,
         paper_repository=paper_repository,
         heartbeat=heartbeat,
+        force=force,
     )
 
     return aggregate_prepare_results(
@@ -561,8 +603,15 @@ def _resolve_prepare_cursor_date(
 def _summarize_paper_failures(result: dict[str, Any]) -> str:
     failures = result.get("failures") or []
     failure_count = int(result.get("failure_count", len(failures)) or 0)
+    success_count = int(result.get("success_count", 0) or 0)
     first_error = str(failures[0].get("error") or "") if failures else ""
-    return f"all {failure_count} paper(s) failed; first error: {first_error}"[:MAX_FAILURE_ERROR_CHARS]
+    if success_count:
+        headline = f"{failure_count} of {failure_count + success_count} paper(s) failed"
+    else:
+        headline = f"all {failure_count} paper(s) failed"
+    return (
+        f"{headline} (success={success_count}, failure={failure_count}); first error: {first_error}"
+    )[:MAX_FAILURE_ERROR_CHARS]
 
 
 def run_backfill_prepare_papers(
@@ -575,6 +624,7 @@ def run_backfill_prepare_papers(
     state_name: str = "default",
     max_papers: int | str | None = None,
     allowed_categories: set[str] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """로컬 GPU 환경에서 prepare_papers를 날짜 배치 단위로 순차 실행한다."""
     today = date_cls.today()
@@ -661,6 +711,7 @@ def run_backfill_prepare_papers(
                 target_date=target_str,
                 max_papers=max_papers,
                 allowed_categories=allowed_categories,
+                force=force,
             )
         except Exception as exc:
             failures.append({"date": target_str, "error": str(exc)})
@@ -787,11 +838,13 @@ def run_consume_prepare_queue(
     max_jobs_per_run: int = 1,
     max_papers: int | str | None = None,
     allowed_categories: set[str] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """prepare 큐를 소비해 날짜별 파싱/청킹 적재를 수행한다.
 
     complete/fail은 claim 토큰(job_id, worker_id, claim_generation)으로 fencing되며, claim을 잃은 작업은
-    예외 없이 lost_claims에 기록된다.
+    예외 없이 lost_claims에 기록된다. 논문이 1건이라도 실패하면 fail_prepare_job으로 backoff 재시도에 넘기고,
+    재시도에서는 내용이 바뀌지 않은 성공분이 건너뛰어진다. force는 인자 또는 job payload의 "force"로 켠다.
     """
     prepare_job_repository = PrepareJobRepository()
     normalized_max_jobs = max(1, int(max_jobs_per_run or 1))
@@ -815,6 +868,8 @@ def run_consume_prepare_queue(
             prepare_job_repository.fail_prepare_job(**claim_token, error="missing target_date")
             continue
         claimed_dates.append(target_date)
+        job_payload = job.get("payload")
+        job_force = force or (isinstance(job_payload, dict) and job_payload.get("force") is True)
         try:
             result = run_prepare_papers(
                 runtime=runtime,
@@ -823,24 +878,35 @@ def run_consume_prepare_queue(
                 max_papers=max_papers,
                 allowed_categories=allowed_categories,
                 heartbeat=_build_job_heartbeat(prepare_job_repository, claim_token),
+                force=job_force,
             )
             job_result = {
                 "saved_papers": int(result.get("saved_papers", 0) or 0),
                 "saved_fulltexts": int(result.get("saved_fulltexts", 0) or 0),
                 "saved_chunks": int(result.get("saved_chunks", 0) or 0),
                 "fallback_fulltexts": int(result.get("fallback_fulltexts", 0) or 0),
-                "skipped_fallback_overwrites": int(result.get("skipped_fallback_overwrites", 0) or 0),
+                "skipped_lower_rank_overwrites": int(result.get("skipped_lower_rank_overwrites", 0) or 0),
+                "skipped_unchanged": int(result.get("skipped_unchanged", 0) or 0),
+                "unchanged_chunk_sets": int(result.get("unchanged_chunk_sets", 0) or 0),
                 "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
                 "prepared_arxiv_count": len([str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()]),
                 "success_count": int(result.get("success_count", 0) or 0),
                 "failure_count": int(result.get("failure_count", 0) or 0),
                 "failures": list(result.get("failures") or []),
             }
-            if result.get("status") == "failed":
+            if job_result["failure_count"] > 0 or result.get("status") == "failed":
                 error_summary = _summarize_paper_failures(result)
                 if not prepare_job_repository.fail_prepare_job(**claim_token, error=error_summary):
                     _record_lost_claim(lost_claims, target_date=target_date, claim_token=claim_token, stage="fail")
-                failures.append({"date": target_date, "error": error_summary})
+                failures.append(
+                    {
+                        "date": target_date,
+                        "error": error_summary,
+                        "prepared_arxiv_ids": [
+                            str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()
+                        ],
+                    }
+                )
                 continue
             if not prepare_job_repository.complete_prepare_job(**claim_token, result=job_result):
                 _record_lost_claim(lost_claims, target_date=target_date, claim_token=claim_token, stage="complete")

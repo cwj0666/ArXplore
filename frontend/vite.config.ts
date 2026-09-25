@@ -1,14 +1,22 @@
 /// <reference types="node" />
-import { defineConfig } from "vite";
+import { defineConfig, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react-swc";
 
 const djangoTarget = "http://arxplore-django:8001";
 const buildBasePath = process.env.VITE_BASE_PATH || "/static/frontend/";
 
-const proxy = (target: string) => ({
+const proxy = (target: string): ProxyOptions => ({
   target,
   changeOrigin: false,
   headers: { host: "localhost" },
+  // Django trusts these for rate limiting, so never forward client-supplied values.
+  configure: (proxyServer) => {
+    proxyServer.on("proxyReq", (proxyReq, req) => {
+      const clientIp = req.socket.remoteAddress ?? "127.0.0.1";
+      proxyReq.setHeader("X-Real-IP", clientIp);
+      proxyReq.setHeader("X-Forwarded-For", clientIp);
+    });
+  },
 });
 
 export default defineConfig(({ command }) => ({

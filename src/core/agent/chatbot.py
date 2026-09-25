@@ -66,24 +66,25 @@ def _message_text(message: BaseMessage) -> str:
     return ""
 
 
-def _is_answer_message(message: Any, metadata: dict[str, Any]) -> bool:
-    if not isinstance(message, AIMessage):
-        return False
-    if metadata.get("langgraph_node") not in (None, AGENT_NODE):
-        return False
-    return not (message.tool_calls or getattr(message, "tool_call_chunks", None))
+def _is_agent_message(message: Any, metadata: dict[str, Any]) -> bool:
+    return isinstance(message, AIMessage) and metadata.get("langgraph_node") in (None, AGENT_NODE)
+
+
+def _has_tool_calls(message: AIMessage) -> bool:
+    return bool(message.tool_calls or getattr(message, "tool_call_chunks", None))
+
+
+def _agent_update_messages(update: Any) -> list[AIMessage]:
+    if not isinstance(update, dict):
+        return []
+    node_output = update.get(AGENT_NODE)
+    if not isinstance(node_output, dict):
+        return []
+    return [message for message in node_output.get("messages") or [] if isinstance(message, AIMessage)]
 
 
 def _hit_step_limit(update: Any) -> bool:
-    if not isinstance(update, dict):
-        return False
-    node_output = update.get(AGENT_NODE)
-    if not isinstance(node_output, dict):
-        return False
-    return any(
-        isinstance(message, AIMessage) and _message_text(message) == _LANGGRAPH_STEP_LIMIT_TEXT
-        for message in node_output.get("messages") or []
-    )
+    return any(_message_text(message) == _LANGGRAPH_STEP_LIMIT_TEXT for message in _agent_update_messages(update))
 
 
 def stream_agent_search(
@@ -95,13 +96,22 @@ def stream_agent_search(
     recursion_limit: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     """`{"chunk": str}`를 순서대로 내보내고 마지막에 `{"citations": [...]}`를 한 번 내보낸다."""
-    limit = recursion_limit or get_settings().agent_recursion_limit
+    settings = get_settings()
+    limit = recursion_limit or settings.agent_recursion_limit
+    buffer_chars = max(0, int(settings.agent_stream_buffer_chars))
     config = {
         **build_agent_chat_trace_config(runtime=runtime, user=user, extra_metadata={"recursion_limit": limit}),
         "recursion_limit": limit,
     }
     parts: list[str] = []
     step_limit_hit = False
+    # 모델은 같은 메시지 안에서 텍스트를 먼저 내보낸 뒤 tool_call_chunks를 붙일 수 있다. 메시지 텍스트는
+    # tool_call_chunk가 나오거나(버림), buffer_chars에 닿거나 줄바꿈이 나오거나, 메시지가 끝날 때(내보냄)까지
+    # 모아 둔다. 내보낸 뒤의 토큰은 바로 흘려보낸다. buffer_chars를 넘긴 앞말 뒤의 도구 호출은 막지 못하므로
+    # 시스템 프롬프트가 도구 호출 차례에 텍스트를 쓰지 않도록 지시한다.
+    pending: dict[str, list[str]] = {}
+    live_message_ids: set[str] = set()
+    tool_call_message_ids: set[str] = set()
 
     with collect_tool_hits() as hits:
         try:
@@ -112,17 +122,46 @@ def stream_agent_search(
             ):
                 if mode == "updates":
                     step_limit_hit = step_limit_hit or _hit_step_limit(payload)
+                    for finished in _agent_update_messages(payload):
+                        texts = pending.pop(finished.id or "", [])
+                        if _has_tool_calls(finished):
+                            tool_call_message_ids.add(finished.id or "")
+                            continue
+                        for text in texts:
+                            parts.append(text)
+                            yield {"chunk": text}
                     continue
                 message, metadata = payload
-                if not _is_answer_message(message, metadata or {}):
+                if not _is_agent_message(message, metadata or {}):
+                    continue
+                message_id = message.id or ""
+                if message_id in tool_call_message_ids:
+                    continue
+                if _has_tool_calls(message):
+                    tool_call_message_ids.add(message_id)
+                    pending.pop(message_id, None)
                     continue
                 text = _message_text(message)
                 if not text or text == _LANGGRAPH_STEP_LIMIT_TEXT:
                     continue
-                parts.append(text)
-                yield {"chunk": text}
+                if message_id in live_message_ids:
+                    parts.append(text)
+                    yield {"chunk": text}
+                    continue
+                buffered = pending.setdefault(message_id, [])
+                buffered.append(text)
+                if sum(len(piece) for piece in buffered) >= buffer_chars or "\n" in text:
+                    live_message_ids.add(message_id)
+                    for piece in pending.pop(message_id):
+                        parts.append(piece)
+                        yield {"chunk": piece}
         except GraphRecursionError:
             step_limit_hit = True
+
+        for texts in pending.values():
+            for text in texts:
+                parts.append(text)
+                yield {"chunk": text}
 
         if step_limit_hit:
             logger.warning("에이전트가 recursion_limit=%s에 도달했습니다.", limit)

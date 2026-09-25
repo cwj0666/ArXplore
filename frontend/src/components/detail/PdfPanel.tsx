@@ -1,3 +1,5 @@
+import { toSafeHttpUrl } from "../../helpers/safeUrl";
+
 interface PdfPanelProps {
   visible: boolean;
   pdfUrl: string;
@@ -19,7 +21,7 @@ export function PdfPanel({ visible, pdfUrl, onClose }: PdfPanelProps) {
       </div>
       <iframe
         id="pdf-frame"
-        src={visible ? pdfUrl : ""}
+        src={visible ? toSafeHttpUrl(pdfUrl) : ""}
         title="Paper PDF"
         loading="lazy"
       />

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from typing import Any
 
 import requests
@@ -11,6 +12,8 @@ try:
     from pypdf import PdfReader
 except ModuleNotFoundError:
     PdfReader = None
+
+logger = logging.getLogger(__name__)
 
 
 class PdfExtractorMixin:
@@ -46,14 +49,15 @@ class PdfExtractorMixin:
             return ''
         try:
             reader = PdfReader(io.BytesIO(content))
-        except Exception:
+            pages: list[str] = []
+            for page in reader.pages:
+                page_text = page.extract_text() or ''
+                cleaned_page = cls._normalize_extracted_page_text(page_text)
+                if cleaned_page:
+                    pages.append(cleaned_page)
+        except Exception as exc:
+            logger.warning('pypdf text extraction failed: %s: %s', type(exc).__name__, exc)
             return ''
-        pages: list[str] = []
-        for page in reader.pages:
-            page_text = page.extract_text() or ''
-            cleaned_page = cls._normalize_extracted_page_text(page_text)
-            if cleaned_page:
-                pages.append(cleaned_page)
         return cls._normalize_text('\n\n'.join(pages))
 
     @staticmethod

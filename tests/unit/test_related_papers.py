@@ -119,6 +119,23 @@ class TestBuildRelatedPapers:
         external_mock.assert_not_called()
 
 
+def test_external_search_failure_is_logged_and_returns_empty(caplog):
+    class BrokenClient:
+        def search_arxiv_papers(self, query, max_results):
+            raise ConnectionError("arxiv down")
+
+    with patch("src.integrations.paper_search.PaperSearchClient", BrokenClient), caplog.at_level("WARNING"):
+        related = services._search_external_related_papers(
+            {"arxiv_id": "2401.00001", "title": "Direct preference optimization"}, seen_ids=set(), limit=3
+        )
+
+    assert related == []
+    record = next(record for record in caplog.records if "arXiv" in record.getMessage())
+    assert record.levelname == "WARNING"
+    assert record.exc_info is not None
+    assert "2401.00001" in record.getMessage()
+
+
 class TestExtractKeyFindings:
     def test_strips_bullets_and_numbering_and_adds_period(self):
         text = "- First finding about scaling\n* Second finding here!\n• Third finding bullet\n1. Fourth numbered item\n2) Fifth numbered item?"

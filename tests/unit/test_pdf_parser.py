@@ -164,6 +164,43 @@ def test_pypdf_path_used_when_layout_parser_errors():
     assert result.source == "pdf"
 
 
+def test_layout_parser_error_is_logged(caplog):
+    pdf_bytes = _build_text_pdf(["1 Introduction", "We propose a method for the alignment of language models."])
+    client = _fake_layout_client(configured=True, error=requests.ConnectionError("layout parser down"))
+    parser = FulltextParser(layout_parser_client=client)
+
+    with caplog.at_level("WARNING"), patch(REQUESTS_GET, return_value=_fake_response(pdf_bytes)):
+        parser.parse_from_pdf_url(PDF_URL)
+
+    assert "layout parser unavailable: layout parser down" in caplog.text
+
+
+def _encrypt_pdf(pdf_bytes: bytes) -> bytes:
+    import io
+
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for page in PdfReader(io.BytesIO(pdf_bytes)).pages:
+        writer.add_page(page)
+    writer.encrypt("pw")
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def test_encrypted_pdf_falls_back_to_abstract(caplog):
+    pdf_bytes = _encrypt_pdf(_build_text_pdf(["1 Introduction", "Secret body text that needs a password."]))
+    parser = FulltextParser(layout_parser_client=_fake_layout_client(configured=False))
+
+    with caplog.at_level("WARNING"), patch(REQUESTS_GET, return_value=_fake_response(pdf_bytes)):
+        result = parser.parse_from_pdf_url(PDF_URL, fallback_text="We align models with preferences.")
+
+    assert result.source == "fallback_abstract"
+    assert result.text == "We align models with preferences."
+    assert "pypdf text extraction failed" in caplog.text
+
+
 def test_download_failure_returns_fallback_abstract():
     client = _fake_layout_client(configured=True, segments=LAYOUT_SEGMENTS)
     parser = FulltextParser(layout_parser_client=client)

@@ -29,7 +29,6 @@ def run_collect_papers(
     prepare_job_repository: PrepareJobRepository | None = None
     if enqueue_prepare:
         prepare_job_repository = PrepareJobRepository()
-        prepare_job_repository.ensure_schema()
 
     payload = search_client.fetch_daily_papers(normalized_date)
     saved = raw_store.save_daily_papers_response(date=normalized_date, payload=payload)

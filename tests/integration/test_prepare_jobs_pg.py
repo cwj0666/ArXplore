@@ -304,3 +304,16 @@ def test_enqueue_failed_job_resets_attempts(repository, dsn):
     assert result["status"] == "pending"
     job = _job(dsn, job_id)
     assert (job["attempt_count"], job["error"], job["raw_revision"]) == (0, None, 1)
+
+
+def test_requeue_force_sets_payload_flag_and_plain_requeue_clears_it(repository, dsn):
+    job_id = repository.enqueue_prepare_job(target_date="2026-04-07", payload={"note": "x"})["job_id"]
+    _execute(dsn, "UPDATE prepare_jobs SET status = 'failed', attempt_count = 3 WHERE id = %s", (job_id,))
+
+    repository.requeue_failed_prepare_jobs(mode="auto", dry_run=False, force=True)
+    claimed = repository.claim_prepare_job(worker_id="w1")
+    assert claimed["payload"] == {"note": "x", "force": True}
+
+    _execute(dsn, "UPDATE prepare_jobs SET status = 'failed' WHERE id = %s", (job_id,))
+    repository.requeue_failed_prepare_jobs(mode="auto", dry_run=False)
+    assert repository.claim_prepare_job(worker_id="w1")["payload"] == {"note": "x"}

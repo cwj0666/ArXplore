@@ -139,7 +139,7 @@ class FakePrepareJobRepository:
         FakePrepareJobRepository.instances.append(self)
 
     def ensure_schema(self):
-        self.calls.append(("ensure_schema", {}))
+        raise AssertionError("Airflow task paths must not run DDL")
 
     def enqueue_prepare_job(self, **kwargs):
         self.calls.append(("enqueue", kwargs))
@@ -153,7 +153,7 @@ def _patch_collect(monkeypatch, raw_store: FakeRawStore) -> None:
     monkeypatch.setattr(collect_papers, "PrepareJobRepository", FakePrepareJobRepository)
 
 
-def test_collect_passes_raw_revision_to_enqueue_after_ensure_schema(monkeypatch):
+def test_collect_passes_raw_revision_to_enqueue_without_ddl(monkeypatch):
     _patch_collect(monkeypatch, FakeRawStore(revision=4))
 
     result = collect_papers.run_collect_papers(runtime="test", target_date="2026-04-07")
@@ -161,7 +161,6 @@ def test_collect_passes_raw_revision_to_enqueue_after_ensure_schema(monkeypatch)
     assert len(FakePrepareJobRepository.instances) == 1
     calls = FakePrepareJobRepository.instances[0].calls
     assert calls == [
-        ("ensure_schema", {}),
         ("enqueue", {"target_date": "2026-04-07", "mode": "auto", "source": "collect", "raw_revision": 4}),
     ]
     assert result["raw_revision"] == 4
@@ -217,14 +216,14 @@ class FakeArxivClient:
         return {arxiv_id: {"title": "T", "primary_category": "cs.AI"} for arxiv_id in arxiv_ids}
 
 
-def test_enrich_ensures_schema_once_on_constructed_repository(monkeypatch):
+def test_enrich_does_not_run_ddl_on_constructed_repository(monkeypatch):
     FakePaperRepository.instances = []
     monkeypatch.setattr(enrich_papers_metadata, "PaperRepository", FakePaperRepository)
 
     result = enrich_papers_metadata.run_enrich_papers_metadata(runtime="test", search_client=FakeArxivClient())
 
     assert result["updated_count"] == 2
-    assert [repository.ensure_calls for repository in FakePaperRepository.instances] == [1]
+    assert [repository.ensure_calls for repository in FakePaperRepository.instances] == [0]
 
 
 def test_enrich_does_not_run_ddl_on_injected_repository():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from contextlib import contextmanager
 from typing import Any
@@ -121,6 +122,7 @@ def test_ensure_schema_adds_generated_search_vectors_and_indexes():
         "CREATE INDEX IF NOT EXISTS idx_paper_chunks_chunk_vector ON paper_chunks USING GIN (chunk_vector)"
         in statements
     )
+    assert "ALTER TABLE paper_fulltexts ADD COLUMN IF NOT EXISTS content_hash TEXT NULL;" in statements
 
     hnsw = (
         "CREATE INDEX IF NOT EXISTS paper_embeddings_embedding_hnsw "
@@ -321,8 +323,8 @@ def test_save_paper_chunks_uses_one_bulk_insert(monkeypatch):
         calls.append({"sql": sql, "args": list(argslist), "template": template})
 
     monkeypatch.setattr(paper_repository_module, "execute_values", fake_execute_values)
-    cursor = RecordingCursor()
-    _repository_with_cursor(cursor).save_paper_chunks(
+    cursor = RecordingCursor(fetchall_results=[[(0, _md5("a")), (1, _md5("old"))]])
+    replaced = _repository_with_cursor(cursor).save_paper_chunks(
         "2401.00001",
         [
             {
@@ -336,7 +338,14 @@ def test_save_paper_chunks_uses_one_bulk_insert(monkeypatch):
         ],
     )
 
-    assert cursor.executed == [("DELETE FROM paper_chunks WHERE arxiv_id = %s", ("2401.00001",))]
+    assert replaced is True
+    assert cursor.executed == [
+        (
+            "SELECT chunk_index, md5(chunk_text) FROM paper_chunks WHERE arxiv_id = %s ORDER BY chunk_index ASC",
+            ("2401.00001",),
+        ),
+        ("DELETE FROM paper_chunks WHERE arxiv_id = %s", ("2401.00001",)),
+    ]
     assert len(calls) == 1
     assert (
         "INSERT INTO paper_chunks (arxiv_id, chunk_index, chunk_text, section_title, token_count, metadata, updated_at) VALUES %s"
@@ -347,6 +356,75 @@ def test_save_paper_chunks_uses_one_bulk_insert(monkeypatch):
     assert first[:5] == ("2401.00001", 0, "a", "Abstract", 1)
     assert first[5].adapted == {"content_role": "body"}
     assert second[:5] == ("2401.00001", 1, "b", None, 0)
+
+
+def _md5(text: str) -> str:
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def test_save_paper_chunks_keeps_rows_when_texts_are_unchanged(monkeypatch):
+    calls: list[dict[str, Any]] = []
+
+    def fake_execute_values(cursor, sql, argslist, template=None, page_size=100, fetch=False):
+        calls.append({"sql": sql, "args": list(argslist), "template": template})
+
+    monkeypatch.setattr(paper_repository_module, "execute_values", fake_execute_values)
+    cursor = RecordingCursor(fetchall_results=[[(0, _md5("a")), (1, _md5("b"))]])
+    replaced = _repository_with_cursor(cursor).save_paper_chunks(
+        "2401.00001",
+        [
+            {"chunk_index": 1, "chunk_text": "b", "section_title": "Method", "metadata": {"content_role": "body"}},
+            {"chunk_index": 0, "chunk_text": "a", "section_title": "Abstract", "token_count": 1},
+        ],
+    )
+
+    assert replaced is False
+    assert len(cursor.executed) == 1
+    assert not any("DELETE" in sql for sql, _ in cursor.executed)
+    assert len(calls) == 1
+    normalized = _normalize_sql(calls[0]["sql"])
+    assert normalized.startswith("UPDATE paper_chunks AS c SET section_title = v.section_title")
+    assert "INSERT" not in normalized
+    assert "c.metadata <> v.metadata" in normalized
+    assert [args[:4] for args in calls[0]["args"]] == [("2401.00001", 0, "Abstract", 1), ("2401.00001", 1, "Method", 0)]
+
+
+@pytest.mark.parametrize(
+    "existing",
+    [
+        [],
+        [(0, "x")],
+        [(0, None), (1, None), (2, None)],
+    ],
+)
+def test_save_paper_chunks_replaces_when_texts_or_count_differ(monkeypatch, existing):
+    monkeypatch.setattr(paper_repository_module, "execute_values", lambda *args, **kwargs: None)
+    existing = [(index, _md5("a") if digest is None else digest) for index, digest in existing]
+    cursor = RecordingCursor(fetchall_results=[existing])
+    replaced = _repository_with_cursor(cursor).save_paper_chunks("2401.00001", [{"chunk_index": 0, "chunk_text": "a"}])
+
+    assert replaced is True
+    assert cursor.executed[-1] == ("DELETE FROM paper_chunks WHERE arxiv_id = %s", ("2401.00001",))
+
+
+def test_get_paper_fulltext_state():
+    cursor = RecordingCursor(fetchone_results=[("layout_pdf", "abc")])
+    assert _repository_with_cursor(cursor).get_paper_fulltext_state("2604.00001") == {
+        "source": "layout_pdf",
+        "content_hash": "abc",
+    }
+    sql, params = cursor.executed[0]
+    assert "SELECT source, content_hash FROM paper_fulltexts WHERE arxiv_id = %s" in _normalize_sql(sql)
+    assert params == ("2604.00001",)
+    assert _repository_with_cursor(RecordingCursor()).get_paper_fulltext_state("missing") is None
+
+
+def test_save_paper_fulltext_stores_content_hash():
+    cursor = RecordingCursor()
+    _repository_with_cursor(cursor).save_paper_fulltext("2604.00001", text="t", source="pdf", content_hash="abc")
+    sql, params = cursor.executed[0]
+    assert "content_hash = EXCLUDED.content_hash" in _normalize_sql(sql)
+    assert params[-1] == "abc"
 
 
 def test_list_chunk_windows_fetches_all_windows_in_one_query():

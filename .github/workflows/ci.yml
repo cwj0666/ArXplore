@@ -105,10 +105,9 @@ jobs:
           pytest tests/integration -q -m integration
           status=$?
           set -e
-          # Exit code 5 means no tests were collected.
           if [ "$status" -eq 5 ]; then
-            echo "No integration tests collected; treating as success."
-            exit 0
+            echo "No integration tests were collected; failing so a marker regression is visible."
+            exit 1
           fi
           exit "$status"
 

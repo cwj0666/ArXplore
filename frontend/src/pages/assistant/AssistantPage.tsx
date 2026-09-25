@@ -89,6 +89,7 @@ export function AssistantPage({
     let accumulated = "";
     let citations: Citation[] = [];
     let notice = "";
+    let failed = false;
 
     try {
       await streamAssistantChat({
@@ -106,8 +107,11 @@ export function AssistantPage({
       });
       if (!accumulated) notice = "답변을 생성할 수 없습니다.";
     } catch (error) {
+      failed = true;
       if (controller.signal.aborted) {
-        if (!accumulated) notice = "사용자의 요청으로 답변이 중단되었습니다.";
+        notice = accumulated
+          ? "사용자의 요청으로 답변이 중단되었습니다. 이 답변은 이후 대화 맥락에 포함되지 않습니다."
+          : "사용자의 요청으로 답변이 중단되었습니다.";
       } else {
         notice = (error instanceof ApiError || error instanceof StreamEventError) && error.message
           ? error.message
@@ -118,7 +122,10 @@ export function AssistantPage({
       if (accumulated) {
         const assistantMessage: AssistantChatMessage = { role: "assistant", content: accumulated };
         newDisplayMessages.push(citations.length ? { ...assistantMessage, citations } : assistantMessage);
-        setChatHistory((prev) => [...prev, assistantMessage]);
+        if (!failed) setChatHistory((prev) => [...prev, assistantMessage]);
+      }
+      if (!accumulated || failed) {
+        setChatHistory((prev) => prev.filter((turn) => turn !== userMessage));
       }
       if (notice) {
         newDisplayMessages.push({ role: "assistant", content: notice, isNotice: true });
