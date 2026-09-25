@@ -37,7 +37,6 @@ done
 SERVER_IP="$(env_value TAILSCALE_SERVER_IP)"
 
 docker volume inspect arxplore_server_arxplore_postgres_data >/dev/null 2>&1 || docker volume create arxplore_server_arxplore_postgres_data >/dev/null
-docker volume inspect arxplore_server_arxplore_mongo_data >/dev/null 2>&1 || docker volume create arxplore_server_arxplore_mongo_data >/dev/null
 docker volume inspect arxplore_server_arxplore_airflow_logs >/dev/null 2>&1 || docker volume create arxplore_server_arxplore_airflow_logs >/dev/null
 
 docker build -t arxplore-airflow -f docker/airflow/Dockerfile .
@@ -50,5 +49,4 @@ docker compose -p "${PROJECT_NAME}" -f docker-compose.server.yml ps
 echo
 echo "[server] 접속 정보"
 echo "Airflow: http://${SERVER_IP}:$(env_value SERVER_AIRFLOW_PORT 18080)"
-echo "MongoDB: ${SERVER_IP}:$(env_value SERVER_MONGO_PORT 17017)"
 echo "PostgreSQL: ${SERVER_IP}:$(env_value SERVER_POSTGRES_PORT 15432)"

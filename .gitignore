@@ -18,7 +18,6 @@ airflow.db-wal
 airflow.cfg
 logs/
 simple_auth_manager_passwords.json.generated
-data/mongo/
 data/postgres/
 .vscode/
 .idea/

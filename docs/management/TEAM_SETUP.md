@@ -34,7 +34,7 @@ docker compose version
 
 ## 4. Tailscale 설치
 
-개발 컨테이너에서 서버의 MongoDB, PostgreSQL, Airflow에 접근하려면 Tailscale 연결이 필요하다.
+개발 컨테이너에서 서버의 PostgreSQL, Airflow에 접근하려면 Tailscale 연결이 필요하다.
 
 ### WSL 사용자
 
@@ -70,7 +70,7 @@ cd ArXplore
 
 ## 6. `.env` 배치
 
-전달받은 `.env`를 프로젝트 루트에 둔다. 현재 `.env`에는 MongoDB, PostgreSQL, LangSmith, parser, worker가 사용할 접속 정보가 포함된다. 새로 만들 때는 `cp .env.example .env`에서 시작한다.
+전달받은 `.env`를 프로젝트 루트에 둔다. 현재 `.env`에는 PostgreSQL, LangSmith, parser, worker가 사용할 접속 정보가 포함된다. 새로 만들 때는 `cp .env.example .env`에서 시작한다.
 
 환경 변수 변경을 반영해야 할 때는 컨테이너를 재생성하는 편이 안전하다.
 
@@ -80,10 +80,8 @@ docker compose up -d --force-recreate django nginx
 
 현재 구조에서 중요한 값은 다음과 같다.
 
-- `MONGO_DB=arxplore_source`
 - `POSTGRES_DB=arxplore_meta`
 - `APP_POSTGRES_DB=arxplore_app`
-- `SERVER_MONGO_PORT`
 - `SERVER_POSTGRES_PORT` (서버 compose가 publish하는 호스트 포트, 기본 `15432`)
 - `PROD_POSTGRES_HOST` (django·prepare-worker 컨테이너가 접속할 서버 PostgreSQL. 보통 `<TAILSCALE_SERVER_IP>`)
 - `LAYOUT_PARSER_BASE_URL` (기본값·자동 감지 없음. prepare-worker와 같은 compose 네트워크이므로 `http://layout-parser:5060`)
@@ -91,9 +89,9 @@ docker compose up -d --force-recreate django nginx
 
 접속 값은 아래 규칙을 유지한다.
 
-- `MONGO_HOST`, `POSTGRES_HOST`, `PROD_POSTGRES_HOST`는 `host` 또는 `host:port` 형식이다
-- 포트를 생략하면 `SERVER_MONGO_PORT`, `SERVER_POSTGRES_PORT`(서버가 공개하는 포트)를 쓴다
-- 서버 compose 안의 Airflow처럼 같은 네트워크에서 컨테이너 이름으로 붙을 때는 `arxplore-postgres:5432`, `arxplore-mongo:27017`처럼 내부 포트를 적는다
+- `POSTGRES_HOST`, `PROD_POSTGRES_HOST`는 `host` 또는 `host:port` 형식이다
+- 포트를 생략하면 `SERVER_POSTGRES_PORT`(서버가 공개하는 포트)를 쓴다
+- 서버 compose 안의 Airflow처럼 같은 네트워크에서 컨테이너 이름으로 붙을 때는 `arxplore-postgres:5432`처럼 내부 포트를 적는다
 
 개인별로 바꿔야 하는 값은 최소한 아래다.
 
@@ -186,7 +184,7 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 
 | 항목 | 설명 |
 |------|------|
-| `TAILSCALE_SERVER_IP` | PostgreSQL(15432), MongoDB(17017), Airflow(18080)를 이 IP에만 바인딩한다. 로컬 worker가 Tailscale로 접속하므로 `127.0.0.1`로 바꾸지 않는다 |
+| `TAILSCALE_SERVER_IP` | PostgreSQL(15432), Airflow(18080)를 이 IP에만 바인딩한다. 로컬 worker가 Tailscale로 접속하므로 `127.0.0.1`로 바꾸지 않는다 |
 | `AIRFLOW_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`로 생성 |
 | `AIRFLOW_ADMIN_USER` | Airflow SimpleAuthManager의 admin 사용자 이름 |
 
@@ -195,7 +193,6 @@ Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성�
 핵심 컨테이너:
 
 - `arxplore-postgres`
-- `arxplore-mongo`
 - `arxplore-airflow-init`
 - `arxplore-airflow-web`
 - `arxplore-airflow-scheduler`
@@ -212,8 +209,8 @@ Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성�
 현재 운영 모델은 다음과 같다.
 
 - `arxplore_daily_collect`
-  - 최신 HF Daily Papers raw 수집
-  - `prepare_jobs` enqueue
+  - 최신 HF Daily Papers raw 수집(PostgreSQL `raw_daily_papers`)
+  - `prepare_jobs` enqueue(raw 저장과 같은 트랜잭션)
 - `arxplore_maintenance`
   - backfill
   - metadata enrichment
@@ -230,6 +227,7 @@ Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성�
 적재 상태는 PostgreSQL에 직접 조회해 확인한다.
 
 ```sql
+SELECT date, revision, fetched_count, collected_at FROM raw_daily_papers ORDER BY date DESC LIMIT 7;
 SELECT status, count(*) FROM prepare_jobs GROUP BY status;
 SELECT source, count(*) FROM paper_fulltexts GROUP BY source;
 SELECT count(*) FROM paper_chunks c
@@ -241,7 +239,7 @@ failed 잡은 `python scripts/requeue_failed_prepare_jobs.py --since YYYY-MM-DD`
 
 운영상 가장 먼저 확인할 것은 아래 네 가지다.
 
-1. raw가 MongoDB에 들어가는지
+1. raw가 `raw_daily_papers`에 들어가는지
 2. `prepare_jobs`가 생성되는지
 3. `prepare-worker`가 이를 소비하는지
 4. embedding backlog가 남아 있지 않은지
@@ -277,7 +275,6 @@ bash scripts/setup.sh forward restart
 |--------|----------------------|
 | Airflow | `http://127.0.0.1:18080` |
 | PostgreSQL | `127.0.0.1:15432` |
-| MongoDB | `127.0.0.1:17017` |
 
 ## 13. 접속 정보 요약
 
@@ -286,7 +283,6 @@ bash scripts/setup.sh forward restart
 | 서비스 | 주소 |
 |--------|------|
 | PostgreSQL | `<TAILSCALE_SERVER_IP>:15432` |
-| MongoDB | `<TAILSCALE_SERVER_IP>:17017` |
 | Airflow API | `http://<TAILSCALE_SERVER_IP>:18080` |
 | Layout Parser | `http://layout-parser:5060` (prepare-worker와 같은 compose 네트워크) |
 
@@ -296,7 +292,6 @@ bash scripts/setup.sh forward restart
 |--------|------|
 | Airflow | `http://127.0.0.1:18080` |
 | PostgreSQL | `127.0.0.1:15432` |
-| MongoDB | `127.0.0.1:17017` |
 
 ## 14. LangSmith 설정
 

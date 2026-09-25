@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import select
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date as date_cls
 from typing import Any
 
@@ -73,14 +75,17 @@ class PrepareJobRepository:
         source: str = "collect",
         payload: dict[str, Any] | None = None,
         raw_revision: int | None = None,
+        connection: Any | None = None,
     ) -> dict[str, Any]:
         """날짜 단위 prepare 작업을 큐에 추가한다.
 
         raw_revision이 기존 잡보다 크면 done 잡은 pending으로 되돌리고, processing 잡은 pending_refresh로 표시한다.
         failed 잡은 새 입력이므로 시도 횟수를 초기화해 pending으로 되돌린다.
         payload는 기존 payload에 병합되므로 requeue가 넣은 force는 작업이 완료될 때까지 유지된다.
+        connection을 받으면 그 트랜잭션 안에서 실행하고 commit하지 않는다. pg_notify는 그 트랜잭션이 commit될 때
+        전달되므로 worker는 같은 트랜잭션에서 쓴 raw payload가 보이는 시점에만 깨어난다.
         """
-        with self._connection() as connection, connection.cursor() as cursor:
+        with self._cursor(connection) as cursor:
             cursor.execute(
                 f"""
                 INSERT INTO prepare_jobs (
@@ -493,6 +498,15 @@ class PrepareJobRepository:
 
     def _connection(self):
         return get_connection(self._build_postgres_connection_params(), settings=self.settings)
+
+    @contextmanager
+    def _cursor(self, connection: Any | None = None) -> Iterator[Any]:
+        if connection is not None:
+            with connection.cursor() as cursor:
+                yield cursor
+            return
+        with self._connection() as owned, owned.cursor() as cursor:
+            yield cursor
 
     def ensure_schema(self) -> None:
         """prepare_jobs 테이블·컬럼·인덱스를 멱등하게 생성한다. 프로세스 시작/마이그레이션 시 1회만 호출한다."""

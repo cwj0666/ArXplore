@@ -33,14 +33,6 @@ class AppSettings(BaseSettings):
         alias="LAYOUT_PARSER_PARSE_TABLES_AND_MATH",
     )
 
-    mongo_host: str | None = Field(default=None, alias="MONGO_HOST")
-    server_mongo_port: int = Field(default=27017, alias="SERVER_MONGO_PORT")
-    mongo_db: str = Field(default="arxplore_source", alias="MONGO_DB")
-    mongo_initdb_root_username: str | None = Field(default=None, alias="MONGO_INITDB_ROOT_USERNAME")
-    mongo_initdb_root_password: str | None = Field(default=None, alias="MONGO_INITDB_ROOT_PASSWORD")
-    mongo_daily_papers_collection: str = Field(default="daily_papers_raw", alias="MONGO_DAILY_PAPERS_COLLECTION")
-    mongo_pipeline_state_collection: str = Field(default="pipeline_state", alias="MONGO_PIPELINE_STATE_COLLECTION")
-
     postgres_host: str | None = Field(default=None, alias="POSTGRES_HOST")
     server_postgres_port: int = Field(default=5432, alias="SERVER_POSTGRES_PORT")
     postgres_db: str | None = Field(default=None, alias="POSTGRES_DB")

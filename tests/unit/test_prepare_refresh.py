@@ -1,113 +1,252 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
-from src.integrations.raw_store import RawPaperStore, compute_payload_hash
+import pytest
+
+from src.integrations import raw_store as raw_store_module
+from src.integrations.raw_store import (
+    SAVE_DAILY_PAPERS_SQL,
+    RawPaperStore,
+    compute_payload_hash,
+    pipeline_state_key,
+    sanitize_payload,
+)
 from src.pipeline import collect_papers, enrich_papers_metadata
 
 
-class FakeMongoCollection:
-    def __init__(self) -> None:
-        self.documents: dict[tuple[str, str], dict[str, Any]] = {}
-        self.calls: list[dict[str, Any]] = []
-
-    def find_one_and_update(self, filter, update, *, projection=None, upsert=False, return_document=None):
-        self.calls.append({"filter": filter, "update": update, "upsert": upsert, "return_document": return_document})
-        key = (filter["source"], filter["date"])
-        document = self.documents.get(key)
-        extra_conditions = {name: value for name, value in filter.items() if name not in ("source", "date")}
-        if document is not None and any(document.get(name) != value for name, value in extra_conditions.items()):
-            document = None
-            if upsert:
-                raise AssertionError("upsert with a non-key filter would duplicate (source, date)")
-        if document is None:
-            if not upsert:
-                return None
-            document = {"_id": f"oid-{len(self.documents) + 1}", **filter}
-            self.documents[key] = document
-        document.update(update["$set"])
-        for field, amount in update.get("$inc", {}).items():
-            document[field] = document.get(field, 0) + amount
-        return {name: document[name] for name in ("_id", *(projection or {})) if name in document}
-
-    def find_one(self, filter, projection=None, sort=None):
-        return self.documents.get((filter["source"], filter["date"]))
+def _normalize_sql(sql: str) -> str:
+    return " ".join(sql.split())
 
 
-def _raw_store(collection: FakeMongoCollection) -> RawPaperStore:
-    settings = SimpleNamespace(mongo_db="db", mongo_daily_papers_collection="raw")
-    return RawPaperStore(settings=settings, client={"db": {"raw": collection}})
+class RecordingCursor:
+    def __init__(self, fetchone_results: list[Any] | None = None, rows: list[tuple[Any, ...]] | None = None) -> None:
+        self.executed: list[tuple[str, Any]] = []
+        self.fetchone_results = list(fetchone_results or [])
+        self.rows = rows or []
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+
+    def fetchone(self):
+        return self.fetchone_results.pop(0) if self.fetchone_results else None
+
+    def fetchall(self):
+        return list(self.rows)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
-def test_first_save_starts_at_revision_one():
-    collection = FakeMongoCollection()
-    saved = _raw_store(collection).save_daily_papers_response(date="2026-04-07", payload=[{"paper": {"id": "a"}}])
+class RecordingConnection:
+    def __init__(self, cursor: RecordingCursor) -> None:
+        self._cursor = cursor
 
-    assert saved == {"record_id": "oid-1", "revision": 1, "changed": True}
-    stored = collection.documents[("hf_daily_papers", "2026-04-07")]
-    assert stored["payload_hash"] == compute_payload_hash([{"paper": {"id": "a"}}])
-    assert stored["fetched_count"] == 1
+    def cursor(self):
+        return self._cursor
 
 
-def test_same_payload_keeps_revision_and_refreshes_collected_at():
-    collection = FakeMongoCollection()
-    store = _raw_store(collection)
+def _store_with_cursor(cursor: RecordingCursor) -> tuple[RawPaperStore, list[str]]:
+    store = RawPaperStore(settings=SimpleNamespace())
+    opened: list[str] = []
+
+    @contextmanager
+    def fake_connection():
+        opened.append("pool")
+        yield RecordingConnection(cursor)
+
+    store._connection = fake_connection  # type: ignore[method-assign]
+    return store, opened
+
+
+def test_constructor_opens_no_connection(monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("RawPaperStore() must not open a DB connection")
+
+    monkeypatch.setattr(raw_store_module, "get_connection", fail)
+    RawPaperStore(settings=SimpleNamespace())
+
+
+def test_save_runs_single_upsert_with_hash_and_revision_case():
+    cursor = RecordingCursor(fetchone_results=[(1, True)])
+    store, _ = _store_with_cursor(cursor)
+
+    saved = store.save_daily_papers_response(date="2026-04-07", payload=[{"paper": {"id": "a"}}])
+
+    assert saved == {"record_id": "hf_daily_papers:2026-04-07", "revision": 1, "changed": True}
+    assert len(cursor.executed) == 1
+    sql, params = cursor.executed[0]
+    assert sql is SAVE_DAILY_PAPERS_SQL
+    normalized = _normalize_sql(sql)
+    assert "WITH previous AS ( SELECT payload_hash FROM raw_daily_papers" in normalized
+    assert "ON CONFLICT (source, date) DO UPDATE SET" in normalized
+    assert (
+        "revision = CASE WHEN raw_daily_papers.payload_hash = EXCLUDED.payload_hash "
+        "THEN raw_daily_papers.revision ELSE raw_daily_papers.revision + 1 END"
+    ) in normalized
+    assert "collected_at = NOW()" in normalized
+    assert "IS DISTINCT FROM upserted.payload_hash AS changed" in normalized
+    assert "xmax" not in normalized
+    assert params["source"] == "hf_daily_papers"
+    assert params["date"] == "2026-04-07"
+    assert params["payload_hash"] == compute_payload_hash([{"paper": {"id": "a"}}])
+    assert params["payload"].adapted == [{"paper": {"id": "a"}}]
+    assert params["fetched_count"] == 1
+
+
+def test_save_hash_ignores_key_order_so_reordered_payload_is_not_a_new_revision():
+    cursor = RecordingCursor(fetchone_results=[(1, True), (1, False)])
+    store, _ = _store_with_cursor(cursor)
+
     store.save_daily_papers_response(date="2026-04-07", payload=[{"paper": {"id": "a", "title": "T"}}])
-    first_collected_at = collection.documents[("hf_daily_papers", "2026-04-07")]["collected_at"]
-
     saved = store.save_daily_papers_response(date="2026-04-07", payload=[{"paper": {"title": "T", "id": "a"}}])
 
-    assert saved == {"record_id": "oid-1", "revision": 1, "changed": False}
-    stored = collection.documents[("hf_daily_papers", "2026-04-07")]
-    assert stored["revision"] == 1
-    assert stored["collected_at"] >= first_collected_at
-    assert "$inc" not in collection.calls[-1]["update"]
-    assert collection.calls[-1]["upsert"] is False
+    first_hash = cursor.executed[0][1]["payload_hash"]
+    second_hash = cursor.executed[1][1]["payload_hash"]
+    assert first_hash == second_hash
+    assert saved == {"record_id": "hf_daily_papers:2026-04-07", "revision": 1, "changed": False}
 
 
-def test_different_payload_increments_revision():
-    collection = FakeMongoCollection()
-    store = _raw_store(collection)
-    store.save_daily_papers_response(date="2026-04-07", payload=[{"paper": {"id": "a"}}])
-    store.save_daily_papers_response(date="2026-04-07", payload=[{"paper": {"id": "a"}}])
+def test_save_reports_database_revision_for_changed_payload():
+    cursor = RecordingCursor(fetchone_results=[(3, True)])
+    store, _ = _store_with_cursor(cursor)
 
     saved = store.save_daily_papers_response(
         date="2026-04-07", payload=[{"paper": {"id": "a"}}, {"paper": {"id": "b"}}]
     )
-    other_date = store.save_daily_papers_response(date="2026-04-08", payload=[])
 
-    assert saved == {"record_id": "oid-1", "revision": 2, "changed": True}
-    assert other_date == {"record_id": "oid-2", "revision": 1, "changed": True}
-    assert len(collection.documents) == 2
-    stored = collection.documents[("hf_daily_papers", "2026-04-07")]
-    assert stored["fetched_count"] == 2
-    assert stored["payload_hash"] == compute_payload_hash([{"paper": {"id": "a"}}, {"paper": {"id": "b"}}])
-    assert store.load_daily_papers_response(date="2026-04-07") == [{"paper": {"id": "a"}}, {"paper": {"id": "b"}}]
+    assert saved == {"record_id": "hf_daily_papers:2026-04-07", "revision": 3, "changed": True}
+    params = cursor.executed[0][1]
+    assert params["fetched_count"] == 2
+    assert params["payload_hash"] == compute_payload_hash([{"paper": {"id": "a"}}, {"paper": {"id": "b"}}])
 
 
-def test_changed_save_upserts_on_source_and_date():
-    collection = FakeMongoCollection()
-    _raw_store(collection).save_daily_papers_response(date="2026-04-07", payload={"paper": {"id": "a"}})
+def test_save_dict_payload_counts_as_one():
+    cursor = RecordingCursor(fetchone_results=[(1, True)])
+    store, _ = _store_with_cursor(cursor)
 
-    call = collection.calls[-1]
-    assert call["filter"] == {"source": "hf_daily_papers", "date": "2026-04-07"}
-    assert call["upsert"] is True
-    assert call["update"]["$inc"] == {"revision": 1}
-    assert set(call["update"]["$set"]) == {"source", "date", "payload", "payload_hash", "fetched_count", "collected_at"}
-    assert call["update"]["$set"]["fetched_count"] == 1
+    store.save_daily_papers_response(date="2026-04-07", payload={"paper": {"id": "a"}})
+
+    assert cursor.executed[0][1]["fetched_count"] == 1
 
 
-def test_legacy_document_without_hash_or_revision_starts_at_one():
-    collection = FakeMongoCollection()
-    collection.documents[("hf_daily_papers", "2026-04-07")] = {
-        "_id": "legacy",
-        "source": "hf_daily_papers",
-        "date": "2026-04-07",
-        "payload": [],
+def test_save_strips_characters_jsonb_rejects_before_hashing():
+    cursor = RecordingCursor(fetchone_results=[(1, True)])
+    store, _ = _store_with_cursor(cursor)
+
+    store.save_daily_papers_response(date="2026-04-07", payload=[{"title": "a\x00b\ud800c"}])
+
+    params = cursor.executed[0][1]
+    assert params["payload"].adapted == [{"title": "abc"}]
+    assert params["payload_hash"] == compute_payload_hash([{"title": "abc"}])
+
+
+def test_save_uses_given_connection_without_borrowing_from_pool():
+    pooled = RecordingCursor()
+    store, opened = _store_with_cursor(pooled)
+    shared = RecordingCursor(fetchone_results=[(2, False)])
+
+    saved = store.save_daily_papers_response(date="2026-04-07", payload=[], connection=RecordingConnection(shared))
+
+    assert opened == []
+    assert pooled.executed == []
+    assert len(shared.executed) == 1
+    assert saved["revision"] == 2
+
+
+def test_save_raises_when_upsert_returns_nothing():
+    store, _ = _store_with_cursor(RecordingCursor(fetchone_results=[None]))
+    with pytest.raises(RuntimeError):
+        store.save_daily_papers_response(date="2026-04-07", payload=[])
+
+
+def test_load_wraps_dict_payload_and_returns_empty_when_missing():
+    cursor = RecordingCursor(fetchone_results=[([{"paper": {"id": "a"}}],), ({"paper": {"id": "b"}},), None])
+    store, _ = _store_with_cursor(cursor)
+
+    assert store.load_daily_papers_response(date="2026-04-07") == [{"paper": {"id": "a"}}]
+    assert store.load_daily_papers_response(date="2026-04-08") == [{"paper": {"id": "b"}}]
+    assert store.load_daily_papers_response(date="2026-04-09") == []
+    assert cursor.executed[0][1] == ("hf_daily_papers", "2026-04-07")
+
+
+def test_has_daily_papers_response_uses_exists():
+    cursor = RecordingCursor(fetchone_results=[(True,), (False,)])
+    store, _ = _store_with_cursor(cursor)
+
+    assert store.has_daily_papers_response(date="2026-04-07") is True
+    assert store.has_daily_papers_response(date="2026-04-08") is False
+    assert "SELECT EXISTS" in cursor.executed[0][0]
+
+
+def test_list_dates_builds_filters_order_and_limit():
+    cursor = RecordingCursor(rows=[(date(2026, 4, 9),), (date(2026, 4, 8),)])
+    store, _ = _store_with_cursor(cursor)
+
+    dates = store.list_daily_papers_dates(date_gt="2026-04-01", date_lte="2026-04-30", limit=2, ascending=False)
+
+    assert dates == ["2026-04-09", "2026-04-08"]
+    sql, params = cursor.executed[0]
+    assert _normalize_sql(sql) == (
+        "SELECT date FROM raw_daily_papers WHERE source = %s AND date > %s AND date <= %s ORDER BY date DESC LIMIT %s"
+    )
+    assert params == ("hf_daily_papers", "2026-04-01", "2026-04-30", 2)
+
+
+def test_pipeline_state_round_trip_shapes():
+    cursor = RecordingCursor(fetchone_results=[({"cursor_date": "2026-04-06", "status": "success"}, "ts"), None])
+    store, _ = _store_with_cursor(cursor)
+
+    store.save_pipeline_state(
+        pipeline="hf_daily_papers_backfill",
+        name="default",
+        state={"cursor_date": "2026-04-06", "status": "success", "pipeline": "ignored"},
+    )
+    loaded = store.load_pipeline_state(pipeline="hf_daily_papers_backfill", name="default")
+    missing = store.load_pipeline_state(pipeline="prepare_papers_backfill", name="other")
+
+    save_sql, save_params = cursor.executed[0]
+    assert "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()" in _normalize_sql(save_sql)
+    assert save_params[0] == "hf_daily_papers_backfill:default"
+    assert save_params[1].adapted == {"cursor_date": "2026-04-06", "status": "success"}
+    assert cursor.executed[1][1] == ("hf_daily_papers_backfill:default",)
+    assert loaded == {
+        "cursor_date": "2026-04-06",
+        "status": "success",
+        "pipeline": "hf_daily_papers_backfill",
+        "name": "default",
+        "updated_at": "ts",
     }
-    saved = _raw_store(collection).save_daily_papers_response(date="2026-04-07", payload=[])
-    assert saved == {"record_id": "legacy", "revision": 1, "changed": True}
+    assert missing is None
+    assert pipeline_state_key("prepare_papers_backfill") == "prepare_papers_backfill:default"
+
+
+def test_ensure_schema_creates_raw_and_state_tables():
+    cursor = RecordingCursor()
+    store, _ = _store_with_cursor(cursor)
+
+    store.ensure_schema()
+
+    statements = [_normalize_sql(sql) for sql, _ in cursor.executed]
+    raw_ddl = next(sql for sql in statements if "CREATE TABLE IF NOT EXISTS raw_daily_papers" in sql)
+    state_ddl = next(sql for sql in statements if "CREATE TABLE IF NOT EXISTS pipeline_state" in sql)
+    assert "payload JSONB NOT NULL" in raw_ddl
+    assert "payload_hash TEXT NOT NULL" in raw_ddl
+    assert "revision INTEGER NOT NULL DEFAULT 1" in raw_ddl
+    assert "PRIMARY KEY (source, date)" in raw_ddl
+    assert "key TEXT PRIMARY KEY" in state_ddl
+    assert "value JSONB NOT NULL" in state_ddl
+    assert not any("DROP" in sql for sql in statements)
+
+
+def test_sanitize_payload_handles_nested_keys_and_tuples():
+    assert sanitize_payload({"k\x00": ("a\x00", 1, None)}) == {"k": ["a", 1, None]}
 
 
 def test_payload_hash_ignores_key_order_but_not_values():
@@ -120,19 +259,35 @@ class FakeSearchClient:
         return [{"paper": {"id": "2604.00001"}}]
 
 
+SHARED_CONNECTION = object()
+
+
 class FakeRawStore:
     def __init__(self, revision: int = 4, changed: bool = True) -> None:
         self.revision = revision
         self.changed = changed
         self.saved: list[str] = []
+        self.transactions: list[str] = []
 
-    def save_daily_papers_response(self, *, date, payload):
+    @contextmanager
+    def transaction(self):
+        self.transactions.append("begin")
+        try:
+            yield SHARED_CONNECTION
+        except BaseException:
+            self.transactions.append("rollback")
+            raise
+        self.transactions.append("commit")
+
+    def save_daily_papers_response(self, *, date, payload, connection=None):
+        assert connection is SHARED_CONNECTION
         self.saved.append(date)
-        return {"record_id": "oid-1", "revision": self.revision, "changed": self.changed}
+        return {"record_id": "hf_daily_papers:" + date, "revision": self.revision, "changed": self.changed}
 
 
 class FakePrepareJobRepository:
     instances: list[FakePrepareJobRepository] = []
+    fail_enqueue = False
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -142,12 +297,16 @@ class FakePrepareJobRepository:
         raise AssertionError("Airflow task paths must not run DDL")
 
     def enqueue_prepare_job(self, **kwargs):
+        assert kwargs.pop("connection") is SHARED_CONNECTION
         self.calls.append(("enqueue", kwargs))
+        if self.fail_enqueue:
+            raise RuntimeError("enqueue failed")
         return {"enqueued": False, "job_id": 9, "status": "pending"}
 
 
-def _patch_collect(monkeypatch, raw_store: FakeRawStore) -> None:
+def _patch_collect(monkeypatch, raw_store: FakeRawStore, *, fail_enqueue: bool = False) -> None:
     FakePrepareJobRepository.instances = []
+    monkeypatch.setattr(FakePrepareJobRepository, "fail_enqueue", fail_enqueue)
     monkeypatch.setattr(collect_papers, "PaperSearchClient", FakeSearchClient)
     monkeypatch.setattr(collect_papers, "RawPaperStore", lambda: raw_store)
     monkeypatch.setattr(collect_papers, "PrepareJobRepository", FakePrepareJobRepository)
@@ -165,7 +324,7 @@ def test_collect_passes_raw_revision_to_enqueue_without_ddl(monkeypatch):
     ]
     assert result["raw_revision"] == 4
     assert result["raw_payload_changed"] is True
-    assert result["stored_record_id"] == "oid-1"
+    assert result["stored_record_id"] == "hf_daily_papers:2026-04-07"
     assert result["prepare_job_id"] == 9
     assert result["prepare_job_status"] == "pending"
 
@@ -192,6 +351,28 @@ def test_collect_backfill_path_skips_queue_entirely(monkeypatch):
     assert result["prepare_job_enqueued"] is False
     assert result["prepare_job_id"] is None
     assert result["raw_revision"] == 2
+    assert raw_store.transactions == ["begin", "commit"]
+
+
+def test_collect_saves_raw_and_enqueues_in_one_transaction(monkeypatch):
+    raw_store = FakeRawStore(revision=4)
+    _patch_collect(monkeypatch, raw_store)
+
+    collect_papers.run_collect_papers(runtime="test", target_date="2026-04-07")
+
+    assert raw_store.transactions == ["begin", "commit"]
+    assert raw_store.saved == ["2026-04-07"]
+    assert len(FakePrepareJobRepository.instances[0].calls) == 1
+
+
+def test_collect_enqueue_failure_rolls_back_the_raw_transaction(monkeypatch):
+    raw_store = FakeRawStore(revision=4)
+    _patch_collect(monkeypatch, raw_store, fail_enqueue=True)
+
+    with pytest.raises(RuntimeError, match="enqueue failed"):
+        collect_papers.run_collect_papers(runtime="test", target_date="2026-04-07")
+
+    assert raw_store.transactions == ["begin", "rollback"]
 
 
 class FakePaperRepository:

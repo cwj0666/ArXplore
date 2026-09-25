@@ -18,7 +18,11 @@ def run_collect_papers(
     target_date: str | None = None,
     enqueue_prepare: bool = True,
 ) -> dict[str, Any]:
-    """HF Daily Papers를 수집하고 MongoDB에 원본을 저장한다."""
+    """HF Daily Papers를 수집해 원본을 PostgreSQL에 저장하고, enqueue_prepare면 prepare 작업을 큐에 넣는다.
+
+    HTTP 수집은 트랜잭션 밖에서 끝내고, raw upsert와 prepare_jobs enqueue는 한 PostgreSQL 트랜잭션에서 실행한다.
+    enqueue가 실패하면 raw 저장도 rollback되고, enqueue의 pg_notify는 commit 뒤에 전달된다.
+    """
     normalized_target_date = (target_date or "").strip() or None
     normalized_date = (
         date_cls.fromisoformat(normalized_target_date).isoformat()
@@ -33,20 +37,20 @@ def run_collect_papers(
         prepare_job_repository = PrepareJobRepository()
 
     payload = search_client.fetch_daily_papers(normalized_date)
-    saved = raw_store.save_daily_papers_response(date=normalized_date, payload=payload)
+    queue_result: dict[str, Any] = {"enqueued": False, "job_id": None}
+    with raw_store.transaction() as connection:
+        saved = raw_store.save_daily_papers_response(date=normalized_date, payload=payload, connection=connection)
+        if prepare_job_repository is not None:
+            queue_result = prepare_job_repository.enqueue_prepare_job(
+                target_date=normalized_date,
+                mode="auto",
+                source="collect",
+                raw_revision=saved["revision"],
+                connection=connection,
+            )
     record_id = saved["record_id"]
     raw_revision = saved["revision"]
     raw_payload_changed = bool(saved.get("changed", True))
-    queue_result = (
-        prepare_job_repository.enqueue_prepare_job(
-            target_date=normalized_date,
-            mode="auto",
-            source="collect",
-            raw_revision=raw_revision,
-        )
-        if prepare_job_repository is not None
-        else {"enqueued": False, "job_id": None}
-    )
 
     sample_arxiv_ids = [
         paper.get("paper", {}).get("id")

@@ -1,11 +1,10 @@
 # docker/airflow/Dockerfile 전용: DAG가 호출하는 src.pipeline에 필요한 패키지만 둔다.
-# Airflow constraints 파일이 고정하는 패키지(openai, psycopg2-binary, pymongo, python-dotenv, requests)는
+# Airflow constraints 파일이 고정하는 패키지(openai, psycopg2-binary, python-dotenv, requests)는
 # 버전을 적지 않는다. constraints에 없는 패키지만 requirements.txt와 같은 버전으로 고정한다.
 langsmith==0.3.45
 openai
 psycopg2-binary
 pydantic-settings==2.8.1
-pymongo
 pypdf==5.4.0
 python-dotenv
 requests

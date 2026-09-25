@@ -19,7 +19,6 @@ _TEST_ENV_DEFAULTS = {
     "POSTGRES_USER": "arxplore_test",
     "POSTGRES_PASSWORD": "arxplore_test",
     "PROD_POSTGRES_HOST": "localhost",
-    "MONGO_HOST": "localhost",
     "OPENAI_API_KEY": "sk-test-dummy",
     "LANGSMITH_TRACING": "false",
     "LANGSMITH_API_KEY": "",

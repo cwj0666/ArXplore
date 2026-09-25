@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.integrations.db import close_all_pools  # noqa: E402
 from src.integrations.paper_repository import PaperRepository  # noqa: E402
 from src.integrations.prepare_job_repository import PrepareJobRepository  # noqa: E402
+from src.integrations.raw_store import RawPaperStore  # noqa: E402
 
 SEARCH_INDEXES = (
     "idx_papers_title_abstract_vector",
@@ -44,6 +45,8 @@ def main() -> int:
         print("papers / paper_fulltexts / paper_chunks / paper_embeddings / paper_ai_* schema ensured")
         for name, present in report_search_indexes(paper_repository).items():
             print(f"  {name}: {'present' if present else 'MISSING'}")
+        RawPaperStore().ensure_schema()
+        print("raw_daily_papers / pipeline_state schema ensured")
         PrepareJobRepository().ensure_schema()
         print("prepare_jobs schema ensured")
     finally:

@@ -151,8 +151,6 @@ jobs:
           AIRFLOW_ADMIN_USER=admin
           AIRFLOW_API_SECRET_KEY=ci-dummy
           AIRFLOW_API_AUTH_JWT_SECRET=ci-dummy
-          MONGO_INITDB_ROOT_USERNAME=arxplore
-          MONGO_INITDB_ROOT_PASSWORD=arxplore
           OPENAI_API_KEY=sk-ci-dummy
           DOTENV
 

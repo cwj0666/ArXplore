@@ -48,40 +48,12 @@ services:
       - "${TAILSCALE_SERVER_IP:?Set TAILSCALE_SERVER_IP}:${SERVER_POSTGRES_PORT:-15432}:5432"
     restart: unless-stopped
 
-  arxplore-mongo:
-    container_name: arxplore-mongo
-    image: arxplore-mongo
-    build:
-      context: .
-      dockerfile: docker/mongo/Dockerfile
-    env_file:
-      - .env
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-    volumes:
-      - arxplore_mongo_data:/data/db
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mongosh --quiet -u ${MONGO_INITDB_ROOT_USERNAME} -p ${MONGO_INITDB_ROOT_PASSWORD} --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep 1",
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-    ports:
-      - "${TAILSCALE_SERVER_IP:?Set TAILSCALE_SERVER_IP}:${SERVER_MONGO_PORT:-17017}:27017"
-    restart: unless-stopped
-
   arxplore-airflow-init:
     <<: *airflow-common
     container_name: arxplore-airflow-init
     command: bash -lc "airflow db migrate"
     depends_on:
       arxplore-postgres:
-        condition: service_healthy
-      arxplore-mongo:
         condition: service_healthy
 
   arxplore-airflow-web:
@@ -117,9 +89,6 @@ volumes:
   arxplore_postgres_data:
     external: true
     name: arxplore_server_arxplore_postgres_data
-  arxplore_mongo_data:
-    external: true
-    name: arxplore_server_arxplore_mongo_data
   arxplore_airflow_logs:
     external: true
     name: arxplore_server_arxplore_airflow_logs

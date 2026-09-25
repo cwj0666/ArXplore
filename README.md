@@ -20,7 +20,7 @@ Hugging Face Daily Papers에 올라오는 AI 논문을 매일 수집하고, PDF�
 
 현재 코드가 실제로 하는 일만 적었습니다.
 
-- **수집(서버 Airflow)**: `arxplore_daily_collect`가 매일 18:00(KST) HF Daily Papers를 MongoDB에 raw로 저장하고 날짜 단위 prepare 작업을 등록합니다. `arxplore_maintenance`는 3시간마다 과거 raw를 backfill하고 arXiv 메타데이터를 보강합니다. `arxplore_langsmith_maintenance`는 매일 03:00에 오래된 LangSmith trace를 정리합니다.
+- **수집(서버 Airflow)**: `arxplore_daily_collect`가 매일 18:00(KST) HF Daily Papers 원본을 PostgreSQL(`raw_daily_papers`, JSONB)에 저장하고, 같은 트랜잭션에서 날짜 단위 prepare 작업을 등록합니다. `arxplore_maintenance`는 3시간마다 과거 raw를 backfill하고 arXiv 메타데이터를 보강합니다. `arxplore_langsmith_maintenance`는 매일 03:00에 오래된 LangSmith trace를 정리합니다.
 - **Prepare(로컬 worker)**: PDF를 3단계 폴백(HURIDOCS → pypdf → 초록)으로 파싱하고, 섹션과 `content_role`을 붙여 글자 수 기준(1,800자, 겹침 200자)으로 청킹한 뒤 OpenAI API로 임베딩합니다.
 - **논문 목록**: 최신순·추천순 정렬, 제목·초록 부분 문자열 검색(최근 1,500편 대상), 페이지네이션, 즐겨찾기. 페이지·정렬·검색어가 URL에 남아 뒤로/앞으로 가기로 그대로 돌아옵니다.
 - **데모 모드**(`DEMO_MODE=true`, 기본값): 로그인 없이 목록과 상세 페이지를 열고, 이미 캐시된 개요·핵심 포인트·상세 요약을 볼 수 있습니다. 캐시가 없는 결과를 새로 만들거나 챗을 쓰려면 로그인과 개인 OpenAI 키가 필요하고, 화면은 그 자리에서 로그인·키 등록 안내를 보여 줍니다. `DEMO_MODE=false`면 상세 페이지부터 로그인이 필요합니다.
@@ -38,14 +38,16 @@ Hugging Face Daily Papers에 올라오는 AI 논문을 매일 수집하고, PDF�
 
 ```mermaid
 flowchart TD
-    A[HF Daily Papers] --> B[MongoDB raw]
-    B --> C[arxplore_daily_collect]
-    B --> D[arxplore_maintenance<br/>backfill + enrich]
-    C --> E[PostgreSQL prepare_jobs]
+    A[HF Daily Papers] --> C[arxplore_daily_collect]
+    A --> D[arxplore_maintenance<br/>backfill + enrich]
+    C -->|한 트랜잭션| B[PostgreSQL raw_daily_papers<br/>JSONB payload]
+    C -->|한 트랜잭션| E[PostgreSQL prepare_jobs]
+    D --> B
     E -->|LISTEN/NOTIFY| F[prepare-worker]
     F --> G[HURIDOCS Layout Parser]
     F --> H[pypdf / abstract fallback]
-    G --> I[prepare_papers]
+    B --> I[prepare_papers]
+    G --> I
     H --> I
     I --> J[(PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings)]
     D --> J
@@ -56,11 +58,11 @@ flowchart TD
     M --> N
 ```
 
-- **서버 스택**(`docker-compose.server.yml`): PostgreSQL(pgvector), MongoDB, Airflow. 항상 켜 두는 수집·저장 계층입니다.
+- **서버 스택**(`docker-compose.server.yml`): PostgreSQL(pgvector), Airflow. 항상 켜 두는 수집·저장 계층입니다. 저장소는 PostgreSQL 하나로, raw payload·파이프라인 상태·정제 데이터·벡터·작업 큐를 모두 담습니다.
 - **로컬 스택**(`docker-compose.yml`): Django(gunicorn) + nginx(React 빌드). `dev` 프로필은 Vite HMR 서버, `parser` 프로필은 HURIDOCS 파서와 prepare-worker, `local-db` 프로필은 로컬 PostgreSQL을 더합니다.
 - **GPU는 HURIDOCS 파서에만 씁니다.** 임베딩은 OpenAI API(`text-embedding-3-large`를 `dimensions=1536`으로 줄여 요청)로 만듭니다.
 - **도메인 범위**: HF Daily Papers 큐레이션 피드 전체입니다. arXiv 카테고리로 따로 거르지 않습니다.
-- **기술 스택**: Python 3.12, Django 5, React 18 + TypeScript + Vite, LangChain / LangGraph / LangSmith, PostgreSQL 16 + pgvector, MongoDB, Airflow 3.
+- **기술 스택**: Python 3.12, Django 5, React 18 + TypeScript + Vite, LangChain / LangGraph / LangSmith, PostgreSQL 16 + pgvector, Airflow 3.
 
 세부 구조와 테이블 스키마는 [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)에 있습니다.
 
@@ -81,8 +83,16 @@ flowchart TD
 ## 데이터 파이프라인
 
 ```text
-HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker → papers / paper_fulltexts / paper_chunks → paper_embeddings
+HF Daily Papers → raw_daily_papers(JSONB) + prepare_jobs → prepare-worker → papers / paper_fulltexts / paper_chunks → paper_embeddings
 ```
+
+모든 단계가 같은 PostgreSQL을 씁니다.
+
+**원본 저장** (`src/integrations/raw_store.py`)
+
+- HF 응답은 `raw_daily_papers`에 `(source, date)`당 1행으로 JSONB 그대로 저장합니다. 키 순서와 무관한 `payload_hash`가 저장된 값과 다를 때만 `revision`이 오르고, 같으면 `collected_at`만 갱신합니다. revision 계산은 `INSERT ... ON CONFLICT` 한 문장 안에서 끝납니다.
+- 수집 태스크는 raw upsert와 `prepare_jobs` 등록을 한 트랜잭션으로 실행합니다. 등록이 실패하면 raw 저장도 롤백되고, `pg_notify`는 commit 뒤에 전달되므로 worker는 raw가 보이는 시점에만 깨어납니다.
+- backfill 커서는 `pipeline_state`(key → JSONB) 테이블에 둡니다.
 
 **작업 큐** (`src/integrations/prepare_job_repository.py`)
 
@@ -91,7 +101,7 @@ HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker 
 - stale 판정을 따로 돌리는 감시 프로세스는 없습니다. worker가 claim할 때 마지막 heartbeat(없으면 claim 시각)가 `PREPARE_JOB_STALE_SECONDS`(기본 900초)보다 오래된 `processing` 잡을 되돌립니다. heartbeat는 논문 한 편을 처리하기 전마다 갱신합니다.
 - 실패한 잡은 `PREPARE_JOB_MAX_ATTEMPTS`(기본 3회)까지 지수 backoff(60초부터 두 배씩, 최대 1시간) 뒤에 다시 시도하고, 횟수를 다 쓰면 `failed`로 닫습니다. 같은 날짜를 다시 수집해 raw revision이 올라가면 완료된 잡도 다시 처리합니다.
 
-**2026-09 점검(Phase 0)에서 추가한 보호 장치**
+**데이터 보호 장치**
 
 - 논문 단위 격리: 한 논문의 예외는 기록하고 나머지 논문을 계속 처리합니다. 큐 잡은 실패한 논문이 하나라도 있으면 backoff 후 재시도되고(최대 `PREPARE_JOB_MAX_ATTEMPTS`), 이미 저장된 논문은 재시도에서 건너뜁니다. 날짜 backfill은 실패가 있는 날짜에서 커서를 진행하지 않습니다.
 - 멱등 재처리: 본문 source 순위(`layout_pdf` > `pdf` > `fallback_abstract`)에서 낮은 순위 결과로는 덮어쓰지 않고, 같은 source에 내용 해시까지 같으면 저장을 건너뜁니다. 청크 텍스트가 같으면 청크 id와 임베딩을 보존합니다. 일시적인 다운로드·파서 실패가 기존 임베딩을 CASCADE로 지우던 문제를 막고, 강제 재처리는 `--force`로 합니다. 논문 1건이라도 실패한 날짜 잡은 backoff 후 재시도됩니다.
@@ -114,7 +124,7 @@ HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker 
 
 ### (a) 로컬 단독 실행
 
-원격 서버 없이 로컬 PostgreSQL 하나로 웹 앱을 띄웁니다. 수집(Airflow + MongoDB)은 돌지 않으므로 **논문 목록은 빈 상태로 시작합니다.**
+원격 서버 없이 로컬 PostgreSQL 하나로 웹 앱을 띄웁니다. 수집(Airflow)은 돌지 않으므로 **논문 목록은 빈 상태로 시작합니다.**
 
 ```bash
 cp .env.example .env
@@ -138,10 +148,10 @@ docker compose --profile local-db --profile dev up -d vite  # (선택) Vite HMR:
 
 ### (b) 원격 서버 모드
 
-서버(PostgreSQL · MongoDB · Airflow)를 Tailscale로 공유하고(참고: 팀 시절 커밋 c7b2c34에 포함됐던 Tailscale 인증 키는 폐기되었고 현재 문서는 플레이스홀더만 담습니다), 로컬에서 웹과 GPU 파서·prepare-worker를 돌리는 원래 팀 구성입니다. 절차는 [TEAM_SETUP.md](./docs/management/TEAM_SETUP.md)를 따릅니다.
+서버(PostgreSQL · Airflow)를 Tailscale로 공유하고(참고: 팀 시절 커밋 c7b2c34에 포함됐던 Tailscale 인증 키는 폐기되었고 현재 문서는 플레이스홀더만 담습니다), 로컬에서 웹과 GPU 파서·prepare-worker를 돌리는 원래 팀 구성입니다. 절차는 [TEAM_SETUP.md](./docs/management/TEAM_SETUP.md)를 따릅니다.
 
 ```bash
-bash scripts/setup-server.sh                  # 서버: PostgreSQL / MongoDB / Airflow
+bash scripts/setup-server.sh                  # 서버: PostgreSQL / Airflow
 bash scripts/setup.sh                         # 로컬: django + nginx
 docker compose --profile parser up -d --build # 로컬 GPU: layout-parser + prepare-worker
 ```
@@ -161,7 +171,7 @@ docker compose --profile parser up -d --build # 로컬 GPU: layout-parser + prep
 pip install -r requirements-dev.txt   # requirements.txt(런타임) + pytest·ruff·jupyter 등 개발 도구
 pytest tests/unit                     # DB·API 키 없이 도는 단위 테스트
 
-# 큐 통합 테스트: 일회용 PostgreSQL(pgvector) 필요
+# 통합 테스트(큐·raw 저장소·검색): 일회용 PostgreSQL(pgvector) 필요
 TEST_DATABASE_URL=postgresql://arxplore:arxplore@localhost:5432/arxplore_test \
   pytest tests/integration -m integration
 
@@ -203,7 +213,7 @@ python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (O
 
 ## 기술적 결정과 트레이드오프
 
-- **PostgreSQL 단일화**: 정제 데이터, 벡터, 작업 큐, AI 결과 캐시, Django 테이블을 한 DB에 둡니다. 별도 메시지 브로커 없이 `SKIP LOCKED`와 `LISTEN/NOTIFY`로 큐를 만들 수 있고 운영할 대상이 줄어듭니다. 대신 벡터 인덱스와 FTS 튜닝을 직접 챙겨야 하고, 규모가 커지면 분리를 검토해야 합니다.
+- **PostgreSQL 단일 저장소**: raw payload(JSONB)·파이프라인 상태, 정제 데이터, 벡터, 작업 큐, AI 결과 캐시, Django 테이블을 한 DB에 둡니다. raw 저장과 prepare 작업 등록을 한 트랜잭션으로 묶을 수 있고, 별도 메시지 브로커 없이 `SKIP LOCKED`와 `LISTEN/NOTIFY`로 큐를 만들 수 있어 운영할 대상이 줄어듭니다. 대신 벡터 인덱스와 FTS 튜닝을 직접 챙겨야 하고, 규모가 커지면 분리를 검토해야 합니다.
 - **서버/로컬 worker 분리**: 서버는 항상 켜진 수집·저장만 맡고, GPU가 필요한 파싱은 로컬 worker가 서버 DB에 직접 적재합니다. 서버에 GPU가 없어도 되지만, 로컬 worker가 꺼져 있으면 수집분이 처리되지 않고 Tailscale 연결에 의존합니다.
 - **3단 파서 폴백**: HURIDOCS 레이아웃 분석이 섹션 구조를 가장 잘 살리지만 GPU 컨테이너와 긴 처리 시간이 필요합니다. 실패하면 pypdf, 그것도 실패하면 초록으로 내려가 최소한의 청크는 남깁니다. 폴백 결과가 기존 PDF 본문을 덮지 않도록 막아 두었습니다.
 - **AI 결과 캐시 키**: 개요는 `arxiv_id` 단독 기본키(모델은 기록용), 상세 요약은 `(arxiv_id, model)` 유일 제약입니다. 모든 사용자가 캐시를 공유하므로 같은 논문을 다시 열 때 LLM을 부르지 않습니다. 대신 프롬프트를 바꿔도 기존 캐시를 무효화할 버전 정보가 없고, 한 사용자가 만든 결과를 모두가 봅니다.
@@ -222,7 +232,7 @@ python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (O
 backend/            Django 프로젝트 (arxplore_web 설정, papers 앱 API)
 frontend/           React + TypeScript + Vite
 src/core/           모델, 프롬프트, 요약 그래프, LangGraph 에이전트
-src/integrations/   PostgreSQL·MongoDB 저장소, PDF 파서, 임베딩, 검색
+src/integrations/   PostgreSQL 저장소(raw·정제·벡터·큐), PDF 파서, 임베딩, 검색
 src/pipeline/       수집·prepare·임베딩 진입점과 prepare-worker
 src/shared/         설정(Pydantic AppSettings)과 LangSmith 트레이싱
 dags/               Airflow DAG 3개

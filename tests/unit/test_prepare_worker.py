@@ -159,17 +159,22 @@ def test_main_ensures_schema_once_at_startup(monkeypatch):
         def ensure_schema(self):
             calls.append("papers")
 
+    class FakeRawPaperStore:
+        def ensure_schema(self):
+            calls.append("raw")
+
     class FakePrepareJobRepository:
         def ensure_schema(self):
             calls.append("prepare_jobs")
 
     monkeypatch.setattr(prepare_worker, "PaperRepository", FakePaperRepository)
+    monkeypatch.setattr(prepare_worker, "RawPaperStore", FakeRawPaperStore)
     monkeypatch.setattr(prepare_worker, "PrepareJobRepository", FakePrepareJobRepository)
     monkeypatch.setattr(prepare_worker, "_run_once", lambda args: {"status": "no_op"})
     monkeypatch.setattr("sys.argv", ["prepare_worker", "--mode", "auto"])
 
     assert prepare_worker.main() == 0
-    assert calls == ["papers", "prepare_jobs"]
+    assert calls == ["papers", "raw", "prepare_jobs"]
 
 
 def test_papers_prepared_in_a_partially_failed_job_are_embedded(monkeypatch):
@@ -201,6 +206,7 @@ def _parsed_main_args(monkeypatch, argv: list[str]) -> argparse.Namespace:
         return {"status": "no_op"}
 
     monkeypatch.setattr(prepare_worker, "PaperRepository", FakeRepository)
+    monkeypatch.setattr(prepare_worker, "RawPaperStore", FakeRepository)
     monkeypatch.setattr(prepare_worker, "PrepareJobRepository", FakeRepository)
     monkeypatch.setattr(prepare_worker, "_run_once", fake_run_once)
     monkeypatch.setattr("sys.argv", ["prepare_worker", *argv])

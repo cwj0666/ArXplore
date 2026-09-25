@@ -19,7 +19,7 @@
 
 현재 ArXplore는 아래 기반이 이미 구현된 상태를 기준으로 움직인다.
 
-- HF Daily Papers 원본 수집과 MongoDB raw 저장
+- HF Daily Papers 원본 수집과 PostgreSQL raw 저장(`raw_daily_papers`)
 - PostgreSQL `prepare_jobs` 기반 prepare queue
 - 로컬 `prepare-worker` 기반 `prepare -> embed` 실행 경로
 - HURIDOCS 우선, `pypdf` fallback, abstract fallback 기반 PDF 파싱

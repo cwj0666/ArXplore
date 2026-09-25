@@ -27,7 +27,7 @@ AI는 아래 운영 사실을 현재 기준선으로 사용한다.
 - 과거 raw 백필과 arXiv 메타데이터 후속 보강은 `maintenance`가 수행한다
 - `prepare`와 `embed`는 서버 Airflow가 아니라 로컬 runtime에서 수행한다
 - 로컬 실행 진입점은 `docker-compose.yml`의 `prepare-worker` 서비스(profile: parser)와 `src/pipeline/prepare_worker.py`다
-- prepare queue는 Mongo polling이 아니라 PostgreSQL `prepare_jobs` 테이블과 `prepare_job_repository.py`를 사용한다
+- raw payload와 backfill 상태는 PostgreSQL `raw_daily_papers`·`pipeline_state` 테이블(`raw_store.py`)에, prepare queue는 PostgreSQL `prepare_jobs` 테이블(`prepare_job_repository.py`)에 있다. 수집은 raw 저장과 enqueue를 한 트랜잭션으로 실행한다
 - parser runtime은 같은 `docker-compose.yml`의 `layout-parser` 서비스(profile: parser, HURIDOCS 컨테이너)다
 - PDF 파싱 경로는 `layout -> pypdf -> abstract fallback` 순서다. GPU는 layout parser에만 쓰고, 임베딩은 OpenAI API로 만든다
 - 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다. 리포지토리 생성자나 요청 경로에 DDL을 넣지 않는다

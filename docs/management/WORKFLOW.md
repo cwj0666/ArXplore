@@ -94,8 +94,8 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 
 현재 운영 흐름은 아래와 같다.
 
-1. `arxplore_daily_collect`가 최신 raw를 MongoDB에 저장한다
-2. 같은 날짜를 PostgreSQL `prepare_jobs`에 등록한다
+1. `arxplore_daily_collect`가 최신 raw를 PostgreSQL `raw_daily_papers`에 저장한다
+2. 같은 트랜잭션에서 그 날짜를 `prepare_jobs`에 등록한다
 3. 로컬 `prepare-worker`가 새 job을 기다린다
 4. job을 claim하면 `prepare -> embed`를 수행한다
 5. 결과는 PostgreSQL 정제층에 저장된다
@@ -179,7 +179,7 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 
 확인 대상:
 
-- MongoDB raw 수집 상태
+- `raw_daily_papers` raw 수집 상태
 - `prepare_jobs` 상태
 - `paper_fulltexts`, `paper_chunks`, `paper_embeddings` 적재 상태
 - parser 컨테이너 health
@@ -214,7 +214,7 @@ LangSmith는 공용 프로젝트 기준으로 trace를 축적한다. 현재 주�
 통합 검증은 아래 순서로 수행한다.
 
 1. ingestion 상태 확인
-   - raw가 MongoDB에 들어가는지
+   - raw가 `raw_daily_papers`에 들어가는지
    - `prepare_jobs`가 생성되는지
 2. prepare 상태 확인
    - `paper_fulltexts`와 `paper_chunks`가 늘어나는지
@@ -232,11 +232,11 @@ LangSmith는 공용 프로젝트 기준으로 trace를 축적한다. 현재 주�
 
 ## 11. 정제층 재적재 원칙
 
-파싱 기준이나 chunk 기준이 크게 바뀌면 MongoDB raw를 유지한 채 PostgreSQL 정제층을 다시 만드는 것이 더 안전하다.
+파싱 기준이나 chunk 기준이 크게 바뀌면 `raw_daily_papers`의 raw를 유지한 채 정제층을 다시 만드는 것이 더 안전하다.
 
 원칙:
 
-1. MongoDB raw는 source of truth다
+1. `raw_daily_papers`의 raw payload는 source of truth다
 2. PostgreSQL `papers`, `paper_fulltexts`, `paper_chunks`, `paper_embeddings`는 재생성 가능한 계층이다
 3. parser 기준이 크게 달라지면 부분 덮어쓰기보다 재prepare와 재embed가 일관성 면에서 낫다
 

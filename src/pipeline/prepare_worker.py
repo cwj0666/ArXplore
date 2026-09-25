@@ -7,6 +7,7 @@ from typing import Any
 
 from src.integrations.paper_repository import PaperRepository
 from src.integrations.prepare_job_repository import PrepareJobRepository
+from src.integrations.raw_store import RawPaperStore
 from src.pipeline import run_backfill_prepare_papers, run_consume_prepare_queue, run_embed_papers
 
 
@@ -261,6 +262,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     PaperRepository().ensure_schema()
+    RawPaperStore().ensure_schema()
     prepare_job_repository = PrepareJobRepository()
     prepare_job_repository.ensure_schema()
 

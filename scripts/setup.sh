@@ -27,11 +27,10 @@ if [[ "${1:-}" == "forward" ]]; then
   : "${SERVER_IP:?Set TAILSCALE_SERVER_IP in .env (server Tailscale IP)}"
   AIRFLOW_PORT="$(env_value SERVER_AIRFLOW_PORT 18080)"
   POSTGRES_PORT="$(env_value SERVER_POSTGRES_PORT 15432)"
-  MONGO_PORT="$(env_value SERVER_MONGO_PORT 17017)"
   ACTION="${2:-start}"
 
   get_pids() {
-    pgrep -f "ssh -N .*${AIRFLOW_PORT}:${SERVER_IP}.*${POSTGRES_PORT}:${SERVER_IP}.*${MONGO_PORT}:${SERVER_IP}" || true
+    pgrep -f "ssh -N .*${AIRFLOW_PORT}:${SERVER_IP}.*${POSTGRES_PORT}:${SERVER_IP}" || true
   }
 
   is_running() { [[ -n "$(get_pids)" ]]; }
@@ -62,7 +61,7 @@ if [[ "${1:-}" == "forward" ]]; then
     exit 0
   fi
 
-  for port in "${AIRFLOW_PORT}" "${POSTGRES_PORT}" "${MONGO_PORT}"; do
+  for port in "${AIRFLOW_PORT}" "${POSTGRES_PORT}"; do
     if ! python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',${port})); s.close()" 2>/dev/null; then
       echo "[forward] 포트 ${port}가 이미 사용 중입니다."
       exit 1
@@ -72,12 +71,10 @@ if [[ "${1:-}" == "forward" ]]; then
   echo "[forward] ${SERVER_IP} 으로 포트 포워딩"
   echo "  Airflow:    localhost:${AIRFLOW_PORT}"
   echo "  PostgreSQL: localhost:${POSTGRES_PORT}"
-  echo "  MongoDB:    localhost:${MONGO_PORT}"
 
   ssh -N \
     -L "${AIRFLOW_PORT}:${SERVER_IP}:${AIRFLOW_PORT}" \
     -L "${POSTGRES_PORT}:${SERVER_IP}:${POSTGRES_PORT}" \
-    -L "${MONGO_PORT}:${SERVER_IP}:${MONGO_PORT}" \
     localhost &
 
   SSH_PID=$!

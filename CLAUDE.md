@@ -23,7 +23,7 @@ docker compose down
 # GPU parser + prepare-worker 포함
 docker compose --profile parser up -d --build
 
-# 서버 인프라 (PostgreSQL, MongoDB, Airflow) — 원격 서버에서 실행
+# 서버 인프라 (PostgreSQL, Airflow) — 원격 서버에서 실행
 bash scripts/setup-server.sh
 
 # SSH 포트 포워딩 (원격 서버 → localhost)
@@ -75,7 +75,6 @@ docker compose logs -f [django|nginx|vite]
 | Vite (dev) | 5173 (`FRONTEND_PORT`) |
 | Layout Parser | 5060 (`LAYOUT_PARSER_PORT`) |
 | Airflow | 18080 |
-| MongoDB | 17017 |
 | PostgreSQL | 15432 (`SERVER_POSTGRES_PORT`, local-db 프로필은 127.0.0.1에만 공개) |
 
 ## Architecture
@@ -87,8 +86,8 @@ ArXplore는 HuggingFace Daily Papers + arXiv 논문을 수집·처리해 RAG 기
 ```
 HF Daily Papers / arXiv
   → Airflow DAGs (daily_collect, maintenance, langsmith_maintenance)  [서버]
-  → MongoDB (raw payload)                       [서버]
-  → PostgreSQL prepare_jobs queue (LISTEN/NOTIFY)
+  → PostgreSQL raw_daily_papers (raw payload JSONB) + prepare_jobs queue, 한 트랜잭션  [서버]
+  → prepare_jobs LISTEN/NOTIFY (commit 뒤 전달)
   → prepare-worker (PDF parse → OpenAI 임베딩 API)  [--profile parser]
   → PostgreSQL: papers, paper_fulltexts, paper_chunks, paper_embeddings (pgvector)
   → Retrieval (RETRIEVAL_MODE=hybrid 기본: 질의 임베딩 키가 있으면 hybrid, 없거나 실패하면 lexical)
@@ -109,7 +108,7 @@ HF Daily Papers / arXiv
 | `layout-parser` | `parser` | HURIDOCS GPU PDF 파서 |
 | `postgres-local` | `local-db` | 로컬 단독 실행용 PostgreSQL 16 + pgvector (`127.0.0.1:${SERVER_POSTGRES_PORT:-15432}`) |
 
-서버 인프라(PostgreSQL, MongoDB, Airflow)는 `docker-compose.server.yml`로 별도 운영합니다. Airflow 서비스 4개는 `x-airflow-common` 앵커로 이미지·환경 변수·볼륨을 공유합니다.
+서버 인프라(PostgreSQL, Airflow)는 `docker-compose.server.yml`로 별도 운영합니다. Airflow 서비스 4개는 `x-airflow-common` 앵커로 이미지·환경 변수·볼륨을 공유합니다.
 
 nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API만 Django로 프록시한다. 새 API 경로를 추가하면 nginx location과 `frontend/vite.config.ts` 프록시에 같이 넣어야 한다. SSE 경로(`/papers/assistant/stream/`, `/papers/<id>/chat/stream/`)는 버퍼링을 끈 location을 쓴다. admin 경로는 프록시하지 않는다.
 
@@ -117,13 +116,13 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 
 ### Key Architectural Split
 
-**Server-side** (`docker-compose.server.yml`): PostgreSQL, MongoDB, Airflow — 항상 켜져있는 원격 서버에서 실행.
+**Server-side** (`docker-compose.server.yml`): PostgreSQL, Airflow — 항상 켜져있는 원격 서버에서 실행. PostgreSQL이 유일한 저장소다(raw payload·파이프라인 상태·정제 데이터·벡터·작업 큐).
 
 **Local** (`docker-compose.yml`): Django(gunicorn) + nginx는 로컬에서 실행하고, vite는 `dev` 프로필로 필요할 때만 띄운다. parser 프로필은 GPU 보유 시에만 추가. `local-db` 프로필은 원격 서버 없이 웹만 띄울 때 쓴다(수집이 없으므로 빈 DB).
 
 **prepare-worker는 Airflow가 아닌 로컬에서 실행** — GPU가 필요한 HURIDOCS 파싱을 로컬에서 처리하고 결과를 서버 DB에 직접 적재한다. 임베딩은 GPU가 아니라 OpenAI API(`text-embedding-3-large`, 1536차원)로 만든다. 이 분리를 깨지 말 것.
 
-**스키마는 `scripts/migrate_schema.py`가 만든다.** `PaperRepository()`·`PrepareJobRepository()` 생성자는 DDL을 실행하지 않는다(요청 경로에서 DDL 금지). prepare-worker는 시작할 때 `ensure_schema()`를 1회 호출한다. DAG 태스크는 스키마가 이미 있다고 가정한다.
+**스키마는 `scripts/migrate_schema.py`가 만든다.** `PaperRepository()`·`RawPaperStore()`·`PrepareJobRepository()` 생성자는 DDL을 실행하지 않는다(요청 경로에서 DDL 금지). prepare-worker는 시작할 때 `ensure_schema()`를 1회 호출한다. DAG 태스크는 스키마가 이미 있다고 가정한다.
 
 ### Module Responsibilities
 
@@ -135,7 +134,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
   - `papers/models.py` — `UserSettings`, `FavoritePaper` (Django ORM)
   - AI overview/요약 결과는 모델이 아니라 `src/integrations/paper_repository.py`가 PostgreSQL `paper_ai_overviews`, `paper_ai_detailed_summaries` 테이블에 직접 캐싱한다
 - **`src/core/`** — LLM 체인, 프롬프트, 상세 요약 그래프, LangGraph 에이전트
-- **`src/integrations/`** — 외부 I/O: MongoDB, PostgreSQL 리포지토리, HURIDOCS 클라이언트, OpenAI 임베딩, hybrid retriever
+- **`src/integrations/`** — 외부 I/O: PostgreSQL 리포지토리(raw 저장소 포함), HURIDOCS 클라이언트, OpenAI 임베딩, hybrid retriever
 - **`src/pipeline/`** — Airflow DAG 및 prepare-worker가 호출하는 진입점 스크립트
 - **`src/shared/`** — Pydantic `AppSettings` (`.env` 로드), LangSmith 트레이싱
 - **`dags/`** — Airflow DAG 3개 (TaskFlow `@dag`/`@task`로 `src/pipeline/` 호출)
@@ -206,7 +205,6 @@ POSTGRES_DB / APP_POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD
 
 ```
 OPENAI_API_KEY              # prepare-worker 임베딩. 웹 AI 기능은 사용자 개인 키(세션)를 쓴다
-MONGO_HOST / SERVER_MONGO_PORT / MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
 LAYOUT_PARSER_BASE_URL      # 코드 기본값 없음. compose prepare-worker는 비면 http://layout-parser:5060
 TAILSCALE_SERVER_IP         # 서버 compose 포트 바인딩 + setup.sh forward
 AIRFLOW_ADMIN_USER          # Airflow SimpleAuthManager admin 사용자
@@ -230,7 +228,7 @@ POSTGRES_POOL_MAX=8         # 프로세스당 연결 풀 상한
 POSTGRES_POOL_TIMEOUT=30    # 풀 고갈 시 대기(초)
 ```
 
-주소 규칙: `POSTGRES_HOST`/`PROD_POSTGRES_HOST`/`MONGO_HOST`는 `host` 또는 `host:port`. 포트를 생략하면 `SERVER_POSTGRES_PORT`/`SERVER_MONGO_PORT`(서버가 호스트에 공개하는 포트)를 쓴다. 같은 compose 네트워크 안에서 컨테이너 이름으로 붙을 때는 `postgres-local:5432`, `arxplore-postgres:5432`처럼 내부 포트를 명시한다.
+주소 규칙: `POSTGRES_HOST`/`PROD_POSTGRES_HOST`는 `host` 또는 `host:port`. 포트를 생략하면 `SERVER_POSTGRES_PORT`(서버가 호스트에 공개하는 포트)를 쓴다. 같은 compose 네트워크 안에서 컨테이너 이름으로 붙을 때는 `postgres-local:5432`, `arxplore-postgres:5432`처럼 내부 포트를 명시한다.
 
 Django 설정: `backend/arxplore_web/settings.py`. 언어 `ko-kr`, 타임존 `Asia/Seoul`.
 

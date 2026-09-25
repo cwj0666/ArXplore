@@ -10,16 +10,18 @@ ArXplore는 `최신 AI 논문 수집 -> raw 저장 -> prepare queue 등록 -> �
 
 ```mermaid
 flowchart TD
-    A[HF Daily Papers API] --> B[MongoDB<br/>raw payload 저장]
-    B --> C[arxplore_daily_collect<br/>PostgreSQL prepare_jobs enqueue]
+    A[HF Daily Papers API] --> C[arxplore_daily_collect<br/>raw upsert + enqueue, 한 트랜잭션]
+    C --> B[raw_daily_papers<br/>PostgreSQL JSONB raw payload]
     C --> D[prepare_jobs<br/>PostgreSQL job queue]
     D --> E[prepare-worker<br/>로컬 worker]
     E --> F[HURIDOCS Layout Parser<br/>로컬 GPU parser]
     E --> G[pypdf / abstract fallback]
-    F --> H[prepare_papers<br/>papers / fulltexts / chunks 적재]
+    B --> H[prepare_papers<br/>papers / fulltexts / chunks 적재]
+    F --> H
     G --> H
     H --> I[embed_papers<br/>OpenAI 임베딩 API -> paper_embeddings]
-    B --> J[arxplore_maintenance<br/>backfill -> enrich]
+    A --> J[arxplore_maintenance<br/>backfill -> enrich]
+    J --> B
     J --> K[arXiv metadata enrichment]
     K --> L[PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings]
     L --> M[Retrieval<br/>hybrid 제품 경로 / lexical 폴백]
@@ -44,13 +46,12 @@ flowchart TD
 `docker-compose.server.yml` 기준 컨테이너:
 
 - `arxplore-postgres` (pgvector/pgvector:pg16)
-- `arxplore-mongo`
 - `arxplore-airflow-init`
 - `arxplore-airflow-web`
 - `arxplore-airflow-scheduler`
 - `arxplore-airflow-dag-processor`
 
-PostgreSQL(15432), MongoDB(17017), Airflow(18080) 포트는 `TAILSCALE_SERVER_IP`에만 바인딩한다. Airflow는 SimpleAuthManager 사용자(`AIRFLOW_ADMIN_USER`)로 로그인한다.
+PostgreSQL(15432), Airflow(18080) 포트는 `TAILSCALE_SERVER_IP`에만 바인딩한다. Airflow는 SimpleAuthManager 사용자(`AIRFLOW_ADMIN_USER`)로 로그인한다.
 
 서버 Airflow DAG는 3개다. 모두 `start_date`가 `Asia/Seoul`이라 cron은 KST 기준이다.
 
@@ -87,12 +88,12 @@ flowchart TD
 
 ### `src/shared`
 
-공용 설정과 tracing. `settings.py`는 MongoDB, PostgreSQL, parser, LangSmith, worker 설정을 로드하고, `host[:port]` 주소를 해석한다(`resolve_host_and_port`). `langsmith.py`는 단계별 trace metadata를 구성한다. 전체 환경 변수 목록은 루트 `.env.example`에 있다.
+공용 설정과 tracing. `settings.py`는 PostgreSQL, parser, LangSmith, worker 설정을 로드하고, `host[:port]` 주소를 해석한다(`resolve_host_and_port`). `langsmith.py`는 단계별 trace metadata를 구성한다. 전체 환경 변수 목록은 루트 `.env.example`에 있다.
 
 ### `src/integrations`
 
 - `paper_search.py`: HF Daily Papers와 arXiv 메타데이터 조회, 관련 논문 카드의 arXiv 외부 검색
-- `raw_store.py`: MongoDB raw payload와 수집 상태 저장
+- `raw_store.py`: HF Daily Papers raw payload(`raw_daily_papers`)와 backfill 진행 상태(`pipeline_state`)를 PostgreSQL JSONB로 저장
 - `paper_repository.py`: `papers`, `paper_fulltexts`, `paper_chunks`, AI 결과 캐시 테이블 적재와 lexical 후보 조회
 - `layout_parser_client.py`: HURIDOCS HTTP 호출과 응답 검증
 - `fulltext_parser.py`, `pdf_parser/`: `layout -> pypdf -> abstract fallback` 파싱, 섹션 정리, `content_role` 판정, 청킹
@@ -106,7 +107,7 @@ flowchart TD
 
 ### `src/pipeline`
 
-- `collect_papers.py`: 최신 수집, raw 저장, prepare job enqueue
+- `collect_papers.py`: 최신 수집, raw 저장과 prepare job enqueue(한 트랜잭션)
 - `enrich_papers_metadata.py`: 저장된 논문의 arXiv 메타데이터 보강
 - `prepare_papers.py`: raw 로드, parser 호출, 청크 생성, PostgreSQL 적재, 큐 잡 단위 처리
 - `embed_papers.py`: 누락 청크 임베딩과 vector 적재
@@ -153,8 +154,8 @@ UI는 API만 소비하고 저장 구조나 외부 연동 코드를 직접 구현
 ## 5. 데이터 흐름
 
 1. `arxplore_daily_collect`가 HF Daily Papers 날짜 feed를 수집한다
-2. raw payload를 MongoDB에 저장한다(같은 날짜를 다시 수집하면 raw revision이 올라간다)
-3. 수집 날짜를 PostgreSQL `prepare_jobs`에 enqueue하고 `pg_notify`를 보낸다
+2. raw payload를 PostgreSQL `raw_daily_papers`에 upsert한다(같은 날짜의 payload hash가 바뀌면 raw revision이 올라간다)
+3. 같은 트랜잭션에서 수집 날짜를 `prepare_jobs`에 enqueue하고 `pg_notify`를 보낸다. 알림은 commit 뒤에 전달된다
 4. 로컬 `prepare-worker`가 잡을 claim한다
 5. `prepare_papers`가 raw payload에서 arXiv ID와 PDF 정보를 정리한다
 6. HURIDOCS parser로 PDF를 파싱하고, 실패하면 pypdf, 최종적으로 초록 폴백을 쓴다
@@ -164,21 +165,18 @@ UI는 API만 소비하고 저장 구조나 외부 연동 코드를 직접 구현
 10. `arxplore_maintenance`는 과거 raw 백필과 메타데이터 보강을 수행한다
 11. retrieval 계층과 상세 문서 생성, 에이전트가 이 데이터를 소비한다
 
-raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 만들 수 있는 읽기/검색 계층이다.
+`raw_daily_papers`의 raw payload가 source of truth이고, 정제층(`papers`, `paper_fulltexts`, `paper_chunks`, `paper_embeddings`)은 raw에서 다시 만들 수 있는 읽기/검색 계층이다. 둘 다 같은 PostgreSQL에 있다.
 
 ## 6. 저장 구조
 
-### MongoDB
-
-- HF Daily Papers 날짜별 원본 payload(`daily_papers_raw`)
-- backfill 상태와 수집 메타데이터(`pipeline_state`)
-
 ### PostgreSQL + pgvector
 
-애플리케이션 DB(`APP_POSTGRES_DB`) 하나에 정제 데이터, 벡터, 큐, AI 캐시, Django 테이블이 함께 있다. DDL 원본은 `PaperRepository.ensure_schema()`(`src/integrations/paper_repository.py`)와 `PrepareJobRepository.ensure_schema()`(`src/integrations/prepare_job_repository.py`)다. `vector_repository.py`는 DDL이 없고 `paper_embeddings`를 읽고 쓰기만 한다.
+PostgreSQL이 유일한 저장소다. 애플리케이션 DB(`APP_POSTGRES_DB`) 하나에 raw payload, 파이프라인 상태, 정제 데이터, 벡터, 큐, AI 캐시, Django 테이블이 함께 있다. DDL 원본은 `PaperRepository.ensure_schema()`(`src/integrations/paper_repository.py`), `RawPaperStore.ensure_schema()`(`src/integrations/raw_store.py`), `PrepareJobRepository.ensure_schema()`(`src/integrations/prepare_job_repository.py`)다. `vector_repository.py`는 DDL이 없고 `paper_embeddings`를 읽고 쓰기만 한다.
 
 | 테이블 | 키 | 주요 컬럼 | 인덱스·제약 |
 | --- | --- | --- | --- |
+| `raw_daily_papers` | `(source, date)` PK | `payload` JSONB(HF 응답 원본), `payload_hash`(키 순서와 무관한 sha256), `revision`(hash가 바뀔 때만 +1, 첫 저장 1), `fetched_count`, `collected_at` | PK만 |
+| `pipeline_state` | `key` PK(`<pipeline>:<name>`) | `value` JSONB(backfill 커서, 마지막 처리 날짜, 마지막 실패), `updated_at` | PK만 |
 | `papers` | `arxiv_id` PK | `title`, `authors` JSONB, `abstract`, `primary_category`, `categories` JSONB, `pdf_url`, `published_at`, `upvotes`, `github_url`, `source`, `title_abstract_vector` tsvector 생성 컬럼(제목 A + 초록 B, `english`) | `idx_papers_title_abstract_vector` GIN(`title_abstract_vector`) |
 | `paper_fulltexts` | `arxiv_id` PK, FK -> `papers` (CASCADE) | `text`, `sections` JSONB, `source`(`layout_pdf` / `pdf` / `fallback_abstract`), `quality_metrics`, `artifacts`, `parser_metadata` JSONB, `content_hash` TEXT | PK만 |
 | `paper_chunks` | `id` BIGSERIAL PK, FK `arxiv_id` -> `papers` (CASCADE) | `chunk_index`, `chunk_text`, `section_title`, `token_count`, `metadata` JSONB(`content_role` 포함), `chunk_vector` tsvector 생성 컬럼(청크 C, `english`) | `UNIQUE(arxiv_id, chunk_index)`, `idx_paper_chunks_chunk_vector` GIN(`chunk_vector`) |
@@ -188,6 +186,13 @@ raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 
 | `prepare_jobs` | `id` BIGSERIAL PK | `mode`, `target_date`, `status`, `attempt_count`, `worker_id`, `claim_generation`, `claimed_at`, `heartbeat_at`, `next_attempt_at`, `raw_revision`, `pending_refresh`, `payload`/`result` JSONB, `error` | `UNIQUE(mode, target_date)`, `(mode, status, target_date)`, `(status, updated_at DESC)` |
 | `topics`, `topic_papers`, `topic_documents` | - | 이전 토픽 계층의 잔재 | 현재 제품 경로에서 쓰지 않음 |
 | `user_settings`, `favorite_papers`, Django `auth_*`/`django_*` | Django ORM | 요약 모델 선호, 즐겨찾기, 계정·세션 | Django 마이그레이션이 관리 (`favorite_papers`는 `(user, arxiv_id)` 유일) |
+
+raw 저장 규칙:
+
+- `save_daily_papers_response`는 `INSERT ... ON CONFLICT (source, date) DO UPDATE` 한 문장이다. `revision = CASE WHEN 기존 payload_hash = 새 payload_hash THEN 기존 revision ELSE 기존 revision + 1 END`로 계산하므로 동시 저장에서도 revision이 빠지거나 겹치지 않는다. 같은 hash면 payload는 그대로 두고 `collected_at`만 갱신한다
+- 반환값 `changed`는 같은 문장의 CTE가 읽은 이전 hash와 저장된 hash를 비교한 값이다. 같은 날짜를 동시에 저장하는 경합에서는 True로 기울 수 있고, revision은 영향을 받지 않는다
+- JSONB가 받지 않는 NUL 문자와 짝 없는 서로게이트는 hash 계산 전에 제거한다
+- `run_collect_papers`는 HTTP 수집을 트랜잭션 밖에서 끝낸 뒤, 풀에서 빌린 연결 하나로 raw upsert와 `prepare_jobs` enqueue를 실행하고 한 번에 commit한다. enqueue가 실패하면 raw 저장도 롤백된다. `pg_notify`는 commit 시점에 전달되므로 worker가 깨어났을 때 raw는 항상 보인다
 
 인덱스 관련 사실:
 

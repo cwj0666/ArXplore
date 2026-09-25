@@ -528,15 +528,15 @@ def test_consume_queue_still_fails_job_on_date_level_exception(monkeypatch):
     monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
 
     def raise_error(**kwargs):
-        raise RuntimeError("mongo down")
+        raise RuntimeError("raw store down")
 
     monkeypatch.setattr(prepare_papers, "run_prepare_papers", raise_error)
 
     result = prepare_papers.run_consume_prepare_queue(runtime="test")
 
     assert result["status"] == "failed"
-    assert job_repository.failed == [{"job_id": 101, "claim_generation": 1, "error": "mongo down"}]
-    assert result["failures"] == [{"date": "2026-04-07", "error": "mongo down"}]
+    assert job_repository.failed == [{"job_id": 101, "claim_generation": 1, "error": "raw store down"}]
+    assert result["failures"] == [{"date": "2026-04-07", "error": "raw store down"}]
 
 
 def test_consume_queue_lost_claim_on_complete_is_recorded_not_raised(monkeypatch):
