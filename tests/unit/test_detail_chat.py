@@ -274,3 +274,10 @@ class TestServices:
             pytest.raises(services.PaperNotFoundError),
         ):
             services.prepare_paper_chat("2401.99999", "질문", [])
+
+
+def test_control_characters_are_removed_from_chat_messages():
+    from papers.services import strip_control_characters
+
+    assert strip_control_characters("RAG\x00에서 retriever\x07의 역할은?\x1b[31m") == "RAG에서 retriever의 역할은?[31m"
+    assert strip_control_characters("a\tb\nc") == "a\tb\nc"

@@ -299,6 +299,18 @@ def fulltext_source_rank(source: str | None) -> int:
     return FULLTEXT_SOURCE_RANK.get(str(source or ""), 0)
 
 
+def strip_surrogates(value: str) -> str:
+    return "".join(char for char in str(value or "") if not 0xD800 <= ord(char) <= 0xDFFF)
+
+
+def _strip_surrogates_in_place(fulltext: Any) -> None:
+    fulltext.text = strip_surrogates(fulltext.text)
+    for section in fulltext.sections or []:
+        for key in ("title", "text"):
+            if isinstance(section.get(key), str):
+                section[key] = strip_surrogates(section[key])
+
+
 def compute_fulltext_content_hash(text: str, sections: list[dict[str, Any]]) -> str:
     """공백을 정규화한 본문과 섹션 제목 순서열의 sha256."""
     payload = {
@@ -338,6 +350,7 @@ def prepare_single_paper(
         fallback_text=prepared.get("abstract") or "",
     )
     _repair_parsed_sections_with_metadata(fulltext, prepared)
+    _strip_surrogates_in_place(fulltext)
     chunks = parser.build_chunks(
         fulltext.text or prepared.get("abstract", ""),
         sections=fulltext.sections,

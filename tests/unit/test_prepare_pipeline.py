@@ -708,3 +708,16 @@ def test_backfill_does_not_advance_cursor_past_partially_failed_date(monkeypatch
     assert failure["paper_failures"] == [{"arxiv_id": "bad0", "error": "NameError: boom"}]
     assert failure["prepared_arxiv_ids"] == ["id0"]
     assert "1 of 2 paper(s) failed" in failure["error"]
+
+
+def test_surrogate_characters_are_stripped_before_hashing_and_saving():
+    repository = FakeRepository()
+    parser = FakeParser(source="pdf", text="Intro \ud835 body")
+
+    result = prepare_papers.prepare_single_paper(_candidate(), parser=parser, paper_repository=repository)
+
+    assert result["saved_fulltext"] == 1
+    saved = repository.saved_fulltexts[-1]
+    assert "\ud835" not in saved["text"]
+    assert all("\ud835" not in section["text"] for section in saved["sections"])
+    prepare_papers.compute_fulltext_content_hash(saved["text"], saved["sections"])

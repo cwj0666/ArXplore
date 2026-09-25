@@ -91,6 +91,13 @@ class InputRejected(ValueError):
     """제품 API가 생성 전에 거부하는 입력."""
 
 
+_CONTROL_CHARS = {chr(code) for code in range(32) if chr(code) not in "\n\t"} | {"\x7f"}
+
+
+def strip_control_characters(value: str) -> str:
+    return "".join(char for char in str(value or "") if char not in _CONTROL_CHARS)
+
+
 def prepare_chat_input(message: str, history: Sequence[tuple[str, str]] = ()) -> tuple[str, list[tuple[str, str]]]:
     """제품 API(`backend/papers/services.py`)의 챗 입력 검증과 이력 정리를 그대로 재현한다.
 
@@ -98,7 +105,7 @@ def prepare_chat_input(message: str, history: Sequence[tuple[str, str]] = ()) ->
     이력은 user/assistant이면서 내용이 공백이 아닌 턴만 남기고 턴마다 `CHAT_MESSAGE_MAX_CHARS`자로 자른다.
     마지막 user 턴이 현재 메시지와 같으면 빼고, 최근 `CHAT_HISTORY_MAX_MESSAGES`개만 남긴다.
     """
-    cleaned = str(message).strip()
+    cleaned = strip_control_characters(message).strip()
     if not cleaned:
         raise InputRejected("메시지를 입력하세요.")
     if len(cleaned) > CHAT_MESSAGE_MAX_CHARS:

@@ -318,7 +318,8 @@ class TestPrepareChatInput:
             prepare_chat_input(message)
 
     def test_nul_is_not_whitespace(self):
-        assert prepare_chat_input("\u0000")[0] == "\u0000"
+        with pytest.raises(InputRejected):
+            prepare_chat_input("\u0000")
 
     def test_history_keeps_last_20_non_empty_turns_and_drops_repeated_current(self):
         turns = [("user" if index % 2 == 0 else "assistant", f"turn {index}") for index in range(24)]

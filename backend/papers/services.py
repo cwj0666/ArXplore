@@ -17,6 +17,13 @@ PAPERS_PER_PAGE = 21
 PAPER_CHUNK_LIMIT = 20
 CHAT_HISTORY_MAX_MESSAGES = 20
 CHAT_MESSAGE_MAX_CHARS = 4000
+_CONTROL_CHARS = {chr(code) for code in range(32) if chr(code) not in "\n\t"} | {"\x7f"}
+
+
+def strip_control_characters(value: str) -> str:
+    return "".join(char for char in str(value or "") if char not in _CONTROL_CHARS)
+
+
 RELATED_PAPER_LIMIT = 5
 RELATED_PAPER_CANDIDATE_LIMIT = 300
 VALID_SEARCH_MODES = {"search", "ai"}
@@ -285,7 +292,7 @@ def _trace_runtime() -> str:
 
 
 def _validate_chat_input(user_message: str, chat_history: Any) -> tuple[str, list[tuple[str, str]]]:
-    cleaned_message = user_message.strip()
+    cleaned_message = strip_control_characters(user_message).strip()
     if not cleaned_message:
         raise InvalidRequestError("메시지를 입력하세요.")
     if len(cleaned_message) > CHAT_MESSAGE_MAX_CHARS:
