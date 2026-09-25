@@ -1,8 +1,12 @@
 import json
+import logging
+from collections.abc import Iterable, Iterator
+from typing import Any
 
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from openai import AuthenticationError
 
 from .services import (
     AuthenticationRequiredError,
@@ -22,12 +26,19 @@ from .services import (
     login_user,
     logout_user,
     prepare_agent_chat,
+    prepare_paper_chat,
     register_user,
     save_personal_api_key,
     stream_agent_chat,
+    stream_paper_chat,
     toggle_favorite_paper,
     update_user_settings,
 )
+
+logger = logging.getLogger(__name__)
+
+STREAM_ERROR_MESSAGE = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+INVALID_API_KEY_MESSAGE = "OpenAI API 키가 유효하지 않습니다. 설정에서 키를 확인하세요."
 
 
 def _json_body(request: HttpRequest) -> dict:
@@ -199,7 +210,7 @@ def paper_summary(request: HttpRequest, arxiv_id: str):
 def paper_chat(request: HttpRequest, arxiv_id: str):
     try:
         body = _json_body(request)
-        answer = answer_paper_chat(
+        payload = answer_paper_chat(
             arxiv_id,
             user_message=str(body.get("message", "")),
             chat_history=body.get("history", []),
@@ -215,16 +226,43 @@ def paper_chat(request: HttpRequest, arxiv_id: str):
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
     except Exception as exc:
-        return JsonResponse({"error": f"답변 생성 실패: {exc}"}, status=500)
+        logger.exception("상세 챗 응답 생성 실패")
+        return JsonResponse({"error": _stream_error_message(exc)}, status=500)
 
-    return JsonResponse({"answer": answer})
+    return JsonResponse(payload)
+
+
+@require_POST
+def paper_chat_stream(request: HttpRequest, arxiv_id: str):
+    try:
+        body = _json_body(request)
+        prepared = prepare_paper_chat(
+            arxiv_id,
+            user_message=str(body.get("message", "")),
+            chat_history=body.get("history", []),
+            user=request.user,
+            session_api_key=get_session_api_key(request),
+        )
+    except AuthenticationRequiredError as exc:
+        return JsonResponse({"error": str(exc)}, status=401)
+    except MissingApiKeyError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except PaperNotFoundError as exc:
+        return JsonResponse({"error": str(exc)}, status=404)
+    except Exception:
+        logger.exception("상세 챗 스트림 준비 실패")
+        return JsonResponse({"error": STREAM_ERROR_MESSAGE}, status=500)
+
+    return _sse_response(stream_paper_chat(prepared))
 
 
 @require_POST
 def paper_agent_chat(request: HttpRequest):
     try:
         body = _json_body(request)
-        answer = answer_agent_chat(
+        payload = answer_agent_chat(
             user_message=str(body.get("message", "")),
             chat_history=body.get("history", []),
             user=request.user,
@@ -237,9 +275,10 @@ def paper_agent_chat(request: HttpRequest):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except Exception as exc:
-        return JsonResponse({"error": f"답변 생성 실패: {exc}"}, status=500)
+        logger.exception("에이전트 응답 생성 실패")
+        return JsonResponse({"error": _stream_error_message(exc)}, status=500)
 
-    return JsonResponse({"answer": answer})
+    return JsonResponse(payload)
 
 
 @require_POST
@@ -258,19 +297,51 @@ def paper_agent_stream(request: HttpRequest):
         return JsonResponse({"error": str(exc)}, status=400)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+    except Exception:
+        logger.exception("에이전트 스트림 준비 실패")
+        return JsonResponse({"error": STREAM_ERROR_MESSAGE}, status=500)
+
+    return _sse_response(stream_agent_chat(prepared))
+
+
+def _sse(payload: Any) -> str:
+    if payload == "[DONE]":
+        return "data: [DONE]\n\n"
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _stream_error_message(exc: Exception) -> str:
+    if isinstance(exc, AuthenticationError):
+        return INVALID_API_KEY_MESSAGE
+    return STREAM_ERROR_MESSAGE
+
+
+def _sse_events(events: Iterable[Any]) -> Iterator[str]:
+    """이벤트 순서: chunk* → citations(정확히 1회) → [DONE]. 오류가 나면 error → [DONE]."""
+    citations_sent = False
+    try:
+        for event in events:
+            if isinstance(event, str):
+                event = {"chunk": event}
+            if "citations" in event:
+                if citations_sent:
+                    continue
+                citations_sent = True
+                yield _sse({"citations": event["citations"]})
+            elif "chunk" in event:
+                if event["chunk"]:
+                    yield _sse({"chunk": event["chunk"]})
+        if not citations_sent:
+            yield _sse({"citations": []})
     except Exception as exc:
-        return JsonResponse({"error": f"답변 생성 실패: {exc}"}, status=500)
+        logger.exception("SSE 스트림 중 오류")
+        yield _sse({"error": _stream_error_message(exc)})
+    yield _sse("[DONE]")
 
-    def event_stream():
-        try:
-            for chunk in stream_agent_chat(prepared):
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-        except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
-        yield "data: [DONE]\n\n"
 
+def _sse_response(events: Iterable[Any]) -> StreamingHttpResponse:
     return StreamingHttpResponse(
-        event_stream(),
+        _sse_events(events),
         content_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

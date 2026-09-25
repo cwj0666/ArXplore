@@ -22,7 +22,7 @@ import {
 } from "./detail-api";
 import { formatSummaryBlocks, type SummaryBlock } from "./detail-summary";
 import type { PaperDetail } from "./detail-types";
-import type { BootstrapPayload } from "../../types/app";
+import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
 import "./detail-page.css";
 
 
@@ -258,9 +258,11 @@ export function PaperDetailPage({
   };
 
   const handleFavoriteToggle = async (paperId: string) => {
-    const payload = await toggleFavorite(paperId);
-    if (payload.error) {
-      if (payload.error === "로그인이 필요합니다.") {
+    let payload: FavoriteTogglePayload;
+    try {
+      payload = await toggleFavorite(paperId);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
         onRequireLogin();
       }
       return;

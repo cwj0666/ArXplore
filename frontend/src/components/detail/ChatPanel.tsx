@@ -8,19 +8,28 @@ import {
 
 import { ApiError } from "../../helpers/http";
 import { isImeComposing } from "../../helpers/keyboard";
-import { postPaperChat } from "../../pages/detail/detail-api";
+import { StreamEventError } from "../../helpers/sse";
+import {
+  isPaperChatStreamUnavailable,
+  postPaperChat,
+  streamPaperChat,
+} from "../../pages/detail/detail-api";
 import type { ChatMessage } from "../../pages/detail/detail-types";
+import type { Citation } from "../../types/assistant";
+import { CitationList } from "../chat/CitationList";
+import { MarkdownContent } from "../chat/MarkdownContent";
 
 interface ChatPanelProps {
   arxivId: string;
 }
 
-type UiRole = "assistant" | "user" | "loading";
+type UiRole = "assistant" | "user" | "loading" | "notice";
 
 interface UiMessage {
   id: string;
   role: UiRole;
   content: string;
+  citations?: Citation[];
 }
 
 interface PanelRect {
@@ -32,6 +41,9 @@ interface PanelRect {
 
 const WELCOME_MESSAGE = "이 논문에 대해 궁금한 점을 편하게 물어보세요!";
 const MIN_VISIBLE_HEADER = 40;
+
+// Flipped off once an older backend without the streaming route is detected.
+let paperChatStreamAvailable = true;
 
 function createMessage(role: UiRole, content: string): UiMessage {
   return {
@@ -124,6 +136,10 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
     return nextRect;
   };
 
+  const stopGeneration = () => {
+    requestControllerRef.current?.abort();
+  };
+
   const sendMessage = async () => {
     const message = inputText.trim();
     if (!message || isSending) {
@@ -134,52 +150,92 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
     setIsSending(true);
 
     const userMessage = createMessage("user", message);
-    const loadingMessage = createMessage("loading", "답변 생성 중...");
+    const replyMessage = createMessage("loading", "답변 생성 중...");
+    const replyId = replyMessage.id;
     const userChat: ChatMessage = { role: "user", content: message };
     const nextHistory = [...history, userChat];
 
-    setMessages((prev) => [...prev, userMessage, loadingMessage]);
+    setMessages((prev) => [...prev, userMessage, replyMessage]);
     setHistory(nextHistory);
 
     const controller = new AbortController();
     requestControllerRef.current = controller;
+    const isSuperseded = () => requestControllerRef.current !== controller;
+
+    let accumulated = "";
+    let citations: Citation[] = [];
+    let notice = "";
 
     try {
-      const data = await postPaperChat(arxivId, message, nextHistory, controller.signal);
-      if (controller.signal.aborted) {
-        return;
+      let answered = false;
+      if (paperChatStreamAvailable) {
+        try {
+          await streamPaperChat(arxivId, message, nextHistory, controller.signal, {
+            onChunk: (chunk) => {
+              if (isSuperseded()) {
+                return;
+              }
+              accumulated += chunk;
+              const content = accumulated;
+              setMessages((prev) =>
+                prev.map((msg) => (msg.id === replyId ? { ...msg, role: "assistant", content } : msg)),
+              );
+            },
+            onCitations: (received) => {
+              citations = received;
+            },
+          });
+          answered = true;
+        } catch (error) {
+          if (!isPaperChatStreamUnavailable(error)) {
+            throw error;
+          }
+          paperChatStreamAvailable = false;
+        }
       }
-      const assistantReply = data.error
-        ? `오류: ${data.error}`
-        : data.answer ?? "응답이 비어 있습니다.";
 
-      setMessages((prev) => [
-        ...prev.filter((msg) => msg.id !== loadingMessage.id),
-        createMessage("assistant", assistantReply),
-      ]);
+      if (!answered) {
+        const data = await postPaperChat(arxivId, message, nextHistory, controller.signal);
+        accumulated = data.answer ?? "";
+      }
 
-      if (!data.error) {
-        setHistory((prev) => [...prev, { role: "assistant", content: assistantReply }]);
+      if (!accumulated) {
+        notice = "응답이 비어 있습니다.";
       }
     } catch (error) {
       if (controller.signal.aborted) {
-        return;
-      }
-      const errorReply =
-        error instanceof ApiError ? `오류: ${error.message}` : "네트워크 오류가 발생했습니다.";
-      setMessages((prev) => [
-        ...prev.filter((msg) => msg.id !== loadingMessage.id),
-        createMessage("assistant", errorReply),
-      ]);
-    } finally {
-      if (requestControllerRef.current === controller) {
-        requestControllerRef.current = null;
-      }
-      if (!controller.signal.aborted) {
-        setIsSending(false);
-        inputRef.current?.focus();
+        if (!accumulated) {
+          notice = "답변이 중단되었습니다.";
+        }
+      } else if (error instanceof ApiError || error instanceof StreamEventError) {
+        notice = `오류: ${error.message}`;
+      } else {
+        notice = "네트워크 오류가 발생했습니다.";
       }
     }
+
+    if (isSuperseded()) {
+      return;
+    }
+    requestControllerRef.current = null;
+
+    const answer = accumulated;
+    const answerCitations = citations.length ? citations : undefined;
+    setMessages((prev) => {
+      const next = answer
+        ? prev.map((msg) =>
+            msg.id === replyId
+              ? { ...msg, role: "assistant" as const, content: answer, citations: answerCitations }
+              : msg,
+          )
+        : prev.filter((msg) => msg.id !== replyId);
+      return notice ? [...next, createMessage("notice", notice)] : next;
+    });
+    if (answer) {
+      setHistory((prev) => [...prev, { role: "assistant", content: answer }]);
+    }
+    setIsSending(false);
+    inputRef.current?.focus();
   };
 
   const handleDragStart = (event: ReactMouseEvent<HTMLElement>) => {
@@ -344,7 +400,14 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
             </button>
           </div>
         </div>
-        <div className="chat-messages" id="chat-messages" ref={messagesRef}>
+        <div
+          className="chat-messages"
+          id="chat-messages"
+          ref={messagesRef}
+          role="log"
+          aria-live="polite"
+          aria-busy={isSending}
+        >
           {messages.map((msg) => {
             if (msg.role === "loading") {
               return (
@@ -355,8 +418,25 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
               );
             }
 
+            if (msg.role === "assistant") {
+              return (
+                <div key={msg.id} className="msg msg-assistant">
+                  <MarkdownContent content={msg.content} />
+                  {msg.citations?.length ? <CitationList citations={msg.citations} /> : null}
+                </div>
+              );
+            }
+
+            if (msg.role === "notice") {
+              return (
+                <div key={msg.id} className="msg msg-assistant msg-notice" role="status">
+                  {msg.content}
+                </div>
+              );
+            }
+
             return (
-              <div key={msg.id} className={`msg msg-${msg.role}`}>
+              <div key={msg.id} className="msg msg-user">
                 {msg.content}
               </div>
             );
@@ -375,15 +455,25 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
               }
             }}
           />
-          <button
-            type="button"
-            className="chat-send-btn"
-            id="send-btn"
-            disabled={isSending}
-            onClick={() => void sendMessage()}
-          >
-            전송
-          </button>
+          {isSending ? (
+            <button
+              type="button"
+              className="chat-send-btn chat-stop-btn"
+              aria-label="답변 중단"
+              onClick={stopGeneration}
+            >
+              중지
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="chat-send-btn"
+              id="send-btn"
+              onClick={() => void sendMessage()}
+            >
+              전송
+            </button>
+          )}
         </div>
       </div>
 

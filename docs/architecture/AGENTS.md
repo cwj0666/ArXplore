@@ -56,10 +56,39 @@ retrieval 구현은 바꿀 수 있지만, 결과 shape는 쉽게 바꾸지 않�
 
 응답 계층이 UI에 넘기는 payload도 공용 계약이다. 현재 형태는 다음과 같다.
 
-- 에이전트 SSE(`/papers/assistant/stream/`): `data: {"chunk": "..."}` 반복, 오류 시 `data: {"error": "..."}`, 끝에 `data: [DONE]`
-- 상세 챗(`/papers/<arxiv_id>/chat/`): `{"answer": "..."}` 또는 `{"error": "..."}`
+**SSE 엔드포인트** (둘 다 `POST`, JSON 본문 `{"message": str, "history": [{"role": "user"|"assistant", "content": str}]}`)
 
-구조화된 citation 목록이나 근거 chunk 필드는 아직 없다. 답변 속 인용은 시스템 프롬프트가 요구하는 마크다운 링크(`[제목](URL)`)뿐이다. citation 필드를 추가하려면 아래 절차로 계약 변경을 제안한다.
+- 에이전트: `/papers/assistant/stream/`
+- 상세 챗: `/papers/<arxiv_id>/chat/stream/`
+
+이벤트 순서는 `chunk`* → `citations`(정확히 1회, 빈 배열 가능) → `[DONE]`이다. 스트리밍 도중 오류가 나면 `error` → `[DONE]`으로 끝나고 `citations`는 보내지 않는다.
+
+```text
+data: {"chunk": "..."}
+data: {"citations": [{"arxiv_id": str, "title": str, "url": str, "section_title": str|null, "chunk_id": int|null, "in_answer": bool}]}
+data: {"error": "..."}
+data: [DONE]
+```
+
+- `in_answer`: 답변이 실제로 이 출처를 인용했으면 `true`. 에이전트는 답변 속 `[제목](URL)` 링크를 도구 결과와 대조하고(URL 또는 arXiv ID 일치), 상세 챗은 `[1]`, `[2]` 같은 발췌문 번호를 대조한다. 답변에 인용이 하나도 없으면 사용한 출처 전체를 `in_answer: false`로 보낸다. 도구 결과에 없는 링크는 서버 로그에 경고로 남기고 답변은 고치지 않는다.
+- 상세 챗의 1번 출처는 논문 초록이다(`section_title: "Abstract"`, `chunk_id: null`). 트렌딩 도구에서 온 에이전트 출처도 `chunk_id: null`이다.
+- 스트리밍을 시작하기 전 검증 실패는 JSON으로 응답한다: 미로그인 401, 개인 키 없음·빈 메시지·4,000자 초과 메시지·잘못된 `history` 400, 없는 논문 404(상세 챗). `history`는 서버에서 user/assistant만 남기고 최근 20개, 메시지당 4,000자로 자른다.
+- `error` 문구는 사용자용 고정 문구다(키 인증 실패만 별도 문구). 예외 메시지는 응답에 싣지 않고 서버 로그에 남긴다.
+
+**비스트리밍 엔드포인트**
+
+- 에이전트 `/papers/assistant/chat/`: `{"answer": str, "citations": [...]}`
+- 상세 챗 `/papers/<arxiv_id>/chat/`: `{"answer": str, "citations": [...], "retrieval_mode": "hybrid"|"lexical"|"first_chunks"}`
+
+**에이전트 검색 도구 출력** (`search_paper_chunks_tool`, LLM이 읽는 문자열)
+
+```text
+[1] 제목: {paper_title} | arxiv_id: {arxiv_id} | 섹션: {section_title 또는 -} | chunk_id: {chunk_id 또는 -}
+출처(URL): {pdf_url 또는 https://arxiv.org/abs/{arxiv_id}}
+내용: {context_text, 없으면 chunk_text}
+```
+
+결과가 없으면 "검색된 관련 논문이 없습니다. …지어내지 말고…" 문구를 돌려준다. 도구는 돌려준 hit을 요청 범위 레지스트리에 기록하고, 스트리밍 계층이 이를 `citations`로 만든다. 검색 방식은 `RETRIEVAL_MODE`(기본 `hybrid`)를 따르고, 질의 임베딩 키(사용자 세션 키 > 서버 `OPENAI_API_KEY`)가 없거나 임베딩 호출이 실패하면 lexical로 내려간다.
 
 계약 변경이 필요하면 아래 순서를 따른다.
 

@@ -51,37 +51,29 @@ async function readJsonBody(response: Response): Promise<{ ok: true; value: unkn
 }
 
 
-interface JsonRequestOptions {
-  // Non-2xx responses whose JSON body carries an `error` string resolve instead of throwing,
-  // for callers that still branch on `payload.error`.
-  resolveErrorPayload?: boolean;
+/** Non-2xx 응답을 ApiError로 변환한다. 본문의 `error` 문자열이 있으면 메시지로 쓴다. */
+export async function readApiError(response: Response): Promise<ApiError> {
+  const body = await readJsonBody(response);
+  const payload = body.ok ? body.value : null;
+  return new ApiError(extractErrorMessage(payload) ?? describeStatus(response), response.status, payload);
 }
 
 
-async function performJsonRequest<T>(
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
-  { resolveErrorPayload = false }: JsonRequestOptions,
-): Promise<T> {
+async function performJsonRequest<T>(input: RequestInfo | URL, init: RequestInit | undefined): Promise<T> {
   const response = await fetch(input, {
     credentials: "same-origin",
     ...init,
   });
+
+  if (!response.ok) {
+    throw await readApiError(response);
+  }
+
   const body = await readJsonBody(response);
-
-  if (response.ok) {
-    if (!body.ok) {
-      throw new ApiError("응답을 해석하지 못했습니다.", response.status);
-    }
-    return body.value as T;
+  if (!body.ok) {
+    throw new ApiError("응답을 해석하지 못했습니다.", response.status);
   }
-
-  const payload = body.ok ? body.value : null;
-  const message = extractErrorMessage(payload);
-  if (message && resolveErrorPayload) {
-    return payload as T;
-  }
-  throw new ApiError(message ?? describeStatus(response), response.status, payload);
+  return body.value as T;
 }
 
 
@@ -105,7 +97,7 @@ function buildBodyInit(method: "POST" | "DELETE", body: unknown, signal?: AbortS
 
 /** 2xx가 아니면 ApiError를 던진다. */
 export async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  return performJsonRequest<T>(input, init, {});
+  return performJsonRequest<T>(input, init);
 }
 
 
@@ -116,26 +108,7 @@ export async function requestJsonWithBody<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  return performJsonRequest<T>(input, buildBodyInit(method, body, signal), {});
-}
-
-
-/**
- * 2xx가 아니면 ApiError를 던지되, `{ error }` JSON 본문은 그대로 반환한다.
- * 기존 호출부(`payload.error` 분기)와의 호환용이며 새 코드는 requestJson을 쓴다.
- */
-export async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  return performJsonRequest<T>(input, init, { resolveErrorPayload: true });
-}
-
-
-/** fetchJson과 같은 규칙의 POST/DELETE 버전. */
-export async function fetchJsonWithBody<T>(
-  input: RequestInfo | URL,
-  method: "POST" | "DELETE",
-  body?: unknown,
-): Promise<T> {
-  return performJsonRequest<T>(input, buildBodyInit(method, body), { resolveErrorPayload: true });
+  return performJsonRequest<T>(input, buildBodyInit(method, body, signal));
 }
 
 
@@ -144,6 +117,19 @@ export function getErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
+
+export function hasErrorPayload(error: ApiError): boolean {
+  return extractErrorMessage(error.payload) !== null;
 }
 
 

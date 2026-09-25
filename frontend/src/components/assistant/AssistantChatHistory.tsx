@@ -1,7 +1,8 @@
 import { forwardRef } from "react";
 
-import { renderAssistantContent } from "../../helpers/assistant/renderAssistantContent";
 import type { AssistantDisplayMessage } from "../../types/assistant";
+import { CitationList } from "../chat/CitationList";
+import { MarkdownContent } from "../chat/MarkdownContent";
 
 interface AssistantChatHistoryProps {
   messages: AssistantDisplayMessage[];
@@ -24,7 +25,15 @@ export const AssistantChatHistory = forwardRef<
   AssistantChatHistoryProps
 >(function AssistantChatHistory({ messages, isSending, streamingContent }, ref) {
   return (
-    <div className="assistant-chat-history" id="assistant-chat-history" ref={ref} onClick={handleChatLinkClick}>
+    <div
+      className="assistant-chat-history"
+      id="assistant-chat-history"
+      ref={ref}
+      onClick={handleChatLinkClick}
+      role="log"
+      aria-live="polite"
+      aria-busy={isSending}
+    >
       {messages.map((message, index) => {
         if (message.isNotice) {
           return (
@@ -36,13 +45,10 @@ export const AssistantChatHistory = forwardRef<
 
         if (message.role === "assistant") {
           return (
-            <div
-              key={`assistant-${index}`}
-              className="assistant-message assistant-message-assistant"
-              dangerouslySetInnerHTML={{
-                __html: renderAssistantContent(message.content),
-              }}
-            />
+            <div key={`assistant-${index}`} className="assistant-message assistant-message-assistant">
+              <MarkdownContent content={message.content} />
+              {message.citations?.length ? <CitationList citations={message.citations} /> : null}
+            </div>
           );
         }
 
@@ -54,12 +60,9 @@ export const AssistantChatHistory = forwardRef<
       })}
 
       {isSending && streamingContent ? (
-        <div
-          className="assistant-message assistant-message-assistant"
-          dangerouslySetInnerHTML={{
-            __html: renderAssistantContent(streamingContent),
-          }}
-        />
+        <div className="assistant-message assistant-message-assistant">
+          <MarkdownContent content={streamingContent} />
+        </div>
       ) : isSending ? (
         <div className="assistant-message assistant-message-loading">
           <p>답변을 생성하는 중입니다...</p>

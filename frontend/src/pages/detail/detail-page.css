@@ -569,6 +569,10 @@
   border-bottom-left-radius: 2px;
 }
 
+.detail-page .msg-notice {
+  color: #6b7280;
+}
+
 .detail-page .msg-user {
   background: #2f343b;
   color: #fff;
@@ -618,6 +622,14 @@
 
 .detail-page .chat-send-btn:hover {
   background: #1f2328;
+}
+
+.detail-page .chat-stop-btn {
+  background: #6b7280;
+}
+
+.detail-page .chat-stop-btn:hover {
+  background: #4b5563;
 }
 
 .detail-page .chat-send-btn:disabled {

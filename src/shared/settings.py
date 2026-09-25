@@ -6,8 +6,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+RETRIEVAL_MODES = frozenset({"lexical", "hybrid"})
 
 
 class AppSettings(BaseSettings):
@@ -59,6 +61,17 @@ class AppSettings(BaseSettings):
     openai_embedding_model: str = Field(default="text-embedding-3-large", alias="OPENAI_EMBEDDING_MODEL")
     openai_embedding_dimensions: int = Field(default=1536, alias="OPENAI_EMBEDDING_DIMENSIONS")
     embedding_batch_size: int = Field(default=64, alias="EMBEDDING_BATCH_SIZE")
+
+    retrieval_mode: str = Field(default="hybrid", alias="RETRIEVAL_MODE")
+    agent_recursion_limit: int = Field(default=12, ge=4, alias="AGENT_RECURSION_LIMIT")
+
+    @field_validator("retrieval_mode", mode="before")
+    @classmethod
+    def _normalize_retrieval_mode(cls, value: Any) -> str:
+        normalized = str(value or "hybrid").strip().lower()
+        if normalized not in RETRIEVAL_MODES:
+            raise ValueError(f"RETRIEVAL_MODE는 {sorted(RETRIEVAL_MODES)} 중 하나여야 합니다. 받은 값: {value}")
+        return normalized
 
     @model_validator(mode="after")
     def _restore_empty_sensitive_values_from_env_file(self) -> "AppSettings":
@@ -153,6 +166,15 @@ def get_runtime_openai_api_key() -> str | None:
     if override is not _UNSET:
         return override
     return get_settings().openai_api_key
+
+
+def get_runtime_openai_api_key_override() -> str | None:
+    """요청 범위에서 주입된 키만 돌려준다. 서버 키로 폴백하지 않는다."""
+    override = _runtime_openai_api_key.get()
+    if override is _UNSET or not override:
+        return None
+    normalized = str(override).strip()
+    return normalized or None
 
 
 def get_runtime_openai_model(default_model: str | None = None) -> str:

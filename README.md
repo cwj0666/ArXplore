@@ -156,15 +156,24 @@ GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 
 ## Evaluation
 
-검색 품질은 아직 측정하지 않았습니다. 아래 표는 측정할 항목의 자리입니다.
+검색 품질은 아직 측정하지 않았습니다. 아래 표는 측정할 항목의 자리이고, 값은 실제 실행 결과로만 채웁니다.
 
-| 검색 방식 | hit@5 | MRR |
-| --- | --- | --- |
-| lexical | 측정 예정 | 측정 예정 |
-| vector | 측정 예정 | 측정 예정 |
-| hybrid | 측정 예정 | 측정 예정 |
+| 검색 방식 | hit@1 | hit@5 | hit@10 | MRR@10 | 지연 p50 / p95 (ms) |
+| --- | --- | --- | --- | --- | --- |
+| lexical | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
+| vector | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
+| hybrid | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
 
-계획: 한국어·영어 질의 30~50개(알려진 논문을 찾는 질의 + LLM 합성 질의)로 세 경로를 비교합니다. 파서·`content_role` 수정과 기존 데이터 백필(`scripts/backfill_content_roles.py`)을 마친 뒤 측정합니다.
+평가 하니스는 [`eval/`](./eval/README.md)에 있습니다. 한국어·영어 질의 30~50개(알려진 논문을 초록으로 찾는 known-item 질의 + 본문 청크 하나로만 답할 수 있는 LLM 합성 질의)로 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF)을 비교하고, 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
+
+```bash
+python scripts/eval_build_queries.py                     # 표본·프롬프트 확인 (dry-run, LLM 미호출)
+python scripts/eval_build_queries.py --generate          # eval/queries.jsonl 생성 → 사람이 검토
+python scripts/eval_retrieval.py --methods lexical       # API 키 없이 lexical만
+python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (OPENAI_API_KEY 필요)
+```
+
+결과는 `eval/results/<timestamp>.md`(위 표와 같은 모양의 붙여넣기용 표 포함)와 질의별 CSV로 남습니다. DB에 연결할 수 없거나 질의셋의 정답 id가 DB에 없으면 결과를 쓰지 않고 실패합니다.
 
 ## 기술적 결정과 트레이드오프
 

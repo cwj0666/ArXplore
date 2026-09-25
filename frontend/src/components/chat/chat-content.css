@@ -1,0 +1,158 @@
+.chat-markdown {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p {
+  margin: 0;
+}
+
+.chat-markdown p + p {
+  margin-top: 8px;
+}
+
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5 {
+  margin: 12px 0 6px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.chat-markdown h3 {
+  font-size: 1.08em;
+}
+
+.chat-markdown h4 {
+  font-size: 1em;
+}
+
+.chat-markdown h5 {
+  font-size: 0.95em;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.chat-markdown li + li {
+  margin-top: 4px;
+}
+
+.chat-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: rgba(15, 23, 42, 0.07);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.chat-markdown pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #1f2328;
+  color: #e6edf3;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.chat-markdown pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.85em;
+}
+
+.chat-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 700;
+}
+
+.chat-citations {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-citations-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+.chat-citation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-citation {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 240px;
+  padding: 5px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #4b5563;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.chat-citation:hover,
+.chat-citation:focus-visible {
+  border-color: #6b7280;
+  color: #111827;
+}
+
+.chat-citation.is-cited {
+  border-color: #9ca3af;
+  color: #1f2937;
+}
+
+.chat-citation-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-citation-section {
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

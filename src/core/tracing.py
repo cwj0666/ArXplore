@@ -1,6 +1,17 @@
 from typing import Any
 
-from src.shared import build_langsmith_trace_context
+from src.shared import build_langsmith_trace_context, get_settings
+
+VALID_TRACE_RUNTIMES = frozenset({"dev", "production", "airflow", "local", "test"})
+_RUNTIME_ALIASES = {"development": "dev", "prod": "production"}
+
+
+def resolve_trace_runtime(value: str | None = None) -> str:
+    """APP_RUNTIME_MODE 값을 trace runtime 태그로 바꾼다. 모르는 값은 dev로 기록한다."""
+    raw = value if value is not None else get_settings().app_runtime_mode
+    normalized = str(raw or "").strip().lower()
+    normalized = _RUNTIME_ALIASES.get(normalized, normalized)
+    return normalized if normalized in VALID_TRACE_RUNTIMES else "dev"
 
 
 def build_analysis_trace_config(
@@ -16,7 +27,7 @@ def build_analysis_trace_config(
 
     Args:
         stage: 실행 단계 ("analyze_paper_detail", "paper_overview", "paper_key_findings" 등). 기본값: "analyze_paper_detail"
-        runtime: 실행 환경 ("dev", "airflow", "local" 등). 기본값: "dev"
+        runtime: 실행 환경 ("dev", "production", "airflow", "local", "test"). 기본값: "dev"
         user: 실행 사용자 ID (선택, LangSmith에 기록). 기본값: None
         quality_score: 평가 점수 (0.0~1.0, 선택, 평가 루프용). 기본값: None
         eval_tags: 평가 태그 (["high_quality", "needs_review"] 등, 선택). 기본값: None
@@ -46,13 +57,14 @@ def build_analysis_trace_config(
         "paper_key_findings",
         "paper_detail_document",
         "rag_answer",
+        "paper_chat",
+        "agent_chat",
     }
     if stage not in valid_stages:
         raise ValueError(f"stage는 {valid_stages} 중 하나여야 합니다. 받은 값: {stage}")
     
-    valid_runtimes = {"dev", "airflow", "local", "test"}
-    if runtime not in valid_runtimes:
-        raise ValueError(f"runtime은 {valid_runtimes} 중 하나여야 합니다. 받은 값: {runtime}")
+    if runtime not in VALID_TRACE_RUNTIMES:
+        raise ValueError(f"runtime은 {set(VALID_TRACE_RUNTIMES)} 중 하나여야 합니다. 받은 값: {runtime}")
     
     if quality_score is not None and not (0.0 <= quality_score <= 1.0):
         raise ValueError(f"quality_score는 0.0~1.0 사이여야 합니다. 받은 값: {quality_score}")
@@ -150,4 +162,32 @@ def build_rag_answer_trace_config(
         runtime=runtime,
         user=user,
         quality_score=quality_score,
+    )
+
+
+def build_paper_chat_trace_config(
+    *,
+    runtime: str | None = None,
+    user: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return build_analysis_trace_config(
+        stage="paper_chat",
+        runtime=resolve_trace_runtime(runtime),
+        user=user,
+        extra_metadata=extra_metadata,
+    )
+
+
+def build_agent_chat_trace_config(
+    *,
+    runtime: str | None = None,
+    user: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return build_analysis_trace_config(
+        stage="agent_chat",
+        runtime=resolve_trace_runtime(runtime),
+        user=user,
+        extra_metadata=extra_metadata,
     )

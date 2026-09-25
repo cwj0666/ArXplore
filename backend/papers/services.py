@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
@@ -10,13 +10,15 @@ from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.core.paginator import Paginator
 from django.http import HttpRequest
 
-from src.shared import override_openai_runtime
+from src.shared import get_settings, override_openai_runtime
 
 from .models import DEFAULT_SUMMARY_MODEL, FavoritePaper, UserSettings
 
 MAX_RECENT_PAPERS = 1500
 PAPERS_PER_PAGE = 21
 PAPER_CHUNK_LIMIT = 20
+CHAT_HISTORY_MAX_MESSAGES = 20
+CHAT_MESSAGE_MAX_CHARS = 4000
 RELATED_PAPER_LIMIT = 5
 RELATED_PAPER_CANDIDATE_LIMIT = 300
 VALID_SEARCH_MODES = {"search", "ai"}
@@ -338,63 +340,112 @@ def get_paper_summary(
     }
 
 
-def answer_paper_chat(
+@dataclass(frozen=True)
+class PreparedPaperChat:
+    api_key: str = field(repr=False)
+    message: str
+    history: list[tuple[str, str]]
+    username: str
+    paper: dict[str, Any]
+
+
+def prepare_paper_chat(
     arxiv_id: str,
     user_message: str,
-    chat_history: list[dict[str, Any]],
+    chat_history: Any,
     *,
     user: AbstractBaseUser | AnonymousUser,
     session_api_key: str | None,
-) -> str:
+) -> PreparedPaperChat:
     _require_authenticated_user(user)
     api_key = _require_personal_api_key(session_api_key)
-    cleaned_message = user_message.strip()
-    if not cleaned_message:
-        raise ValueError("메시지를 입력하세요.")
+    message, history = _validate_chat_input(user_message, chat_history)
+    paper = _get_paper_or_raise(arxiv_id)
+    return PreparedPaperChat(
+        api_key=api_key,
+        message=message,
+        history=history,
+        username=user.get_username(),
+        paper=dict(paper),
+    )
 
-    repo = get_paper_repository()
-    _get_paper_or_raise(arxiv_id)
-    chunks = repo.list_paper_chunks(arxiv_id, limit=PAPER_CHUNK_LIMIT)
 
-    from src.core.agent.chatbot import stream_answer_question
+def stream_paper_chat(prepared: PreparedPaperChat):
+    """`{"chunk"}` 이벤트들과 마지막 `{"citations"}` 이벤트를 내보낸다."""
+    with override_openai_runtime(api_key=prepared.api_key):
+        retrieval = _retrieve_paper_chat_sources(prepared)
+        yield from _stream_paper_chat_answer(prepared, retrieval)
 
-    with override_openai_runtime(api_key=api_key):
-        answer_stream = stream_answer_question(
-            cleaned_message,
-            context_papers=chunks,
-            chat_history=_build_history_tuples(chat_history),
-            user=user.get_username(),
-        )
-        return "".join(answer_stream)
+
+def answer_paper_chat(
+    arxiv_id: str,
+    user_message: str,
+    chat_history: Any,
+    *,
+    user: AbstractBaseUser | AnonymousUser,
+    session_api_key: str | None,
+) -> dict[str, Any]:
+    prepared = prepare_paper_chat(
+        arxiv_id,
+        user_message,
+        chat_history,
+        user=user,
+        session_api_key=session_api_key,
+    )
+    with override_openai_runtime(api_key=prepared.api_key):
+        retrieval = _retrieve_paper_chat_sources(prepared)
+        answer, citations = _collect_stream(_stream_paper_chat_answer(prepared, retrieval))
+    return {
+        "answer": answer,
+        "citations": citations,
+        "retrieval_mode": retrieval.retrieval_mode,
+    }
+
+
+def _retrieve_paper_chat_sources(prepared: PreparedPaperChat):
+    from src.core.agent.paper_chat import retrieve_paper_chat_sources
+    from src.integrations.paper_retriever import PaperRetriever
+
+    return retrieve_paper_chat_sources(
+        prepared.paper,
+        prepared.message,
+        retriever=PaperRetriever(repository=get_paper_repository()),
+    )
+
+
+def _stream_paper_chat_answer(prepared: PreparedPaperChat, retrieval):
+    from src.core.agent.paper_chat import stream_paper_chat_answer
+
+    return stream_paper_chat_answer(
+        prepared.message,
+        paper=prepared.paper,
+        retrieval=retrieval,
+        chat_history=prepared.history,
+        runtime=_trace_runtime(),
+        user=prepared.username,
+    )
 
 
 def answer_agent_chat(
     user_message: str,
-    chat_history: list[dict[str, Any]],
+    chat_history: Any,
     *,
     user: AbstractBaseUser | AnonymousUser,
     session_api_key: str | None,
-) -> str:
-    _require_authenticated_user(user)
-    api_key = _require_personal_api_key(session_api_key)
-    cleaned_message = user_message.strip()
-    if not cleaned_message:
-        raise ValueError("메시지를 입력하세요.")
-
-    from src.core.agent.chatbot import agent_search
-
-    with override_openai_runtime(api_key=api_key):
-        result = agent_search(
-            cleaned_message,
-            chat_history=_build_history_tuples(chat_history),
-            user=user.get_username(),
-        )
-    return result.get("answer") or "답변을 생성할 수 없습니다."
+) -> dict[str, Any]:
+    prepared = prepare_agent_chat(
+        user_message,
+        chat_history,
+        user=user,
+        session_api_key=session_api_key,
+    )
+    answer, citations = _collect_stream(stream_agent_chat(prepared))
+    return {"answer": answer or "답변을 생성할 수 없습니다.", "citations": citations}
 
 
 @dataclass(frozen=True)
 class PreparedAgentChat:
-    api_key: str
+    api_key: str = field(repr=False)
     message: str
     history: list[tuple[str, str]]
     username: str
@@ -409,29 +460,54 @@ def prepare_agent_chat(
 ) -> PreparedAgentChat:
     _require_authenticated_user(user)
     api_key = _require_personal_api_key(session_api_key)
-    cleaned_message = user_message.strip()
-    if not cleaned_message:
-        raise ValueError("메시지를 입력하세요.")
-    if not isinstance(chat_history, list):
-        raise ValueError("잘못된 요청입니다.")
-
+    message, history = _validate_chat_input(user_message, chat_history)
     return PreparedAgentChat(
         api_key=api_key,
-        message=cleaned_message,
-        history=_build_history_tuples(chat_history),
+        message=message,
+        history=history,
         username=user.get_username(),
     )
 
 
 def stream_agent_chat(prepared: PreparedAgentChat):
+    """`{"chunk"}` 이벤트들과 마지막 `{"citations"}` 이벤트를 내보낸다."""
     from src.core.agent.chatbot import stream_agent_search
 
     with override_openai_runtime(api_key=prepared.api_key):
         yield from stream_agent_search(
             prepared.message,
             chat_history=prepared.history,
+            runtime=_trace_runtime(),
             user=prepared.username,
         )
+
+
+def _collect_stream(events) -> tuple[str, list[dict[str, Any]]]:
+    parts: list[str] = []
+    citations: list[dict[str, Any]] = []
+    for event in events:
+        if "chunk" in event:
+            parts.append(event["chunk"])
+        elif "citations" in event:
+            citations = event["citations"]
+    return "".join(parts), citations
+
+
+def _trace_runtime() -> str:
+    from src.core.tracing import resolve_trace_runtime
+
+    return resolve_trace_runtime(get_settings().app_runtime_mode)
+
+
+def _validate_chat_input(user_message: str, chat_history: Any) -> tuple[str, list[tuple[str, str]]]:
+    cleaned_message = user_message.strip()
+    if not cleaned_message:
+        raise ValueError("메시지를 입력하세요.")
+    if len(cleaned_message) > CHAT_MESSAGE_MAX_CHARS:
+        raise ValueError(f"메시지는 {CHAT_MESSAGE_MAX_CHARS:,}자 이하로 입력하세요.")
+    if not isinstance(chat_history, list):
+        raise ValueError("잘못된 요청입니다.")
+    return cleaned_message, _build_history_tuples(chat_history)
 
 
 def _get_paper_or_raise(arxiv_id: str) -> dict[str, Any]:
@@ -469,12 +545,16 @@ def _parse_page_number(raw_page: Any) -> int:
 
 
 def _build_history_tuples(chat_history: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    return [
-        (message["role"], message["content"])
+    """user/assistant 메시지만 남기고, 최근 CHAT_HISTORY_MAX_MESSAGES개와 메시지당 CHAT_MESSAGE_MAX_CHARS자로 자른다."""
+    messages = [
+        (message["role"], message["content"][:CHAT_MESSAGE_MAX_CHARS])
         for message in chat_history
         if isinstance(message, dict)
-        and message.get("role") in ("user", "assistant") and message.get("content")
+        and message.get("role") in ("user", "assistant")
+        and isinstance(message.get("content"), str)
+        and message["content"].strip()
     ]
+    return messages[-CHAT_HISTORY_MAX_MESSAGES:]
 
 
 def _get_or_create_user_settings(user: AbstractBaseUser) -> UserSettings:

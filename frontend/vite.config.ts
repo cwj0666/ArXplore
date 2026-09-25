@@ -29,6 +29,7 @@ export default defineConfig(({ command }) => ({
       "^/papers/[^/]+/analyze/$": proxy(djangoTarget),
       "^/papers/[^/]+/summary/$": proxy(djangoTarget),
       "^/papers/[^/]+/chat/$": proxy(djangoTarget),
+      "^/papers/[^/]+/chat/stream/$": proxy(djangoTarget),
       "/admin/": proxy(djangoTarget),
       "/static/": proxy(djangoTarget),
     }

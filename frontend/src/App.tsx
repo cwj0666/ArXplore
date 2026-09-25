@@ -5,7 +5,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } fr
 import { AppHeader } from "./components/account/AppHeader";
 import { SettingsPanel } from "./components/account/SettingsPanel";
 import { postLogout } from "./helpers/accountApi";
-import { fetchJson } from "./helpers/http";
+import { requestJson } from "./helpers/http";
 import { AssistantPage } from "./pages/assistant";
 import { PaperDetailPage } from "./pages/detail";
 import { ListPage } from "./pages/list";
@@ -14,7 +14,7 @@ import type { BootstrapPayload } from "./types/app";
 
 
 async function fetchBootstrap(): Promise<BootstrapPayload> {
-  return fetchJson<BootstrapPayload & { error?: string }>("/bootstrap.json", {
+  return requestJson<BootstrapPayload>("/bootstrap.json", {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -69,8 +69,9 @@ function App() {
   };
 
   const handleLogout = async () => {
-    const payload = await postLogout();
-    if (payload.error) {
+    try {
+      await postLogout();
+    } catch {
       return;
     }
     await refreshBootstrap();

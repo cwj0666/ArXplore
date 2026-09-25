@@ -2,8 +2,12 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { postLogin, postSignup } from "../../helpers/accountApi";
+import { getApiErrorMessage } from "../../helpers/http";
 import { sanitizeNextPath } from "../../helpers/safeRedirect";
 import "./login-page.css";
+
+
+const REQUEST_FAILED_MESSAGE = "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 
 
 interface LoginPageProps {
@@ -29,9 +33,10 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     setIsSubmitting(true);
     try {
       if (mode === "signup") {
-        const signupPayload = await postSignup(username, password);
-        if (signupPayload.error) {
-          setErrorMessage(signupPayload.error);
+        try {
+          await postSignup(username, password);
+        } catch (error) {
+          setErrorMessage(getApiErrorMessage(error, REQUEST_FAILED_MESSAGE));
           return;
         }
 
@@ -39,13 +44,15 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
         await new Promise((resolve) => window.setTimeout(resolve, 1200));
       }
 
-      const loginPayload = await postLogin(username, password);
-      if (loginPayload.error) {
+      try {
+        await postLogin(username, password);
+      } catch (error) {
+        const message = getApiErrorMessage(error, REQUEST_FAILED_MESSAGE);
         setSuccessMessage("");
         setErrorMessage(
           mode === "signup"
-            ? `회원가입은 완료되었지만 자동 로그인에 실패했습니다. ${loginPayload.error}`
-            : loginPayload.error,
+            ? `회원가입은 완료되었지만 자동 로그인에 실패했습니다. ${message}`
+            : message,
         );
         return;
       }

@@ -6,7 +6,7 @@ import { ListSearchPanel } from "../../components/list/ListSearchPanel";
 import { PaperCard } from "../../components/list/PaperCard";
 import { fetchPaperList } from "./listApi";
 import type { PaperListResponse, SearchMode, SortOption } from "./listTypes";
-import type { BootstrapPayload } from "../../types/app";
+import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
 import "./listPage.css";
 
 const SORT_OPTIONS = [
@@ -150,8 +150,10 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
   };
 
   const handleFavoriteToggle = async (arxivId: string) => {
-    const payload = await toggleFavorite(arxivId);
-    if (payload.error) {
+    let payload: FavoriteTogglePayload;
+    try {
+      payload = await toggleFavorite(arxivId);
+    } catch {
       return;
     }
     setListData((previous) => {

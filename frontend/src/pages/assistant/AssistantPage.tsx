@@ -4,8 +4,10 @@ import { AssistantChatHistory } from "../../components/assistant/AssistantChatHi
 import { AssistantComposer } from "../../components/assistant/AssistantComposer";
 import { AssistantHero } from "../../components/assistant/AssistantHero";
 import { AssistantNotice } from "../../components/assistant/AssistantNotice";
-import { AssistantRequestError, streamAssistantChat } from "../../helpers/assistant/assistantChatApi";
-import type { AssistantChatMessage, AssistantDisplayMessage } from "../../types/assistant";
+import { streamAssistantChat } from "../../helpers/assistant/assistantChatApi";
+import { ApiError } from "../../helpers/http";
+import { StreamEventError } from "../../helpers/sse";
+import type { AssistantChatMessage, AssistantDisplayMessage, Citation } from "../../types/assistant";
 import type { BootstrapPayload } from "../../types/app";
 import "./assistant-page.css";
 
@@ -85,6 +87,7 @@ export function AssistantPage({
     const controller = new AbortController();
     abortControllerRef.current = controller;
     let accumulated = "";
+    let citations: Citation[] = [];
     let notice = "";
 
     try {
@@ -97,13 +100,16 @@ export function AssistantPage({
           accumulated += chunk;
           setStreamingContent(accumulated);
         },
+        onCitations: (received) => {
+          citations = received;
+        },
       });
       if (!accumulated) notice = "답변을 생성할 수 없습니다.";
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
+      if (controller.signal.aborted) {
         if (!accumulated) notice = "사용자의 요청으로 답변이 중단되었습니다.";
       } else {
-        notice = error instanceof AssistantRequestError && error.message
+        notice = (error instanceof ApiError || error instanceof StreamEventError) && error.message
           ? error.message
           : "답변을 불러오는 중 오류가 발생했습니다.";
       }
@@ -111,7 +117,7 @@ export function AssistantPage({
       const newDisplayMessages: AssistantDisplayMessage[] = [];
       if (accumulated) {
         const assistantMessage: AssistantChatMessage = { role: "assistant", content: accumulated };
-        newDisplayMessages.push(assistantMessage);
+        newDisplayMessages.push(citations.length ? { ...assistantMessage, citations } : assistantMessage);
         setChatHistory((prev) => [...prev, assistantMessage]);
       }
       if (notice) {

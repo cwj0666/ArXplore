@@ -5,6 +5,7 @@ import {
   fetchFavorites,
   savePersonalApiKey,
 } from "../../helpers/accountApi";
+import { getApiErrorMessage } from "../../helpers/http";
 import type { BootstrapPayload, FavoriteListPayload } from "../../types/app";
 
 
@@ -54,10 +55,6 @@ export function SettingsPanel({
         if (!active) {
           return;
         }
-        if (payload.error) {
-          setFavoritesError(payload.error);
-          return;
-        }
         setFavorites(payload.items);
         setFavoritesError("");
       })
@@ -82,14 +79,12 @@ export function SettingsPanel({
     setIsBusy(true);
     setStatusMessage("");
     try {
-      const payload = await savePersonalApiKey(apiKeyInput);
-      if (payload.error) {
-        setStatusMessage(payload.error);
-        return;
-      }
+      await savePersonalApiKey(apiKeyInput);
       setApiKeyInput("");
       await onSessionChanged();
       setStatusMessage("API 키를 저장했습니다.");
+    } catch (error) {
+      setStatusMessage(getApiErrorMessage(error, "API 키를 저장하지 못했습니다."));
     } finally {
       setIsBusy(false);
     }
@@ -99,13 +94,11 @@ export function SettingsPanel({
     setIsBusy(true);
     setStatusMessage("");
     try {
-      const payload = await clearPersonalApiKey();
-      if (payload.error) {
-        setStatusMessage(payload.error);
-        return;
-      }
+      await clearPersonalApiKey();
       await onSessionChanged();
       setStatusMessage("API 키를 삭제했습니다.");
+    } catch (error) {
+      setStatusMessage(getApiErrorMessage(error, "API 키를 삭제하지 못했습니다."));
     } finally {
       setIsBusy(false);
     }

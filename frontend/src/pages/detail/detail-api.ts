@@ -1,4 +1,6 @@
-import { requestJson, requestJsonWithBody } from "../../helpers/http";
+import { ApiError, hasErrorPayload, requestJson, requestJsonWithBody } from "../../helpers/http";
+import { streamChat } from "../../helpers/sse";
+import type { Citation } from "../../types/assistant";
 import type {
   AnalysisResponse,
   ChatMessage,
@@ -50,4 +52,36 @@ export async function postPaperChat(
     { message, history },
     signal,
   );
+}
+
+
+export interface StreamPaperChatHandlers {
+  onChunk: (chunk: string) => void;
+  onCitations?: (citations: Citation[]) => void;
+}
+
+
+export async function streamPaperChat(
+  arxivId: string,
+  message: string,
+  history: ChatMessage[],
+  signal: AbortSignal,
+  { onChunk, onCitations }: StreamPaperChatHandlers,
+): Promise<void> {
+  return streamChat({
+    endpoint: buildPaperPath(arxivId, "chat/stream/"),
+    body: { message, history },
+    signal,
+    onChunk,
+    onCitations,
+  });
+}
+
+
+/**
+ * 스트리밍 엔드포인트가 없는 구버전 백엔드인지 판별한다.
+ * 논문이 없을 때의 404는 `{ error }` JSON을 싣고, 라우트 자체가 없을 때는 JSON이 아니다.
+ */
+export function isPaperChatStreamUnavailable(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && !hasErrorPayload(error);
 }

@@ -17,7 +17,7 @@ function normalizeArxivId(value: string): string {
   return match[1];
 }
 
-function toInternalPaperHref(url: string): string | null {
+export function toInternalPaperHref(url: string): string | null {
   const match = url.match(
     /^https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf)\/([^/?#]+?)(?:\.pdf)?(?:[?#].*)?$/i,
   );
@@ -26,45 +26,126 @@ function toInternalPaperHref(url: string): string | null {
     return null;
   }
 
-  return `/papers/${normalizeArxivId(match[1])}/`;
+  return `/papers/${encodeURIComponent(normalizeArxivId(match[1]))}/`;
+}
+
+function renderLink(label: string, escapedUrl: string): string {
+  const url = escapedUrl.replace(/&amp;/g, "&");
+  const href = toInternalPaperHref(url) ?? escapedUrl;
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+}
+
+// Operates on already-escaped text, so captured groups can never contain raw markup.
+// Links are swapped for placeholders first so emphasis rules cannot touch their hrefs.
+function renderInlineText(escaped: string): string {
+  const links: string[] = [];
+  const withPlaceholders = escaped.replace(/\u0000/g, "").replace(
+    /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+    (_, label: string, url: string) => {
+      links.push(renderLink(label.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>"), url));
+      return `\u0000${links.length - 1}\u0000`;
+    },
+  );
+  return withPlaceholders
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\u0000(\d+)\u0000/g, (_, index: string) => links[Number(index)] ?? "");
 }
 
 function renderInlineMarkdown(text: string): string {
-  let html = escapeHtml(text);
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => {
-    const internalHref = toInternalPaperHref(url);
-    if (internalHref) {
-      return `<a href="${internalHref}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-    }
-
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-  });
-  return html;
+  return text
+    .split(/(`[^`\n]+`)/)
+    .map((segment, index) => {
+      if (index % 2 === 1) {
+        return `<code>${escapeHtml(segment.slice(1, -1))}</code>`;
+      }
+      return renderInlineText(escapeHtml(segment));
+    })
+    .join("");
 }
 
+const FENCE_PATTERN = /^\s*(```|~~~)/;
+const HEADING_PATTERN = /^(#{1,3})\s+(.*)$/;
+const BULLET_PATTERN = /^[-*+]\s+(.*)$/;
+const ORDERED_PATTERN = /^(\d{1,9})[.)]\s+(.*)$/;
+
+/**
+ * 채팅 답변용 최소 마크다운 렌더러.
+ * 모든 텍스트는 치환 전에 이스케이프되며 링크는 http(s)만 허용한다.
+ */
 export function renderAssistantContent(text: string): string {
-  const lines = String(text || "").split("\n");
+  const lines = String(text || "").split(/\r\n|\r|\n/);
   const parts: string[] = [];
-  let listBuffer: string[] = [];
+  let list: { kind: "ul" | "ol"; start: number; items: string[] } | null = null;
+  let codeLines: string[] | null = null;
+  let codeFence = "";
 
   const flushList = () => {
-    if (!listBuffer.length) {
+    if (!list) {
       return;
     }
-    parts.push(`<ul>${listBuffer.join("")}</ul>`);
-    listBuffer = [];
+    const startAttr = list.kind === "ol" && list.start !== 1 ? ` start="${list.start}"` : "";
+    parts.push(`<${list.kind}${startAttr}>${list.items.join("")}</${list.kind}>`);
+    list = null;
+  };
+
+  const pushListItem = (kind: "ul" | "ol", start: number, content: string) => {
+    if (!list || list.kind !== kind) {
+      flushList();
+      list = { kind, start, items: [] };
+    }
+    list.items.push(`<li>${renderInlineMarkdown(content)}</li>`);
+  };
+
+  const flushCode = () => {
+    if (codeLines === null) {
+      return;
+    }
+    parts.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeLines = null;
+    codeFence = "";
   };
 
   for (const rawLine of lines) {
+    if (codeLines !== null) {
+      if (rawLine.trim().startsWith(codeFence)) {
+        flushCode();
+      } else {
+        codeLines.push(rawLine);
+      }
+      continue;
+    }
+
+    const fence = rawLine.match(FENCE_PATTERN);
+    if (fence) {
+      flushList();
+      codeLines = [];
+      codeFence = fence[1];
+      continue;
+    }
+
     const line = rawLine.trim();
     if (!line) {
       flushList();
       continue;
     }
 
-    if (line.startsWith("- ")) {
-      listBuffer.push(`<li>${renderInlineMarkdown(line.slice(2))}</li>`);
+    const heading = line.match(HEADING_PATTERN);
+    if (heading) {
+      flushList();
+      const level = heading[1].length + 2;
+      parts.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    const bullet = line.match(BULLET_PATTERN);
+    if (bullet) {
+      pushListItem("ul", 1, bullet[1]);
+      continue;
+    }
+
+    const ordered = line.match(ORDERED_PATTERN);
+    if (ordered) {
+      pushListItem("ol", Number(ordered[1]), ordered[2]);
       continue;
     }
 
@@ -73,5 +154,6 @@ export function renderAssistantContent(text: string): string {
   }
 
   flushList();
+  flushCode();
   return parts.join("");
 }

@@ -12,5 +12,6 @@ urlpatterns = [
     path('<str:arxiv_id>/analyze/', api_views.paper_analyze, name='paper_analyze'),
     path('<str:arxiv_id>/summary/', api_views.paper_summary, name='paper_summary'),
     path('<str:arxiv_id>/chat/', api_views.paper_chat, name='paper_chat'),
+    path('<str:arxiv_id>/chat/stream/', api_views.paper_chat_stream, name='paper_chat_stream'),
     path('<str:arxiv_id>/', page_views.paper_detail, name='paper_detail'),
 ]
