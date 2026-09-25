@@ -6,9 +6,9 @@
 }
 
 .list-page {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #f5f5f5;
-  color: #212529;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
   padding: 40px 20px;
 }
 
@@ -48,7 +48,7 @@
 }
 
 .list-page .search-shell {
-  background: #fff;
+  background: var(--color-surface);
   border: 1px solid #d9d9dd;
   border-radius: 28px;
   padding: 8px;
@@ -82,7 +82,7 @@
   font-size: 1rem;
   padding: 10px 2px;
   background: transparent;
-  color: #212529;
+  color: var(--color-text);
 }
 
 .list-page .pill-search-bar input::placeholder {
@@ -111,7 +111,7 @@
 .list-page .mode-chip {
   border: none;
   background: transparent;
-  color: #6b7280;
+  color: var(--color-text-muted);
   border-radius: 999px;
   padding: 7px 12px;
   font-size: 0.8rem;
@@ -125,8 +125,8 @@
 }
 
 .list-page .mode-chip.active {
-  background: white;
-  color: #111827;
+  background: var(--color-surface);
+  color: var(--color-text-emphasis);
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
@@ -144,7 +144,7 @@
 }
 
 .list-page .submit-btn-premium {
-  background: #f3f4f6;
+  background: var(--color-surface-subtle);
   color: #2f3441;
   border: none;
   padding: 10px 18px;
@@ -160,7 +160,7 @@
 
 .list-page .submit-btn-premium:hover {
   background: #e6e7eb;
-  color: #212529;
+  color: var(--color-text);
   transform: translateY(-1px);
 }
 
@@ -178,8 +178,8 @@
 }
 
 .list-page .paper-card {
-  background: white;
-  border: 1px solid #e0e0e0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 18px;
   display: flex;
@@ -206,7 +206,7 @@
   align-self: start;
   justify-self: end;
   color: #5f6673;
-  background: #fff;
+  background: var(--color-surface);
   border: 1px solid #d7dce3;
   border-radius: 12px;
   box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04);
@@ -218,9 +218,14 @@
 }
 
 .list-page .paper-favorite-btn.active {
-  color: #2f343b;
+  color: var(--color-primary);
   background: #eef1f4;
   border-color: #c8d0d9;
+}
+
+.list-page .paper-card:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 .list-page .paper-card:hover {
@@ -236,7 +241,7 @@
 }
 
 .list-page .paper-title a {
-  color: #212529;
+  color: var(--color-text);
   text-decoration: none;
 }
 
@@ -250,7 +255,7 @@
   top: -5px;
   left: 12px;
   background: rgba(30, 30, 30, 0.82);
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 0.72rem;
   font-weight: 500;
   padding: 4px 10px;
@@ -277,7 +282,7 @@
   position: absolute;
   inset: 0;
   background: rgba(50, 50, 55, 0.78);
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 1.05rem;
   font-weight: 700;
   display: flex;
@@ -295,7 +300,7 @@
 
 .list-page .paper-abstract {
   font-size: 0.83rem;
-  color: #555;
+  color: var(--color-text-secondary);
   line-height: 1.5;
   overflow: hidden;
   display: -webkit-box;
@@ -305,7 +310,7 @@
 
 .list-page .paper-meta {
   font-size: 0.78rem;
-  color: #888;
+  color: var(--color-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -326,7 +331,7 @@
 }
 
 .list-page .paper-meta-icon-muted {
-  color: #888;
+  color: var(--color-text-faint);
 }
 
 .list-page .paper-meta-icon-heart {
@@ -348,12 +353,12 @@
 .list-page .pagination a,
 .list-page .pagination span {
   padding: 8px 14px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-input);
   border-radius: 8px;
   text-decoration: none;
-  color: #212529;
+  color: var(--color-text);
   font-size: 0.9rem;
-  background: white;
+  background: var(--color-surface);
 }
 
 .list-page .pagination .arrow {
@@ -368,12 +373,12 @@
 
 .list-page .pagination a:hover {
   background: #e9eaed;
-  color: #212529;
+  color: var(--color-text);
   border-color: #cdd1d6;
 }
 
 .list-page .pagination .page-info {
-  color: #888;
+  color: var(--color-text-faint);
   border: none;
   background: transparent;
   padding: 8px 6px;
@@ -388,7 +393,7 @@
 .list-page .no-papers {
   text-align: center;
   padding: 60px 0;
-  color: #888;
+  color: var(--color-text-faint);
   font-size: 1rem;
 }
 
@@ -396,19 +401,19 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: #888;
+  color: var(--color-text-faint);
   margin-bottom: 16px;
   font-size: 0.9rem;
 }
 
 .list-page .result-count select {
   padding: 8px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-input);
   border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 500;
-  background: white;
-  color: #212529;
+  background: var(--color-surface);
+  color: var(--color-text);
   cursor: pointer;
 }
 

@@ -1,4 +1,10 @@
-FROM apache/airflow:3.1.8-python3.12
+ARG AIRFLOW_VERSION=3.1.8
+ARG PYTHON_VERSION=3.12
+
+FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
+
+ARG AIRFLOW_VERSION
+ARG PYTHON_VERSION
 
 USER root
 RUN apt-get update \
@@ -7,5 +13,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 USER airflow
-COPY requirements.txt /requirements.txt
-RUN pip install --no-cache-dir -r /requirements.txt
+COPY requirements-airflow.txt /requirements-airflow.txt
+# apache-airflow를 함께 적어야 의존성 해석 중에 Airflow 버전이 바뀌지 않는다.
+RUN pip install --no-cache-dir \
+    "apache-airflow==${AIRFLOW_VERSION}" \
+    -r /requirements-airflow.txt \
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"

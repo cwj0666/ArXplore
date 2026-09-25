@@ -1,3 +1,6 @@
+import { Link } from "react-router-dom";
+
+
 interface AssistantNoticeProps {
   isAuthenticated: boolean;
   homeHref?: string;
@@ -29,7 +32,7 @@ export function AssistantNotice({
             로그인
           </button>
         )}
-        <a href={homeHref}>뒤로가기</a>
+        <Link to={homeHref}>뒤로가기</Link>
       </div>
     </div>
   );

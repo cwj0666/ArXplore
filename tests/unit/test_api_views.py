@@ -63,6 +63,7 @@ class AgentStreamViewTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn("error", json.loads(response.content))
+        self.assertIs(json.loads(response.content)["login_required"], True)
         stream_mock.assert_not_called()
 
     def test_missing_api_key_returns_400(self):
@@ -70,6 +71,7 @@ class AgentStreamViewTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(json.loads(response.content)["error"], "개인 API 키를 먼저 등록하세요.")
+        self.assertIs(json.loads(response.content)["api_key_required"], True)
         stream_mock.assert_not_called()
 
     def test_empty_message_returns_400(self):
@@ -261,3 +263,29 @@ class PaperAnalyzeViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content), payload)
         analysis_mock.assert_called_once()
+
+
+class PaperSummaryViewTests(SimpleTestCase):
+    def test_get_is_not_allowed(self):
+        request = RequestFactory().get("/papers/2401.00001/summary/")
+        request.user = _AuthenticatedUser()
+
+        with patch.object(api_views, "get_paper_summary") as summary_mock:
+            response = api_views.paper_summary(request, "2401.00001")
+
+        self.assertEqual(response.status_code, 405)
+        summary_mock.assert_not_called()
+
+    def test_unexpected_error_is_not_leaked(self):
+        request = RequestFactory().post(
+            "/papers/2401.00001/summary/", data=json.dumps({"model": "gpt-5-mini"}), content_type="application/json"
+        )
+        request.user = _AuthenticatedUser()
+
+        with patch.object(api_views, "get_session_api_key", return_value="sk-user"), patch.object(
+            api_views, "get_paper_summary", side_effect=ValueError("internal detail /srv/secret")
+        ), self.assertLogs("papers.api_views", level="ERROR"):
+            response = api_views.paper_summary(request, "2401.00001")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("/srv/secret", response.content.decode())

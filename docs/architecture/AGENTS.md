@@ -31,8 +31,9 @@ AI는 아래 운영 사실을 현재 기준선으로 사용한다.
 - parser runtime은 같은 `docker-compose.yml`의 `layout-parser` 서비스(profile: parser, HURIDOCS 컨테이너)다
 - PDF 파싱 경로는 `layout -> pypdf -> abstract fallback` 순서다. GPU는 layout parser에만 쓰고, 임베딩은 OpenAI API로 만든다
 - 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다. 리포지토리 생성자나 요청 경로에 DDL을 넣지 않는다
-- 제품에서 쓰는 검색 경로는 lexical 하나다. 에이전트 도구 `search_paper_chunks_tool`은 `PaperRetriever.search_paper_contexts`(PostgreSQL 전문 검색)를 호출하고, vector / hybrid는 구현만 되어 있고 연결되지 않았다
-- 상세 페이지 챗은 retrieval 없이 논문의 앞 20개 청크를 넣는 비스트리밍 응답이다
+- 제품 검색 경로는 `src/core/agent/retrieval.py`의 `retrieve_contexts`가 고른다. `RETRIEVAL_MODE=hybrid`(기본)이고 질의 임베딩 키(사용자 세션 키 > 서버 `OPENAI_API_KEY`)가 있으면 `PaperRetriever.search_paper_contexts_by_hybrid`(lexical + vector RRF)를 쓰고, 키가 없거나 임베딩 호출이 실패하면 `search_paper_contexts`(lexical)로 내려간다. 에이전트 도구 `search_paper_chunks_tool`과 상세 챗이 같은 경로를 쓴다
+- 상세 페이지 챗은 질문으로 해당 논문 안(`arxiv_id` 한정)을 검색해 초록 + 발췌 청크 최대 5개로 답하고, SSE로 스트리밍하며 `[n]` 번호 인용을 `citations`로 돌려준다. 검색 결과가 없으면 앞 청크로 대신한다(`retrieval_mode: "first_chunks"`)
+- `DEMO_MODE=true`(기본)이면 목록·상세와 캐시된 개요·상세 요약은 로그인 없이 보인다. 새 생성과 챗은 로그인 + 개인 키가 필요하고, LLM 호출 엔드포인트는 rate limit(`RATE_LIMIT_*`)을 받는다
 
 ## 3. 절대 임의 변경하면 안 되는 것
 

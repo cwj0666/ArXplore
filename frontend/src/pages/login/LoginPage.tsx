@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { postLogin, postSignup } from "../../helpers/accountApi";
-import { getApiErrorMessage } from "../../helpers/http";
+import { getApiErrorMessage, getPasswordErrors } from "../../helpers/http";
 import { sanitizeNextPath } from "../../helpers/safeRedirect";
 import "./login-page.css";
 
@@ -22,6 +22,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -29,6 +30,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
 
   const handleSubmit = async () => {
     setErrorMessage("");
+    setPasswordErrors([]);
     setSuccessMessage("");
     setIsSubmitting(true);
     try {
@@ -36,7 +38,13 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
         try {
           await postSignup(username, password);
         } catch (error) {
-          setErrorMessage(getApiErrorMessage(error, REQUEST_FAILED_MESSAGE));
+          const passwordProblems = getPasswordErrors(error);
+          setPasswordErrors(passwordProblems);
+          setErrorMessage(
+            passwordProblems.length > 0
+              ? "비밀번호가 아래 조건을 만족하지 않습니다."
+              : getApiErrorMessage(error, REQUEST_FAILED_MESSAGE),
+          );
           return;
         }
 
@@ -68,14 +76,14 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     <>
     <div className="login-topbar">
       <div className="login-topbar-left">
-        <a href={next} className="back-btn">
+        <Link to={next} className="back-btn">
           뒤로가기
-        </a>
+        </Link>
       </div>
       <div className="login-topbar-center">
-        <a href="/" className="login-topbar-logo">
+        <Link to="/" className="login-topbar-logo">
           ArXplore
-        </a>
+        </Link>
       </div>
       <div className="login-topbar-right" />
     </div>
@@ -85,9 +93,10 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
           <h1>{mode === "login" ? "로그인" : "회원가입"}</h1>
         </div>
 
-        <div className="login-mode-tabs">
+        <div className="login-mode-tabs" role="group" aria-label="로그인 또는 회원가입">
           <button
             type="button"
+            aria-pressed={mode === "login"}
             className={mode === "login" ? "active" : ""}
             onClick={() => setMode("login")}
           >
@@ -95,6 +104,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
           </button>
           <button
             type="button"
+            aria-pressed={mode === "signup"}
             className={mode === "signup" ? "active" : ""}
             onClick={() => setMode("signup")}
           >
@@ -104,7 +114,11 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
 
         <label className="login-field">
           <span>사용자 이름</span>
-          <input value={username} onChange={(event) => setUsername(event.target.value)} />
+          <input
+            value={username}
+            autoComplete="username"
+            onChange={(event) => setUsername(event.target.value)}
+          />
         </label>
 
         <label className="login-field">
@@ -112,6 +126,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
           <input
             type="password"
             value={password}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
             onChange={(event) => setPassword(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -121,8 +136,19 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
           />
         </label>
 
-        {errorMessage ? <div className="login-feedback login-feedback-error">{errorMessage}</div> : null}
-        {successMessage ? <div className="login-feedback login-feedback-success">{successMessage}</div> : null}
+        {errorMessage ? (
+          <div className="login-feedback login-feedback-error" role="alert">
+            {errorMessage}
+            {passwordErrors.length > 0 ? (
+              <ul className="login-feedback-list">
+                {passwordErrors.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {successMessage ? <div className="login-feedback login-feedback-success" role="status">{successMessage}</div> : null}
 
         <button type="button" className="login-submit" onClick={() => void handleSubmit()} disabled={isSubmitting}>
           {isSubmitting ? "처리 중..." : mode === "login" ? "로그인" : "회원가입 후 로그인"}

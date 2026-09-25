@@ -1,8 +1,7 @@
+cryptography>=42
 django>=5.2,<6.0
 feedparser>=6.0
 gunicorn>=23.0
-ipykernel==6.29.5
-jupyterlab==4.4.1
 langchain==1.2.15
 langchain-core==1.2.26
 langgraph==1.1.6
@@ -10,13 +9,13 @@ langchain-openai==1.1.0
 langchain-text-splitters==1.1.0
 langsmith==0.3.45
 openai>=1.109.1
-pandas==2.2.3
 pgvector==0.3.6
 psycopg2-binary==2.9.10
 pypdf==5.4.0
 pydantic-settings==2.8.1
 pymongo==4.12.0
 python-dotenv==1.1.0
+redis>=5
 requests==2.33.0
 SQLAlchemy==2.0.48
 tiktoken>=0.7

@@ -8,10 +8,10 @@
 .assistant-page {
   display: block;
   width: 100%;
-  background: #f5f5f5;
-  color: #212529;
+  background: var(--color-bg);
+  color: var(--color-text);
   min-height: 100vh;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .assistant-page a {
@@ -43,8 +43,8 @@
 }
 
 .assistant-chat-shell {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 20px;
   overflow: hidden;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
@@ -71,31 +71,31 @@
 
 .assistant-message-user {
   align-self: flex-end;
-  background: #2f343b;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
   border-bottom-right-radius: 4px;
 }
 
 .assistant-message-assistant {
   align-self: flex-start;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
   color: #1f2937;
   border-bottom-left-radius: 4px;
 }
 
 .assistant-message-loading {
   align-self: flex-start;
-  background: #f3f4f6;
-  color: #6b7280;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .assistant-message-notice {
   align-self: flex-start;
-  background: #f3f4f6;
-  color: #6b7280;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .assistant-message p {
@@ -107,7 +107,7 @@
 }
 
 .assistant-message a {
-  color: #111827;
+  color: var(--color-text-emphasis);
   text-decoration: underline;
   text-underline-offset: 2px;
   font-weight: 700;
@@ -117,18 +117,18 @@
   display: flex;
   gap: 10px;
   padding: 16px;
-  border-top: 1px solid #e5e7eb;
-  background: #fff;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
 }
 
 .assistant-composer input {
   flex: 1;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-border-strong);
   border-radius: 999px;
   padding: 13px 16px;
   font-size: 0.95rem;
   outline: none;
-  background: #fff;
+  background: var(--color-surface);
 }
 
 .assistant-composer input:focus {
@@ -138,8 +138,8 @@
 .assistant-composer button {
   border: none;
   border-radius: 999px;
-  background: #2f343b;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
   width: 60px;
   min-width: 60px;
   height: 46px;
@@ -172,8 +172,8 @@
 }
 
 .assistant-notice {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 20px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
   padding: 24px;
@@ -187,7 +187,7 @@
 
 .assistant-notice p {
   margin: 0;
-  color: #4b5563;
+  color: var(--color-text-subtle);
   font-size: 0.95rem;
 }
 
@@ -202,8 +202,8 @@
 .assistant-notice-actions button {
   border: none;
   border-radius: 999px;
-  background: #2f343b;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
   padding: 10px 20px;
   font-size: 0.92rem;
   font-weight: 700;

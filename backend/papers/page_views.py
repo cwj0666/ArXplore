@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
+from django.views.decorators.http import require_GET
 
 from .services import (
     AuthenticationRequiredError,
     PaperNotFoundError,
     build_paper_detail_payload,
     build_paper_list_payload,
+    demo_mode_enabled,
 )
+
+logger = logging.getLogger(__name__)
+
+DATA_LOAD_ERROR_MESSAGE = "논문 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 
 
 def paper_list(request: HttpRequest) -> HttpResponse:
@@ -25,6 +32,7 @@ def paper_list_alias(request: HttpRequest) -> HttpResponse:
     return redirect(redirect_to)
 
 
+@require_GET
 def paper_list_data(request: HttpRequest) -> JsonResponse:
     try:
         payload = build_paper_list_payload(
@@ -34,27 +42,30 @@ def paper_list_data(request: HttpRequest) -> JsonResponse:
             page=request.GET.get("page", 1),
             user=request.user,
         )
-    except Exception as exc:
-        return JsonResponse({"error": f"데이터베이스 연결 실패: {exc}"}, status=500)
+    except Exception:
+        logger.exception("논문 목록 조회 실패")
+        return JsonResponse({"error": DATA_LOAD_ERROR_MESSAGE}, status=500)
 
     return JsonResponse(payload)
 
 
 def paper_detail(request: HttpRequest, arxiv_id: str) -> HttpResponse:
-    if not getattr(request.user, "is_authenticated", False):
+    if not demo_mode_enabled() and not getattr(request.user, "is_authenticated", False):
         return redirect(f"/login/?next=/papers/{arxiv_id}/")
     return _render_react_shell()
 
 
+@require_GET
 def paper_detail_data(request: HttpRequest, arxiv_id: str) -> JsonResponse:
     try:
         return JsonResponse(build_paper_detail_payload(arxiv_id, user=request.user))
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return JsonResponse({"error": str(exc), "login_required": True}, status=401)
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
-    except Exception as exc:
-        return JsonResponse({"error": f"데이터베이스 연결 실패: {exc}"}, status=500)
+    except Exception:
+        logger.exception("논문 상세 조회 실패")
+        return JsonResponse({"error": DATA_LOAD_ERROR_MESSAGE}, status=500)
 
 
 def paper_agent(request: HttpRequest) -> HttpResponse:

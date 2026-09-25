@@ -8,11 +8,13 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from openai import AuthenticationError
 
+from .ratelimit import rate_limit
 from .services import (
     AuthenticationRequiredError,
-    InvalidSummaryModelError,
+    InvalidRequestError,
     MissingApiKeyError,
     PaperNotFoundError,
+    PasswordValidationError,
     answer_agent_chat,
     answer_paper_chat,
     build_auth_payload,
@@ -38,17 +40,29 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 STREAM_ERROR_MESSAGE = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+GENERATION_ERROR_MESSAGE = "AI 결과 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 INVALID_API_KEY_MESSAGE = "OpenAI API 키가 유효하지 않습니다. 설정에서 키를 확인하세요."
+
+auth_rate_limit = rate_limit("auth", limit_setting="RATE_LIMIT_AUTH_PER_MINUTE", per="ip")
+llm_rate_limit = rate_limit("llm", limit_setting="RATE_LIMIT_LLM_PER_MINUTE", per="user")
 
 
 def _json_body(request: HttpRequest) -> dict:
     try:
         payload = json.loads(request.body)
     except Exception as exc:
-        raise ValueError("잘못된 요청입니다.") from exc
+        raise InvalidRequestError("잘못된 요청입니다.") from exc
     if not isinstance(payload, dict):
-        raise ValueError("잘못된 요청입니다.")
+        raise InvalidRequestError("잘못된 요청입니다.")
     return payload
+
+
+def _login_required(exc: AuthenticationRequiredError) -> JsonResponse:
+    return JsonResponse({"error": str(exc), "login_required": True}, status=401)
+
+
+def _api_key_required(exc: MissingApiKeyError) -> JsonResponse:
+    return JsonResponse({"error": str(exc), "api_key_required": True}, status=400)
 
 
 @require_GET
@@ -58,6 +72,7 @@ def bootstrap(request: HttpRequest):
 
 
 @require_POST
+@auth_rate_limit
 def auth_signup(request: HttpRequest):
     try:
         body = _json_body(request)
@@ -65,13 +80,16 @@ def auth_signup(request: HttpRequest):
             username=str(body.get("username", "")),
             password=str(body.get("password", "")),
         )
-    except ValueError as exc:
+    except PasswordValidationError as exc:
+        return JsonResponse({"error": str(exc), "password_errors": exc.messages}, status=400)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
     return JsonResponse(payload)
 
 
 @require_POST
+@auth_rate_limit
 def auth_login(request: HttpRequest):
     try:
         body = _json_body(request)
@@ -80,7 +98,7 @@ def auth_login(request: HttpRequest):
             username=str(body.get("username", "")),
             password=str(body.get("password", "")),
         )
-    except ValueError as exc:
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
     return JsonResponse(payload)
@@ -102,7 +120,7 @@ def settings_detail(request: HttpRequest):
         try:
             return JsonResponse(build_settings_payload(request.user))
         except AuthenticationRequiredError as exc:
-            return JsonResponse({"error": str(exc)}, status=401)
+            return _login_required(exc)
 
     try:
         body = _json_body(request)
@@ -111,8 +129,8 @@ def settings_detail(request: HttpRequest):
             preferred_summary_model=str(body.get("preferred_summary_model", "")),
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
-    except (InvalidSummaryModelError, ValueError) as exc:
+        return _login_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
     return JsonResponse(payload)
@@ -124,15 +142,15 @@ def settings_api_key_detail(request: HttpRequest):
         try:
             payload = clear_personal_api_key(request)
         except AuthenticationRequiredError as exc:
-            return JsonResponse({"error": str(exc)}, status=401)
+            return _login_required(exc)
         return JsonResponse(payload)
 
     try:
         body = _json_body(request)
         payload = save_personal_api_key(request, str(body.get("api_key", "")))
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
-    except ValueError as exc:
+        return _login_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
     return JsonResponse(payload)
@@ -143,7 +161,7 @@ def favorites_list(request: HttpRequest):
     try:
         return JsonResponse(build_favorites_payload(request.user))
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
 
 
 @require_POST
@@ -155,16 +173,17 @@ def favorites_toggle(request: HttpRequest):
             arxiv_id=str(body.get("arxiv_id", "")),
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
-    except ValueError as exc:
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
     return JsonResponse(payload)
 
 
 @require_POST
+@llm_rate_limit
 def paper_analyze(request: HttpRequest, arxiv_id: str):
     try:
         return JsonResponse(
@@ -175,16 +194,18 @@ def paper_analyze(request: HttpRequest, arxiv_id: str):
             )
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
     except MissingApiKeyError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
+        return _api_key_required(exc)
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
     except Exception as exc:
-        return JsonResponse({"error": str(exc)}, status=500)
+        logger.exception("overview 생성 실패")
+        return JsonResponse({"error": _generation_error_message(exc)}, status=500)
 
 
 @require_POST
+@llm_rate_limit
 def paper_summary(request: HttpRequest, arxiv_id: str):
     try:
         body = _json_body(request)
@@ -197,16 +218,20 @@ def paper_summary(request: HttpRequest, arxiv_id: str):
             )
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
-    except (MissingApiKeyError, InvalidSummaryModelError) as exc:
+        return _login_required(exc)
+    except MissingApiKeyError as exc:
+        return _api_key_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
     except Exception as exc:
-        return JsonResponse({"error": str(exc)}, status=500)
+        logger.exception("상세 요약 생성 실패")
+        return JsonResponse({"error": _generation_error_message(exc)}, status=500)
 
 
 @require_POST
+@llm_rate_limit
 def paper_chat(request: HttpRequest, arxiv_id: str):
     try:
         body = _json_body(request)
@@ -218,10 +243,10 @@ def paper_chat(request: HttpRequest, arxiv_id: str):
             session_api_key=get_session_api_key(request),
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
     except MissingApiKeyError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    except ValueError as exc:
+        return _api_key_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
@@ -233,6 +258,7 @@ def paper_chat(request: HttpRequest, arxiv_id: str):
 
 
 @require_POST
+@llm_rate_limit
 def paper_chat_stream(request: HttpRequest, arxiv_id: str):
     try:
         body = _json_body(request)
@@ -244,10 +270,10 @@ def paper_chat_stream(request: HttpRequest, arxiv_id: str):
             session_api_key=get_session_api_key(request),
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
     except MissingApiKeyError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    except ValueError as exc:
+        return _api_key_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
@@ -259,6 +285,7 @@ def paper_chat_stream(request: HttpRequest, arxiv_id: str):
 
 
 @require_POST
+@llm_rate_limit
 def paper_agent_chat(request: HttpRequest):
     try:
         body = _json_body(request)
@@ -269,10 +296,10 @@ def paper_agent_chat(request: HttpRequest):
             session_api_key=get_session_api_key(request),
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
     except MissingApiKeyError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    except ValueError as exc:
+        return _api_key_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except Exception as exc:
         logger.exception("에이전트 응답 생성 실패")
@@ -282,6 +309,7 @@ def paper_agent_chat(request: HttpRequest):
 
 
 @require_POST
+@llm_rate_limit
 def paper_agent_stream(request: HttpRequest):
     try:
         body = _json_body(request)
@@ -292,10 +320,10 @@ def paper_agent_stream(request: HttpRequest):
             session_api_key=get_session_api_key(request),
         )
     except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
+        return _login_required(exc)
     except MissingApiKeyError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    except ValueError as exc:
+        return _api_key_required(exc)
+    except InvalidRequestError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except Exception:
         logger.exception("에이전트 스트림 준비 실패")
@@ -314,6 +342,12 @@ def _stream_error_message(exc: Exception) -> str:
     if isinstance(exc, AuthenticationError):
         return INVALID_API_KEY_MESSAGE
     return STREAM_ERROR_MESSAGE
+
+
+def _generation_error_message(exc: Exception) -> str:
+    if isinstance(exc, AuthenticationError):
+        return INVALID_API_KEY_MESSAGE
+    return GENERATION_ERROR_MESSAGE
 
 
 def _sse_events(events: Iterable[Any]) -> Iterator[str]:

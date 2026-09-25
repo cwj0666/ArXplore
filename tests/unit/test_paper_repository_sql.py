@@ -4,10 +4,17 @@ import re
 from contextlib import contextmanager
 from typing import Any
 
+import psycopg2
 import pytest
 
 from src.integrations import paper_repository as paper_repository_module
-from src.integrations.paper_repository import REFERENCES_SECTION_TITLE_SQL_REGEX, PaperRepository
+from src.integrations.paper_repository import (
+    REFERENCES_SECTION_TITLE_SQL_REGEX,
+    PaperRepository,
+    build_lexical_candidates_query,
+    escape_like,
+)
+from src.integrations.paper_retriever import PaperRetriever
 from src.integrations.pdf_parser.section_roles import is_references_section_title
 
 
@@ -86,7 +93,67 @@ def test_ensure_schema_is_explicit_and_never_drops_tables():
     statements = [_normalize_sql(sql).upper() for sql, _ in cursor.executed]
     assert any("CREATE TABLE IF NOT EXISTS PAPERS" in statement for statement in statements)
     assert any("CREATE TABLE IF NOT EXISTS PAPER_EMBEDDINGS" in statement for statement in statements)
-    assert not any("DROP " in statement for statement in statements)
+    assert not any("DROP TABLE" in statement for statement in statements)
+    assert [statement for statement in statements if "DROP " in statement] == [
+        "DROP INDEX IF EXISTS IDX_PAPER_CHUNKS_FTS"
+    ]
+
+
+def test_ensure_schema_adds_generated_search_vectors_and_indexes():
+    cursor = RecordingCursor()
+    _repository_with_cursor(cursor).ensure_schema()
+    statements = [_normalize_sql(sql) for sql, _ in cursor.executed]
+
+    assert (
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS title_abstract_vector tsvector GENERATED ALWAYS AS ("
+        "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+        "setweight(to_tsvector('english', coalesce(abstract, '')), 'B')) STORED"
+    ) in statements
+    assert (
+        "ALTER TABLE paper_chunks ADD COLUMN IF NOT EXISTS chunk_vector tsvector GENERATED ALWAYS AS ("
+        "setweight(to_tsvector('english', coalesce(chunk_text, '')), 'C')) STORED"
+    ) in statements
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_papers_title_abstract_vector ON papers USING GIN (title_abstract_vector)"
+        in statements
+    )
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_paper_chunks_chunk_vector ON paper_chunks USING GIN (chunk_vector)"
+        in statements
+    )
+
+    hnsw = (
+        "CREATE INDEX IF NOT EXISTS paper_embeddings_embedding_hnsw "
+        "ON paper_embeddings USING hnsw (embedding vector_cosine_ops)"
+    )
+    position = statements.index(hnsw)
+    assert statements[position - 1] == "SAVEPOINT paper_embeddings_hnsw"
+    assert statements[position + 1] == "RELEASE SAVEPOINT paper_embeddings_hnsw"
+    assert statements.index(hnsw) > statements.index(
+        next(statement for statement in statements if "CREATE TABLE IF NOT EXISTS paper_embeddings" in statement)
+    )
+
+
+class HnswUnsupportedCursor(RecordingCursor):
+    def execute(self, sql, params=None):
+        super().execute(sql, params)
+        if "USING hnsw" in sql:
+            raise psycopg2.errors.UndefinedObject('access method "hnsw" does not exist')
+
+
+def test_ensure_schema_continues_without_hnsw_support(caplog):
+    cursor = HnswUnsupportedCursor()
+    with caplog.at_level("WARNING", logger=paper_repository_module.__name__):
+        _repository_with_cursor(cursor).ensure_schema()
+
+    statements = [_normalize_sql(sql) for sql, _ in cursor.executed]
+    position = next(index for index, statement in enumerate(statements) if "USING hnsw" in statement)
+    assert statements[position + 1] == "ROLLBACK TO SAVEPOINT paper_embeddings_hnsw"
+    assert "RELEASE SAVEPOINT paper_embeddings_hnsw" not in statements
+    assert any(
+        "CREATE TABLE IF NOT EXISTS paper_ai_detailed_summaries" in statement for statement in statements[position:]
+    )
+    assert "HNSW" in caplog.text
 
 
 def test_save_paper_preserves_enrichment_on_conflict():
@@ -150,7 +217,229 @@ def test_lexical_query_uses_full_title_references_rule():
     assert "ILIKE '%%References%%'" not in sql
     assert "%" not in REFERENCES_SECTION_TITLE_SQL_REGEX
     assert "'" not in REFERENCES_SECTION_TITLE_SQL_REGEX
-    assert sql.count("%s") == len(params)
+    assert "%s" not in sql
+    assert set(re.findall(r"%\((\w+)\)s", sql)) == set(params)
+
+
+def test_lexical_candidates_come_from_indexed_generated_columns():
+    sql, params = build_lexical_candidates_query("retrieval-augmented generation", limit=7)
+    normalized = _normalize_sql(sql)
+    matched = normalized.split("ranked AS")[0]
+
+    assert "WHERE c.chunk_vector @@ (SELECT any_term FROM query_terms)" in matched
+    assert "WHERE p.title_abstract_vector @@ (SELECT any_term FROM query_terms)" in matched
+    assert " UNION " in matched
+    assert "ILIKE" not in matched
+    assert "to_tsvector('english', coalesce(" not in normalized
+    assert ("tsvector_to_array(to_tsvector('english', %(query)s) || to_tsvector('english', %(fts_query)s))") in matched
+    assert params == {
+        "query": "retrieval-augmented generation",
+        "fts_query": "retrieval augmented generation",
+        "like_pattern": "%retrieval-augmented generation%",
+        "limit": 7,
+    }
+
+
+def test_lexical_scoring_matches_previous_weights_and_breakdown():
+    normalized = _normalize_sql(build_lexical_candidates_query("dpo", limit=5)[0])
+
+    assert (
+        "(p.title_abstract_vector || c.chunk_vector) @@ websearch_to_tsquery('english', %(query)s) "
+        "OR (p.title_abstract_vector || c.chunk_vector) @@ plainto_tsquery('english', %(fts_query)s)"
+    ) in normalized
+    assert (
+        "ts_rank_cd( p.title_abstract_vector || c.chunk_vector, websearch_to_tsquery('english', %(query)s) ) + "
+        "0.65 * ts_rank_cd( p.title_abstract_vector || c.chunk_vector, plainto_tsquery('english', %(fts_query)s) )"
+    ) in normalized
+    assert (
+        "WHEN p.title ILIKE %(like_pattern)s THEN 0.45 WHEN p.abstract ILIKE %(like_pattern)s THEN 0.2 "
+        "WHEN c.chunk_text ILIKE %(like_pattern)s THEN 0.15"
+    ) in normalized
+    assert (
+        "WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01"
+        in normalized
+    )
+    assert normalized.endswith("ORDER BY score DESC, chunk_id DESC LIMIT %(limit)s")
+
+
+def test_lexical_query_scopes_both_candidate_branches():
+    sql, params = build_lexical_candidates_query("loss", limit=5, arxiv_id="2401.00001")
+    normalized = _normalize_sql(sql)
+    assert "WHERE c.chunk_vector @@ (SELECT any_term FROM query_terms) AND c.arxiv_id = %(arxiv_id)s" in normalized
+    assert (
+        "WHERE p.title_abstract_vector @@ (SELECT any_term FROM query_terms) AND p.arxiv_id = %(arxiv_id)s"
+        in normalized
+    )
+    assert params["arxiv_id"] == "2401.00001"
+
+
+@pytest.mark.parametrize(
+    "raw,escaped",
+    [("plain text", "plain text"), ("50%", "50\\%"), ("snake_case", "snake\\_case"), ("a\\b", "a\\\\b")],
+)
+def test_like_pattern_is_escaped(raw, escaped):
+    assert escape_like(raw) == escaped
+    assert build_lexical_candidates_query(raw, limit=1)[1]["like_pattern"] == f"%{escaped}%"
+
+
+def test_blank_lexical_query_skips_the_database():
+    repository = PaperRepository(settings=object())
+    repository._connection = pytest.fail  # type: ignore[method-assign]
+    assert repository.list_chunk_candidates_by_query("   ", limit=3) == []
+    assert build_lexical_candidates_query("", limit=3) is None
+
+
+def test_lexical_rows_keep_the_public_shape():
+    row = ("c1", "2401.00001", "Title", "Abstract", "chunk", 4, "Method", "body", 0.3, 0.15, 0.0, 0.04, 0.0, 0.49)
+    cursor = RecordingCursor(fetchall_results=[[row]])
+    result = _repository_with_cursor(cursor).list_chunk_candidates_by_query("chunk", limit=3)[0]
+
+    assert {
+        key: result[key] for key in ("chunk_id", "arxiv_id", "chunk_text", "section_title", "content_role", "score")
+    } == {
+        "chunk_id": "c1",
+        "arxiv_id": "2401.00001",
+        "chunk_text": "chunk",
+        "section_title": "Method",
+        "content_role": "body",
+        "score": 0.49,
+    }
+    assert result["score_breakdown"] == {
+        "fts_score": 0.3,
+        "ilike_bonus": 0.15,
+        "content_role_adjustment": 0.0,
+        "section_boost": 0.04,
+        "structural_adjustment": 0.0,
+    }
+    assert result["retrieval_method"] == "lexical"
+
+
+def test_save_paper_chunks_uses_one_bulk_insert(monkeypatch):
+    calls: list[dict[str, Any]] = []
+
+    def fake_execute_values(cursor, sql, argslist, template=None, page_size=100, fetch=False):
+        calls.append({"sql": sql, "args": list(argslist), "template": template})
+
+    monkeypatch.setattr(paper_repository_module, "execute_values", fake_execute_values)
+    cursor = RecordingCursor()
+    _repository_with_cursor(cursor).save_paper_chunks(
+        "2401.00001",
+        [
+            {
+                "chunk_index": 0,
+                "chunk_text": "a",
+                "section_title": "Abstract",
+                "token_count": 1,
+                "metadata": {"content_role": "body"},
+            },
+            {"chunk_index": "1", "chunk_text": "b\ud800"},
+        ],
+    )
+
+    assert cursor.executed == [("DELETE FROM paper_chunks WHERE arxiv_id = %s", ("2401.00001",))]
+    assert len(calls) == 1
+    assert (
+        "INSERT INTO paper_chunks (arxiv_id, chunk_index, chunk_text, section_title, token_count, metadata, updated_at) VALUES %s"
+        in _normalize_sql(calls[0]["sql"])
+    )
+    assert calls[0]["template"] == "(%s, %s, %s, %s, %s, %s, NOW())"
+    first, second = calls[0]["args"]
+    assert first[:5] == ("2401.00001", 0, "a", "Abstract", 1)
+    assert first[5].adapted == {"content_role": "body"}
+    assert second[:5] == ("2401.00001", 1, "b", None, 0)
+
+
+def test_list_chunk_windows_fetches_all_windows_in_one_query():
+    rows = [
+        (1, 11, "A", 0, "a0", "Abstract", 3, {"content_role": "body"}, None),
+        (1, 12, "A", 1, "a1", "Intro", 4, None, None),
+        (3, 12, "A", 1, "a1", "Intro", 4, None, None),
+    ]
+    cursor = RecordingCursor(fetchall_results=[rows])
+    windows = _repository_with_cursor(cursor).list_chunk_windows([("A", 0), ("B", 5), ("A", 2)], window=1)
+
+    assert len(cursor.executed) == 1
+    sql, params = cursor.executed[0]
+    normalized = _normalize_sql(sql)
+    assert (
+        "FROM unnest(%(arxiv_ids)s::text[], %(center_indexes)s::integer[]) WITH ORDINALITY AS w(arxiv_id, center_index, ord)"
+        in normalized
+    )
+    assert (
+        "c.chunk_index BETWEEN GREATEST(0, w.center_index - %(window)s) AND w.center_index + %(window)s"
+    ) in normalized
+    assert normalized.endswith("ORDER BY w.ord ASC, c.chunk_index ASC")
+    assert params == {"arxiv_ids": ["A", "B", "A"], "center_indexes": [0, 5, 2], "window": 1}
+    assert [[chunk["chunk_id"] for chunk in window] for window in windows] == [[11, 12], [], [12]]
+    assert windows[0][0] == {
+        "chunk_id": 11,
+        "arxiv_id": "A",
+        "chunk_index": 0,
+        "chunk_text": "a0",
+        "section_title": "Abstract",
+        "token_count": 3,
+        "metadata": {"content_role": "body"},
+        "updated_at": None,
+    }
+    assert windows[0][1]["metadata"] == {}
+
+
+def test_list_chunk_windows_without_centers_skips_the_database():
+    repository = PaperRepository(settings=object())
+    repository._connection = pytest.fail  # type: ignore[method-assign]
+    assert repository.list_chunk_windows([], window=1) == []
+
+
+class WindowRepository:
+    def __init__(self) -> None:
+        self.bulk_calls: list[tuple[list[tuple[str, int]], int]] = []
+
+    def list_chunk_windows(self, centers, *, window):
+        self.bulk_calls.append((list(centers), window))
+        return [
+            [{"chunk_text": f"{arxiv_id}:{index}", "metadata": {"content_role": "body"}}] for arxiv_id, index in centers
+        ]
+
+    def list_chunk_window(self, arxiv_id, center_chunk_index, *, window=1):
+        raise AssertionError("per-hit window query must not be used")
+
+
+class SingleWindowRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, int]] = []
+
+    def list_chunk_window(self, arxiv_id, center_chunk_index, *, window=1):
+        self.calls.append((arxiv_id, center_chunk_index, window))
+        return [{"chunk_text": f"{arxiv_id}:{center_chunk_index}", "metadata": {"content_role": "body"}}]
+
+
+def _hits() -> list[dict[str, Any]]:
+    return [
+        {"chunk_id": 1, "arxiv_id": "A", "chunk_index": "3", "chunk_text": "x"},
+        {"chunk_id": 2, "arxiv_id": "B", "chunk_index": 0, "chunk_text": "y"},
+    ]
+
+
+def test_build_contexts_uses_a_single_window_query():
+    repository = WindowRepository()
+    retriever = PaperRetriever(repository=repository, embedding_client=object(), vector_repository=object())
+    contexts = retriever._build_contexts(_hits(), adjacency_window=2)
+
+    assert repository.bulk_calls == [([("A", 3), ("B", 0)], 2)]
+    assert [context["context_text"] for context in contexts] == ["A:3", "B:0"]
+    assert contexts[0]["context_chunks"] == [
+        {"chunk_text": "A:3", "metadata": {"content_role": "body"}, "section_title": "", "content_role": "body"}
+    ]
+    assert retriever._build_contexts([], adjacency_window=1) == []
+
+
+def test_build_contexts_output_is_identical_with_single_window_repositories():
+    bulk = PaperRetriever(repository=WindowRepository(), embedding_client=object(), vector_repository=object())
+    single_repository = SingleWindowRepository()
+    single = PaperRetriever(repository=single_repository, embedding_client=object(), vector_repository=object())
+
+    assert bulk._build_contexts(_hits(), adjacency_window=1) == single._build_contexts(_hits(), adjacency_window=1)
+    assert single_repository.calls == [("A", 3, 1), ("B", 0, 1)]
 
 
 AGREEING_TITLES = [

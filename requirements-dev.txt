@@ -1,0 +1,9 @@
+-r requirements.txt
+
+ipykernel==6.29.5
+jupyterlab==4.4.1
+pandas==2.2.3
+pyflakes>=3.2
+pytest>=8.3
+pytest-django>=4.9
+ruff==0.16.9

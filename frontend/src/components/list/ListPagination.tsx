@@ -1,10 +1,9 @@
+import { Link } from "react-router-dom";
+
 interface ListPaginationProps {
   page: number;
   totalPages: number;
-  query: string;
-  sort: string;
-  mode: string;
-  onPageChange: (page: number) => void;
+  buildHref: (page: number) => string;
 }
 
 function clampPage(page: number, totalPages: number): number {
@@ -17,96 +16,50 @@ function clampPage(page: number, totalPages: number): number {
   return page;
 }
 
-export function ListPagination({
-  page,
-  totalPages,
-  query,
-  sort,
-  mode,
-  onPageChange,
-}: ListPaginationProps) {
+export function ListPagination({ page, totalPages, buildHref }: ListPaginationProps) {
   const prevPage = clampPage(page - 1, totalPages);
   const nextPage = clampPage(page + 1, totalPages);
   const jumpPrev10 = clampPage(page - 10, totalPages);
   const jumpNext10 = clampPage(page + 10, totalPages);
 
-  const buildHref = (targetPage: number): string => {
-    const params = new URLSearchParams();
-    if (query) {
-      params.set("q", query);
-    }
-    params.set("sort", sort);
-    params.set("mode", mode);
-    params.set("page", String(targetPage));
-    return `/?${params.toString()}`;
-  };
-
   const canGoPrev = page > 1;
   const canGoNext = page < totalPages;
 
   return (
-    <nav className="pagination" aria-label="pagination">
+    <nav className="pagination" aria-label="페이지 이동">
       {canGoPrev ? (
         <>
-          <a
-            className="arrow"
-            href={buildHref(jumpPrev10)}
-            onClick={(event) => {
-              event.preventDefault();
-              onPageChange(jumpPrev10);
-            }}
-          >
+          <Link className="arrow" to={buildHref(jumpPrev10)} aria-label="10페이지 앞으로">
             &laquo;
-          </a>
-          <a
-            className="arrow"
-            href={buildHref(prevPage)}
-            onClick={(event) => {
-              event.preventDefault();
-              onPageChange(prevPage);
-            }}
-          >
+          </Link>
+          <Link className="arrow" to={buildHref(prevPage)} aria-label="이전 페이지">
             &lsaquo;
-          </a>
+          </Link>
         </>
       ) : (
         <>
-          <span className="arrow disabled">&laquo;</span>
-          <span className="arrow disabled">&lsaquo;</span>
+          <span className="arrow disabled" aria-hidden="true">&laquo;</span>
+          <span className="arrow disabled" aria-hidden="true">&lsaquo;</span>
         </>
       )}
 
-      <span className="page-info">
+      <span className="page-info" aria-current="page">
         {page} / {totalPages}
       </span>
 
       {canGoNext ? (
         <>
-          <a
-            className="arrow"
-            href={buildHref(nextPage)}
-            onClick={(event) => {
-              event.preventDefault();
-              onPageChange(nextPage);
-            }}
-          >
+          <Link className="arrow" to={buildHref(nextPage)} aria-label="다음 페이지">
             &rsaquo;
-          </a>
-          <a
-            className="arrow"
-            href={buildHref(jumpNext10)}
-            onClick={(event) => {
-              event.preventDefault();
-              onPageChange(jumpNext10);
-            }}
-          >
+          </Link>
+          <Link className="arrow" to={buildHref(jumpNext10)} aria-label="10페이지 뒤로">
             &raquo;
-          </a>
+          </Link>
         </>
       ) : (
         <>
-          <span className="arrow disabled">&rsaquo;</span>
-          <span className="arrow disabled">&raquo;</span>
+          <span className="arrow disabled" aria-hidden="true">&rsaquo;</span>
+          <span className="arrow disabled" aria-hidden="true">&raquo;</span>
         </>
       )}
     </nav>

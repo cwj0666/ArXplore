@@ -13,7 +13,7 @@
 2. Tailscale 연결
 3. 저장소 clone
 4. .env 배치
-5. 기본 컨테이너 실행 (django + nginx + vite) 후 스키마 생성 (migrate_schema.py)
+5. 기본 컨테이너 실행 (django + nginx, 필요하면 dev 프로필로 vite) 후 스키마 생성 (migrate_schema.py)
 6. parser 프로필 실행 (layout-parser + prepare-worker가 함께 올라옴)
 7. 필요 시 서버 Airflow와 DB 접근을 위한 포트 포워딩
 ```
@@ -112,7 +112,7 @@ docker compose ps
 
 - `arxplore-django`
 - `arxplore-nginx`
-- `arxplore-vite`
+- `arxplore-vite` (`dev` 프로필: `docker compose --profile dev up -d vite`)
 
 기본 접속:
 
@@ -125,7 +125,7 @@ docker compose ps
 docker compose exec django python /workspace/scripts/migrate_schema.py
 ```
 
-`arxplore-vite`는 단일 `docker-compose.yml`의 기본 서비스로 묶여 있어 `setup.sh` 한 번에 함께 올라온다. 프론트엔드 수정만 하는 경우에도 별도 명령은 필요 없다.
+`arxplore-vite`는 `dev` 프로필이라 `setup.sh`로는 올라오지 않는다. 프론트엔드를 수정할 때 `docker compose --profile dev up -d vite`로 따로 띄운다.
 
 이 환경에서 할 수 있는 작업:
 

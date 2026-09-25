@@ -2,7 +2,7 @@
 
 ## 1. 문서 목적
 
-이 문서는 ArXplore의 현재 운영 구조와 모듈 경계를 코드 기준으로 설명한다. 목표 구조가 아니라 지금 코드가 실제로 하는 일을 적고, 구현만 되어 있고 제품 경로에 연결되지 않은 부분은 따로 표시한다.
+이 문서는 ArXplore의 현재 운영 구조와 모듈 경계를 코드 기준으로 설명한다. 목표 구조가 아니라 지금 코드가 실제로 하는 일을 적는다.
 
 ArXplore는 `최신 AI 논문 수집 -> raw 저장 -> prepare queue 등록 -> 로컬 prepare/embedding -> retrieval -> 논문 상세 문서 / 에이전트 응답 -> UI` 흐름을 기준으로 한다. 수집 자동화와 무거운 파싱은 같은 런타임에 있지 않다. 서버 스택은 Airflow와 데이터 저장소를 운영하고, 로컬 PC는 Django/React 서비스, GPU parser, prepare worker를 실행한다.
 
@@ -22,11 +22,13 @@ flowchart TD
     B --> J[arxplore_maintenance<br/>backfill -> enrich]
     J --> K[arXiv metadata enrichment]
     K --> L[PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings]
-    L --> M[Retrieval<br/>lexical 제품 경로 / vector·hybrid 미연결]
+    L --> M[Retrieval<br/>hybrid 제품 경로 / lexical 폴백]
     L --> N[Paper Detail Generation<br/>overview / key_findings / summary]
     M --> O[LangGraph ReAct Agent]
+    M --> Q[상세 페이지 챗]
     N --> P[React UI]
     O --> P
+    Q --> P
 ```
 
 - 수집 자동화는 서버 Airflow가 수행한다
@@ -60,13 +62,13 @@ PostgreSQL(15432), MongoDB(17017), Airflow(18080) 포트는 `TAILSCALE_SERVER_IP
 
 ### 로컬 서비스 런타임
 
-단일 `docker-compose.yml`의 기본 서비스 `arxplore-nginx`, `arxplore-django`, `arxplore-vite`. nginx는 React 빌드를 서빙하고 API를 Django로 프록시한다. Django는 gunicorn(gthread, 워커 4 × 스레드 8)으로 돈다. `arxplore-vite`는 프론트엔드 수정용 Vite dev server다.
+단일 `docker-compose.yml`의 기본 서비스는 `arxplore-nginx`, `arxplore-django`다. nginx는 React 빌드를 서빙하고 API 경로만 Django로 프록시하며(SPA 경로는 `index.html`), 보안 헤더와 gzip을 붙인다. SSE 경로는 버퍼링을 끄고 읽기 제한을 300초로 둔다. Django admin 경로는 프록시하지 않는다. Django는 gunicorn(gthread, 워커 4 × 스레드 8)으로 root가 아닌 `app` 사용자로 돌고, nginx는 django의 TCP healthcheck가 통과한 뒤 시작한다. 프론트엔드 수정용 Vite dev server(`arxplore-vite`)는 `dev` 프로필이다.
 
 원격 서버 없이 웹만 띄울 때는 `local-db` 프로필의 `postgres-local`(pgvector/pgvector:pg16, `127.0.0.1:${SERVER_POSTGRES_PORT:-15432}`)을 함께 올린다. 같은 compose 기본 네트워크에 있으므로 django는 `PROD_POSTGRES_HOST=postgres-local:5432`로 접속한다. 수집 계층이 없으므로 이 모드의 DB는 비어 있다.
 
 ### 로컬 parser / worker 런타임
 
-`parser` 프로필이 `arxplore-layout-parser`(HURIDOCS, GPU)와 `arxplore-prepare-worker`를 함께 올린다. `LAYOUT_PARSER_BASE_URL`은 기본값도 자동 감지도 없으므로 `.env`에 `http://layout-parser:5060`처럼 넣는다. 비어 있으면 layout 단계를 건너뛰고 pypdf로 내려간다.
+`parser` 프로필이 `arxplore-layout-parser`(HURIDOCS, GPU)와 `arxplore-prepare-worker`를 함께 올린다. worker는 파서 healthcheck가 통과한 뒤 시작한다. 코드에는 `LAYOUT_PARSER_BASE_URL` 기본값이 없지만, compose가 worker에 값이 비어 있으면 `http://layout-parser:5060`을 넣는다. 값이 끝내 비어 있으면 layout 단계를 건너뛰고 pypdf로 내려간다.
 
 `src/pipeline/prepare_worker.py`가 `prepare_jobs`를 소비하는 공식 진입점이다. 시작할 때 스키마를 1회 확인(`ensure_schema`)한 뒤, `LISTEN/NOTIFY`로 새 잡을 기다리다가 `prepare -> embed`를 수행한다.
 
@@ -98,6 +100,7 @@ flowchart TD
 - `embedding_client.py`: OpenAI 임베딩 API 호출
 - `vector_repository.py`: `paper_embeddings` 저장, 누락 임베딩 조회, vector 후보 조회
 - `paper_retriever.py`: lexical, vector, hybrid를 합치는 retrieval 인터페이스
+- `db.py`: 프로세스별 PostgreSQL 연결 풀
 
 생성자는 DDL을 실행하지 않는다. 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다.
 
@@ -117,7 +120,10 @@ flowchart TD
 - `paper_chains.py`: 개요·핵심 포인트 생성 chain
 - `summary_graph.py`: 섹션을 배경·방법·실험·한계 버킷으로 묶어 요약하는 LangGraph 상세 요약 그래프
 - `translation_chains.py`: `build_summary`(상세 요약 진입점), `translate_chunk`(구현만 있고 호출하는 엔드포인트 없음)
-- `agent/chatbot.py`, `agent/tools.py`: LangGraph ReAct 에이전트와 도구 2개, 상세 페이지 챗 응답
+- `agent/chatbot.py`, `agent/tools.py`: LangGraph ReAct 에이전트와 도구 2개
+- `agent/retrieval.py`: 제품 검색 경로 선택(hybrid → lexical 폴백)
+- `agent/paper_chat.py`: 상세 페이지 챗(논문 범위 검색 + 스트리밍)
+- `agent/citations.py`: 도구 hit 레지스트리와 답변 인용 대조
 - `tracing.py`: 도메인 레벨 trace 설정
 
 ### `dags`
@@ -127,16 +133,20 @@ Airflow가 파싱하는 DAG 정의만 둔다: `daily_collect.py`, `maintenance.p
 ### `backend`
 
 - `backend/arxplore_web/`: Django 설정과 URL. DB 접속은 `src.shared`의 설정을 그대로 쓴다
-- `backend/papers/api_views.py`: 인증, 설정, 즐겨찾기, 목록, 상세, 분석(POST), 요약, 상세 챗, 에이전트 SSE API
-- `backend/papers/page_views.py`: React shell과 JSON endpoint
-- `backend/papers/services.py`: LLM 호출, AI 결과 캐싱, 관련 논문 합성, 개인 API 키 처리
+- `backend/papers/api_views.py`: 인증, 설정, 즐겨찾기, 분석(POST), 요약, 상세 챗, 에이전트 API와 SSE
+- `backend/papers/page_views.py`: React shell과 목록·상세 JSON endpoint
+- `backend/papers/services.py`: LLM 호출, AI 결과 캐싱, 관련 논문 합성, 개인 API 키 처리, 데모 모드 판단
+- `backend/papers/ratelimit.py`: Django cache 기반 분당 rate limit(인증은 IP당, LLM은 사용자당)
+- `backend/papers/secret_box.py`: 세션에 저장하는 개인 API 키 암호화
 - `backend/papers/models.py`: `UserSettings`, `FavoritePaper` (AI 캐시는 모델이 아니라 PostgreSQL 테이블에서 직접 관리)
 
 ### `frontend`
 
-- `frontend/src/pages/list/`: 논문 목록
-- `frontend/src/pages/detail/`: 논문 상세
+- `frontend/src/pages/list/`: 논문 목록. 페이지·정렬·검색어는 URL 쿼리가 원본이다
+- `frontend/src/pages/detail/`: 논문 상세. 개요·상세 요약 카드가 로딩·취소·로그인/키 안내 상태를 가진다
 - `frontend/src/pages/assistant/`: 에이전트 채팅
+- `frontend/src/components/account/`: 공용 계정 메뉴와 설정 패널
+- `frontend/src/helpers/`: HTTP(`ApiError`, 429 안내), SSE 클라이언트, 모달 접근성 훅
 
 UI는 API만 소비하고 저장 구조나 외부 연동 코드를 직접 구현하지 않는다.
 
@@ -169,10 +179,10 @@ raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 
 
 | 테이블 | 키 | 주요 컬럼 | 인덱스·제약 |
 | --- | --- | --- | --- |
-| `papers` | `arxiv_id` PK | `title`, `authors` JSONB, `abstract`, `primary_category`, `categories` JSONB, `pdf_url`, `published_at`, `upvotes`, `github_url`, `source` | PK만 |
+| `papers` | `arxiv_id` PK | `title`, `authors` JSONB, `abstract`, `primary_category`, `categories` JSONB, `pdf_url`, `published_at`, `upvotes`, `github_url`, `source`, `title_abstract_vector` tsvector 생성 컬럼(제목 A + 초록 B, `english`) | `idx_papers_title_abstract_vector` GIN(`title_abstract_vector`) |
 | `paper_fulltexts` | `arxiv_id` PK, FK -> `papers` (CASCADE) | `text`, `sections` JSONB, `source`(`layout_pdf` / `pdf` / `fallback_abstract`), `quality_metrics`, `artifacts`, `parser_metadata` JSONB | PK만 |
-| `paper_chunks` | `id` BIGSERIAL PK, FK `arxiv_id` -> `papers` (CASCADE) | `chunk_index`, `chunk_text`, `section_title`, `token_count`, `metadata` JSONB(`content_role` 포함) | `UNIQUE(arxiv_id, chunk_index)`, `idx_paper_chunks_fts` GIN on `to_tsvector('english', chunk_text)` |
-| `paper_embeddings` | `chunk_id` PK, FK -> `paper_chunks` (CASCADE) | `embedding VECTOR(1536)`, `model_name` | PK만. **벡터 인덱스(HNSW/IVFFlat) 없음** |
+| `paper_chunks` | `id` BIGSERIAL PK, FK `arxiv_id` -> `papers` (CASCADE) | `chunk_index`, `chunk_text`, `section_title`, `token_count`, `metadata` JSONB(`content_role` 포함), `chunk_vector` tsvector 생성 컬럼(청크 C, `english`) | `UNIQUE(arxiv_id, chunk_index)`, `idx_paper_chunks_chunk_vector` GIN(`chunk_vector`) |
+| `paper_embeddings` | `chunk_id` PK, FK -> `paper_chunks` (CASCADE) | `embedding VECTOR(1536)`, `model_name` | `paper_embeddings_embedding_hnsw` HNSW(`embedding vector_cosine_ops`). pgvector 0.5.0 미만이면 경고만 남기고 생략 |
 | `paper_ai_overviews` | `arxiv_id` PK, FK -> `papers` | `overview`, `key_findings` JSONB, `model`(기록용) | PK만 |
 | `paper_ai_detailed_summaries` | `id` PK, FK `arxiv_id` -> `papers` | `model`, `summary`, `created_by_user_id` | `UNIQUE(arxiv_id, model)` |
 | `prepare_jobs` | `id` BIGSERIAL PK | `mode`, `target_date`, `status`, `attempt_count`, `worker_id`, `claim_generation`, `claimed_at`, `heartbeat_at`, `next_attempt_at`, `raw_revision`, `pending_refresh`, `payload`/`result` JSONB, `error` | `UNIQUE(mode, target_date)`, `(mode, status, target_date)`, `(status, updated_at DESC)` |
@@ -181,8 +191,13 @@ raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 
 
 인덱스 관련 사실:
 
-- FTS GIN 인덱스는 `chunk_text` 단일 식에만 있다. lexical 쿼리는 제목·초록·청크를 합친 tsvector 식을 쓰므로 이 인덱스를 타지 않는다
-- 벡터 검색은 인덱스 없이 `<=>` 거리를 계산한다. 감점 식을 더한 값으로 정렬하므로 HNSW를 추가해도 지금 쿼리 형태로는 쓰이지 않는다
+- lexical 후보는 질의 lexeme 중 하나라도 가진 행을 두 GIN 인덱스(`chunk_vector`, `title_abstract_vector`)로 각각 찾아 UNION한다. 최종 판정과 `ts_rank_cd`는 `title_abstract_vector || chunk_vector`에 원래 질의를 적용한다(이전 행별 `to_tsvector` 식과 같은 tsvector). 전체 질의 `ILIKE`는 후보 조건이 아니라 점수 보너스로만 쓰고, `%`·`_`는 이스케이프한다
+- 이전 `idx_paper_chunks_fts`(식 인덱스)는 `ensure_schema()`가 지운다
+- 벡터 검색은 2단계다. 1단계는 `ORDER BY embedding <=> 질의 LIMIT max(limit*4, 40)`로 HNSW를 타고(`model_name` 필터, 후보가 40개를 넘으면 트랜잭션 범위로 `hnsw.ef_search`를 올림), 2단계는 후보에만 섹션·`content_role` 보정과 `VECTOR_MIN_SIMILARITY` 하한을 적용해 정렬한다
+- 논문 범위(`arxiv_id`) 벡터 검색은 HNSW 사후 필터가 결과를 잃을 수 있어 그 논문의 청크만 모아 정확 정렬한다
+- 인덱스 사용 여부와 실행 시간은 `python scripts/explain_retrieval.py --query "..."`로 실제 DB에서 확인한다(`EXPLAIN (ANALYZE, BUFFERS)`)
+- 기존 DB에 처음 `migrate_schema.py`를 돌리면 생성 컬럼 추가로 `papers`·`paper_chunks`를 다시 쓰고 HNSW를 빌드한다. prepare-worker를 멈춘 상태에서 실행한다
+- 리포지토리 연결은 `src/integrations/db.py` 풀을 쓴다. 프로세스(gunicorn 워커)마다 첫 사용 시 만들어지고 최대 `POSTGRES_POOL_MAX`(기본 8)개, 고갈 시 `POSTGRES_POOL_TIMEOUT`(기본 30초)까지 기다린다. prepare-worker의 LISTEN은 전용 연결을 쓴다
 
 ## 7. prepare 큐 동작
 
@@ -204,24 +219,29 @@ prepare 단계의 보호 장치:
 
 ## 8. retrieval 계층
 
+제품 경로는 `src/core/agent/retrieval.py`의 `retrieve_contexts`가 고른다. 에이전트 검색 도구와 상세 챗이 같은 함수를 쓴다.
+
 | 경로 | 제품 사용 | 구현 |
 | --- | --- | --- |
-| lexical | 에이전트 `search_paper_chunks_tool` | 제목(A)·초록(B)·청크(C) 가중 tsvector + `websearch_to_tsquery`/`plainto_tsquery` `ts_rank_cd`, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌 유사 텍스트 필터, 논문 다양성, 인접 청크 병합 |
-| vector | 없음 | `paper_embeddings` 코사인 거리, 섹션·`content_role` 감점 후 rerank |
-| hybrid | 없음 | lexical + vector를 RRF(k=60)와 방법별·후보 품질 가중치로 합침 |
+| hybrid | 기본 경로(`RETRIEVAL_MODE=hybrid`이고 질의 임베딩 키가 있을 때) | lexical + vector를 RRF(k=60)와 방법별·후보 품질 가중치로 합침 |
+| lexical | 폴백(키 없음, 임베딩 호출 `OpenAIError`, `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector + `websearch_to_tsquery`/`plainto_tsquery` `ts_rank_cd`, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌 유사 텍스트 필터, 논문 다양성, 인접 청크 병합 |
+| vector | hybrid 구성 요소 | `paper_embeddings` 코사인 거리, 섹션·`content_role` 감점 후 rerank, `VECTOR_MIN_SIMILARITY` 하한 |
 
-- FTS 설정이 `english`라 한국어 질의는 lexical에서 거의 맞지 않는다. hybrid 연결의 가장 큰 이유다
+- 질의 임베딩 키는 요청 범위의 사용자 세션 키가 우선이고, 없으면 서버 `OPENAI_API_KEY`를 쓴다
+- FTS 설정이 `english`라 한국어 질의는 lexical에서 거의 맞지 않는다. 키가 없어 lexical로 내려가면 한국어 검색 품질이 크게 떨어진다
 - `references` 판정은 섹션 제목이 참고문헌 제목과 정확히 일치할 때만 참이다(`pdf_parser/section_roles.py`). 같은 규칙을 청커, retriever, SQL이 공유한다
-- 상세 페이지 챗은 retrieval을 쓰지 않고 논문의 앞 20개 청크를 그대로 넣는다
+- 상세 페이지 챗은 같은 경로를 `arxiv_id`로 한정해 호출하고, 결과가 비면 논문의 앞 청크로 대신한다(`retrieval_mode: "first_chunks"`)
 
 ## 9. 에이전트와 상세 챗
 
 - **어시스턴트 페이지**: `src/core/agent/chatbot.py`의 LangGraph ReAct 에이전트(`create_react_agent`, `stream_mode="messages"`). Django `/papers/assistant/stream/`이 `StreamingHttpResponse` + `text/event-stream`으로 내보내고, React는 fetch ReadableStream으로 읽으며 중지 버튼으로 요청을 abort한다. 인증·키·입력 검증은 스트림 시작 전에 끝나서 401/400이 그대로 나간다
 - **도구**(`src/core/agent/tools.py`)
-  - `search_paper_chunks_tool`: `PaperRetriever.search_paper_contexts`(lexical)로 5개 문맥을 찾아 `[번호] 출처(URL) | 제목 | 섹션` 헤더와 본문으로 LLM에 넘긴다
+  - `search_paper_chunks_tool`: `retrieve_contexts`(hybrid → lexical)로 5개 문맥을 찾아 `[번호] 제목 | arxiv_id | 섹션 | chunk_id` 헤더, 출처 URL, 본문으로 LLM에 넘기고 hit을 요청 범위 레지스트리에 기록한다
   - `get_trending_papers_tool`: 최근 논문 10편을 추천수 순으로 정렬해 돌려준다
-- **인용**: 답변은 시스템 프롬프트 규칙에 따라 마크다운 링크를 넣은 평문이다. 구조화된 citation 이벤트나 사후 검증은 없다
-- **상세 페이지 챗**: 앞 20개 청크를 컨텍스트로 넣고 한 번에 응답하는 비스트리밍 POST다
+- **가드레일**: `recursion_limit=AGENT_RECURSION_LIMIT`(기본 12). 초과하면 그때까지의 답에 단계 제한 안내를 붙여 끝낸다. 대화 이력은 최근 20개, 메시지당 4,000자로 자른다. 도구 결과는 지시가 아니라 데이터로 다루도록 프롬프트에 규칙이 있다
+- **인용**: 답변 속 마크다운 링크를 도구 hit과 대조해 `citations` 이벤트(`in_answer`)를 한 번 보낸다. 도구 결과에 없는 링크는 서버 로그에 경고로 남긴다
+- **상세 페이지 챗**: `src/core/agent/paper_chat.py`. 초록(1번 출처) + 질문으로 논문 안을 검색한 청크 최대 5개를 넣고 `/papers/<id>/chat/stream/`으로 스트리밍한다. 답변의 `[n]` 번호를 발췌문과 대조해 `citations`를 만든다. 비스트리밍 `/papers/<id>/chat/`도 남아 있다
+- **접근 모델**: `DEMO_MODE=true`(기본)이면 목록·상세 JSON과 캐시된 개요·상세 요약은 익명으로 볼 수 있다. 캐시가 없으면 미로그인 401(`login_required`), 개인 키 없음 400(`api_key_required`)이고, 챗과 에이전트는 항상 로그인 + 키가 필요하다. LLM 호출 엔드포인트는 `RATE_LIMIT_LLM_PER_MINUTE`, 로그인·회원가입은 `RATE_LIMIT_AUTH_PER_MINUTE`로 제한되고 초과 시 429 + `Retry-After`를 돌려준다
 
 ## 10. `PaperDetailDocument` 계약
 
@@ -250,6 +270,6 @@ class PaperDetailDocument(BaseModel):
 
 ## 11. 추적
 
-LangSmith trace metadata에 쓰는 stage 이름은 다음과 같다: `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `consume_prepare_queue`, `embed_papers`, `enrich_papers_metadata`, `analyze_paper_detail`, `paper_overview`, `paper_key_findings`, `summary`, `rag_answer`.
+LangSmith trace metadata에 쓰는 stage 이름은 다음과 같다: `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `consume_prepare_queue`, `embed_papers`, `enrich_papers_metadata`, `analyze_paper_detail`, `paper_overview`, `paper_key_findings`, `summary`, `rag_answer`, `paper_chat`(상세 챗), `agent_chat`(에이전트).
 
 적재·큐 상태는 PostgreSQL에서 직접 확인한다. 예: `SELECT status, count(*) FROM prepare_jobs GROUP BY status;`, `SELECT count(*) FROM paper_chunks c LEFT JOIN paper_embeddings e ON e.chunk_id = c.id WHERE e.chunk_id IS NULL;`

@@ -1,3 +1,6 @@
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+
 import type { RelatedPaper } from "../../pages/detail/detail-types";
 
 interface RelatedPapersCardProps {
@@ -18,11 +21,24 @@ function authorsToText(authors: RelatedPaper["authors"]): string {
   return authors;
 }
 
-function buildPaperHref(paper: RelatedPaper): string {
+function RelatedPaperLink({ paper, children }: { paper: RelatedPaper; children: ReactNode }) {
   if (paper.source === "arxiv") {
-    return `https://arxiv.org/abs/${paper.arxiv_id}`;
+    return (
+      <a
+        className="related-paper-row"
+        href={`https://arxiv.org/abs/${encodeURIComponent(paper.arxiv_id)}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {children}
+      </a>
+    );
   }
-  return `/papers/${encodeURIComponent(paper.arxiv_id)}/`;
+  return (
+    <Link className="related-paper-row" to={`/papers/${encodeURIComponent(paper.arxiv_id)}/`}>
+      {children}
+    </Link>
+  );
 }
 
 export function RelatedPapersCard({ papers }: RelatedPapersCardProps) {
@@ -35,13 +51,7 @@ export function RelatedPapersCard({ papers }: RelatedPapersCardProps) {
       <div className="section-title">관련 논문</div>
       <div className="related-papers-list">
         {papers.map((paper) => (
-          <a
-            key={`${paper.source ?? "local"}-${paper.arxiv_id}`}
-            className="related-paper-row"
-            href={buildPaperHref(paper)}
-            target={paper.source === "arxiv" ? "_blank" : undefined}
-            rel={paper.source === "arxiv" ? "noreferrer" : undefined}
-          >
+          <RelatedPaperLink key={`${paper.source ?? "local"}-${paper.arxiv_id}`} paper={paper}>
             <div className="related-paper-title">{paper.title}</div>
             <div className="related-paper-meta">
               <span>{paper.published_at?.slice(0, 10) ?? "-"}</span>
@@ -50,7 +60,7 @@ export function RelatedPapersCard({ papers }: RelatedPapersCardProps) {
             {paper.abstract ? (
               <p className="related-paper-abstract">{truncateText(paper.abstract, 180)}</p>
             ) : null}
-          </a>
+          </RelatedPaperLink>
         ))}
       </div>
     </section>

@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 
-import { toggleFavorite } from "../../helpers/accountApi";
-import { ApiError, getErrorMessage } from "../../helpers/http";
-import { AnalyzeOverlay } from "../../components/detail/AnalyzeOverlay";
+import type { SettingsTab } from "../../components/account/AccountMenu";
 import {
   AbstractCard,
   FindingsCard,
@@ -15,27 +13,30 @@ import { DetailTopBar } from "../../components/detail/DetailTopBar";
 import { PaperHeroCard } from "../../components/detail/PaperHeroCard";
 import { PdfPanel } from "../../components/detail/PdfPanel";
 import { RelatedPapersCard } from "../../components/detail/RelatedPapersCard";
+import { SummaryModelDialog } from "../../components/detail/SummaryModelDialog";
+import { toggleFavorite } from "../../helpers/accountApi";
+import { ApiError, getErrorMessage } from "../../helpers/http";
+import { buildLoginPath } from "../../helpers/loginPath";
+import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
 import {
   fetchPaperAnalysis,
   fetchPaperDetail,
   fetchPaperSummary,
 } from "./detail-api";
 import { formatSummaryBlocks, type SummaryBlock } from "./detail-summary";
-import type { PaperDetail } from "./detail-types";
-import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
+import type { AiAccessReason, AiSectionState, PaperDetail } from "./detail-types";
 import "./detail-page.css";
 
 
 interface PaperDetailPageProps {
   session: BootstrapPayload;
   onRequireLogin: () => void;
-  onOpenSettings: (tab?: "settings" | "favorites") => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   onLogout: () => void;
 }
 
 
-const ANALYZE_OVERLAY_TEXT = "AI가 실시간으로 논문을 분석하고 있습니다...";
-const SUMMARY_OVERLAY_TEXT = "AI가 상세 요약을 생성하고 있습니다...";
+const IDLE: AiSectionState = { status: "idle" };
 
 
 function describeRequestError(error: unknown, prefix: string): string {
@@ -43,6 +44,27 @@ function describeRequestError(error: unknown, prefix: string): string {
     return error.message;
   }
   return `${prefix}: ${getErrorMessage(error, "알 수 없는 오류")}`;
+}
+
+
+function payloadFlag(error: ApiError, key: string): boolean {
+  const payload = error.payload;
+  return Boolean(payload && typeof payload === "object" && (payload as Record<string, unknown>)[key]);
+}
+
+
+/** 캐시가 없을 때 서버가 돌려주는 접근 거부(미로그인 401, 개인 키 없음 400)를 구분한다. */
+function classifyAccessError(error: unknown): AiAccessReason | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+  if (error.status === 401) {
+    return "login";
+  }
+  if (error.status === 400 && payloadFlag(error, "api_key_required")) {
+    return "api_key";
+  }
+  return null;
 }
 
 
@@ -58,209 +80,197 @@ export function PaperDetailPage({
 
   const [paper, setPaper] = useState<PaperDetail | null>(null);
   const [pageError, setPageError] = useState("");
+  const [pageLoginRequired, setPageLoginRequired] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [pdfVisible, setPdfVisible] = useState(false);
 
-  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisState, setAnalysisState] = useState<AiSectionState>(IDLE);
   const [overview, setOverview] = useState("");
-  const [overviewError, setOverviewError] = useState("");
   const [findings, setFindings] = useState<string[]>([]);
 
-  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryState, setSummaryState] = useState<AiSectionState>(IDLE);
   const [summaryBlocks, setSummaryBlocks] = useState<SummaryBlock[]>([]);
-  const [summaryError, setSummaryError] = useState("");
   const [selectedSummaryModel, setSelectedSummaryModel] = useState(session.preferred_summary_model);
   const [summaryModelPickerOpen, setSummaryModelPickerOpen] = useState(false);
 
-  const [overlayVisible, setOverlayVisible] = useState(false);
-  const [overlayMessage, setOverlayMessage] = useState(ANALYZE_OVERLAY_TEXT);
-  const summaryRequestIdRef = useRef(0);
+  const analysisControllerRef = useRef<AbortController | null>(null);
+  const summaryControllerRef = useRef<AbortController | null>(null);
+
+  const abortPending = useCallback(() => {
+    const analysisController = analysisControllerRef.current;
+    const summaryController = summaryControllerRef.current;
+    analysisControllerRef.current = null;
+    summaryControllerRef.current = null;
+    analysisController?.abort();
+    summaryController?.abort();
+  }, []);
 
   useEffect(() => {
     setSelectedSummaryModel(session.preferred_summary_model);
   }, [session.preferred_summary_model]);
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
 
-    async function loadDetail() {
-      if (!session.is_authenticated) {
-        setPageLoading(false);
-        return;
-      }
+    abortPending();
+    setPageError("");
+    setPageLoginRequired(false);
+    setPaper(null);
+    setPdfVisible(false);
+    setAnalysisState(IDLE);
+    setOverview("");
+    setFindings([]);
+    setSummaryState(IDLE);
+    setSummaryBlocks([]);
+    setSummaryModelPickerOpen(false);
 
-      if (!arxivId) {
-        setPageError("잘못된 경로입니다.");
-        setPageLoading(false);
-        return;
-      }
+    if (!arxivId) {
+      setPageError("잘못된 경로입니다.");
+      setPageLoading(false);
+      return () => controller.abort();
+    }
 
-      setPageLoading(true);
-      setPageError("");
-      setPaper(null);
-      setPdfVisible(false);
-      setAnalysisLoading(false);
-      setOverview("");
-      setOverviewError("");
-      setFindings([]);
-      setSummaryLoading(false);
-      setSummaryBlocks([]);
-      setSummaryError("");
-      setOverlayVisible(false);
-      setSummaryModelPickerOpen(false);
-      setOverlayMessage(ANALYZE_OVERLAY_TEXT);
-
-      try {
-        const data = await fetchPaperDetail(arxivId);
-        if (!active) {
-          return;
-        }
-
+    setPageLoading(true);
+    fetchPaperDetail(arxivId, controller.signal)
+      .then((data) => {
         if (data.error || !data.paper) {
           setPageError(data.error ?? "논문을 찾을 수 없습니다.");
-          setPageLoading(false);
           return;
         }
-
         setPaper(data.paper);
-        setPageLoading(false);
-      } catch (error) {
-        if (!active) {
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (error instanceof ApiError && error.status === 401) {
+          setPageLoginRequired(true);
           return;
         }
         setPageError(describeRequestError(error, "데이터 로드 실패"));
-        setPageLoading(false);
-      }
-    }
-
-    void loadDetail();
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setPageLoading(false);
+        }
+      });
 
     return () => {
-      active = false;
-      summaryRequestIdRef.current += 1;
+      controller.abort();
+      abortPending();
     };
-  }, [arxivId, session.is_authenticated]);
+  }, [abortPending, arxivId, session.is_authenticated]);
 
-  useEffect(() => {
-    let active = true;
+  const paperId = paper?.arxiv_id ?? "";
 
-    async function loadAnalysis() {
-      if (!paper || !canUseAi) {
+  const runAnalysis = useCallback(async (targetId: string) => {
+    analysisControllerRef.current?.abort();
+    const controller = new AbortController();
+    analysisControllerRef.current = controller;
+    const isCurrent = () => analysisControllerRef.current === controller;
+
+    setAnalysisState({ status: "loading" });
+    try {
+      const data = await fetchPaperAnalysis(targetId, controller.signal);
+      if (!isCurrent()) {
         return;
       }
-
-      setAnalysisLoading(true);
-      setOverviewError("");
-      setOverlayMessage(ANALYZE_OVERLAY_TEXT);
-      setOverlayVisible(true);
-
-      try {
-        const data = await fetchPaperAnalysis(paper.arxiv_id);
-        if (!active) {
-          return;
-        }
-
-        setOverlayVisible(false);
-        setAnalysisLoading(false);
-
-        if (data.error) {
-          setOverviewError(data.error);
-          return;
-        }
-
-        if (data.overview) {
-          setOverview(data.overview);
-        }
-
-        if (Array.isArray(data.key_findings) && data.key_findings.length > 0) {
-          setFindings(data.key_findings);
-        }
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-        setOverlayVisible(false);
-        setAnalysisLoading(false);
-        setOverviewError(describeRequestError(error, "분석 요청 실패"));
+      if (data.error) {
+        setAnalysisState({ status: "error", message: data.error });
+        return;
+      }
+      setOverview(data.overview ?? "");
+      setFindings(Array.isArray(data.key_findings) ? data.key_findings : []);
+      setAnalysisState({ status: "ready" });
+    } catch (error) {
+      if (!isCurrent()) {
+        return;
+      }
+      if (controller.signal.aborted) {
+        setAnalysisState({ status: "cancelled" });
+        return;
+      }
+      const reason = classifyAccessError(error);
+      setAnalysisState(
+        reason
+          ? { status: "denied", reason }
+          : { status: "error", message: describeRequestError(error, "분석 요청 실패") },
+      );
+    } finally {
+      if (isCurrent()) {
+        analysisControllerRef.current = null;
       }
     }
-
-    void loadAnalysis();
-
-    return () => {
-      active = false;
-    };
-  }, [canUseAi, paper]);
-
-  const lockedNotice = useMemo(() => {
-    return "개인 API 키를 등록하면 개요, 핵심 포인트, 논문 채팅을 사용할 수 있습니다.";
   }, []);
 
-  const summaryButtonLabel = useMemo(() => {
-    if (!session.has_personal_api_key) {
-      return "API 키 등록하기";
-    }
-    if (summaryBlocks.length > 0) {
-      return "다른 모델로 상세요약";
-    }
-    return "상세요약 생성하기";
-  }, [session.has_personal_api_key, session.is_authenticated, summaryBlocks.length]);
+  const analysisReady = analysisState.status === "ready";
 
-  const handleViewPdf = () => {
-    setPdfVisible(true);
-    setOverlayVisible(false);
-  };
-
-  const handleSummaryAction = () => {
-    if (!session.has_personal_api_key) {
-      onOpenSettings();
+  // 로그인하거나 키를 등록하면 거부됐던 개요 요청을 다시 보낸다.
+  useEffect(() => {
+    if (!paperId || analysisReady) {
       return;
     }
-    setSummaryModelPickerOpen(true);
-  };
+    void runAnalysis(paperId);
+  }, [analysisReady, canUseAi, paperId, runAnalysis, session.is_authenticated]);
 
-  const handleConfirmSummary = async () => {
-    if (!paper || !canUseAi) {
-      return;
-    }
+  const runSummary = useCallback(async (targetId: string, model: string) => {
+    summaryControllerRef.current?.abort();
+    const controller = new AbortController();
+    summaryControllerRef.current = controller;
+    const isCurrent = () => summaryControllerRef.current === controller;
 
-    const requestId = ++summaryRequestIdRef.current;
-    const isStale = () => requestId !== summaryRequestIdRef.current;
-
-    setSummaryModelPickerOpen(false);
-    setSummaryError("");
-    setSummaryLoading(true);
-    setOverlayMessage(SUMMARY_OVERLAY_TEXT);
-    setOverlayVisible(true);
-
+    setSummaryState({ status: "loading" });
     try {
-      const data = await fetchPaperSummary(paper.arxiv_id, selectedSummaryModel);
-      if (isStale()) {
+      const data = await fetchPaperSummary(targetId, model, controller.signal);
+      if (!isCurrent()) {
         return;
       }
-      setOverlayVisible(false);
-      setSummaryLoading(false);
-
       if (data.error) {
-        setSummaryError(data.error);
+        setSummaryState({ status: "error", message: data.error });
         return;
       }
-
       setSummaryBlocks(formatSummaryBlocks(data.summary ?? ""));
+      setSummaryState({ status: "ready" });
     } catch (error) {
-      if (isStale()) {
+      if (!isCurrent()) {
         return;
       }
-      setOverlayVisible(false);
-      setSummaryLoading(false);
-      setSummaryError(describeRequestError(error, "요약 생성 실패"));
+      if (controller.signal.aborted) {
+        setSummaryState({ status: "cancelled" });
+        return;
+      }
+      const reason = classifyAccessError(error);
+      setSummaryState(
+        reason
+          ? { status: "denied", reason }
+          : { status: "error", message: describeRequestError(error, "요약 생성 실패") },
+      );
+    } finally {
+      if (isCurrent()) {
+        summaryControllerRef.current = null;
+      }
     }
+  }, []);
+
+  const summaryLoading = summaryState.status === "loading";
+  const summaryButtonLabel = !canUseAi
+    ? "저장된 상세요약 보기"
+    : summaryBlocks.length > 0
+      ? "다른 모델로 상세요약"
+      : "상세요약 생성하기";
+
+  const handleConfirmSummary = () => {
+    if (!paperId) {
+      return;
+    }
+    setSummaryModelPickerOpen(false);
+    void runSummary(paperId, selectedSummaryModel);
   };
 
-  const handleFavoriteToggle = async (paperId: string) => {
+  const handleFavoriteToggle = async (targetId: string) => {
     let payload: FavoriteTogglePayload;
     try {
-      payload = await toggleFavorite(paperId);
+      payload = await toggleFavorite(targetId);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onRequireLogin();
@@ -272,14 +282,20 @@ export function PaperDetailPage({
     );
   };
 
+  const openSettings = () => onOpenSettings("settings");
+
+  if (pageLoginRequired) {
+    return <Navigate replace to={buildLoginPath(`${location.pathname}${location.search}`)} />;
+  }
+
   if (pageError) {
     return (
       <div className="detail-page">
         <div className="page-error-wrap">
-          <div className="error-box">{pageError}</div>
+          <div className="error-box" role="alert">{pageError}</div>
           {arxivId ? (
             <a
-              href={`https://arxiv.org/abs/${arxivId}`}
+              href={`https://arxiv.org/abs/${encodeURIComponent(arxivId)}`}
               target="_blank"
               rel="noreferrer"
               className="arxiv-fallback-btn"
@@ -292,62 +308,45 @@ export function PaperDetailPage({
     );
   }
 
-  if (!session.is_authenticated) {
-    return <Navigate replace to={`/login/?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`} />;
-  }
-
   if (pageLoading || !paper) {
     return (
       <div className="detail-page">
         <div className="page-error-wrap">
-          <div className="info-box">논문을 불러오는 중입니다...</div>
+          <div className="info-box" role="status">논문을 불러오는 중입니다...</div>
         </div>
       </div>
     );
   }
 
+  const chatAccess: AiAccessReason | null = !session.is_authenticated
+    ? "login"
+    : !session.has_personal_api_key
+      ? "api_key"
+      : null;
+
   return (
     <div className="detail-page">
-      <AnalyzeOverlay
-        title={paper.title}
-        message={overlayMessage}
-        visible={canUseAi && overlayVisible}
-      />
-
       <DetailTopBar
         pdfUrl={paper.pdf_url}
         summaryLoading={summaryLoading}
         summaryLabel={summaryButtonLabel}
         showSummaryAction
         session={session}
-        onViewPdf={handleViewPdf}
-        onGenerateSummary={handleSummaryAction}
+        onViewPdf={() => setPdfVisible(true)}
+        onGenerateSummary={() => setSummaryModelPickerOpen(true)}
         onOpenSettings={onOpenSettings}
         onLogout={onLogout}
       />
 
-      {summaryModelPickerOpen ? (
-        <div className="summary-model-overlay" onClick={() => setSummaryModelPickerOpen(false)}>
-          <div className="summary-model-dialog" onClick={(event) => event.stopPropagation()}>
-            <h2>상세요약 모델 선택</h2>
-            <select value={selectedSummaryModel} onChange={(event) => setSelectedSummaryModel(event.target.value)}>
-              {session.available_summary_models.map((model) => (
-                <option key={model} value={model}>
-                  {model.replace(/-/g, " ").toUpperCase()}
-                </option>
-              ))}
-            </select>
-            <div className="summary-model-actions">
-              <button type="button" onClick={() => setSummaryModelPickerOpen(false)}>
-                취소
-              </button>
-              <button type="button" className="primary" onClick={() => void handleConfirmSummary()}>
-                생성
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <SummaryModelDialog
+        open={summaryModelPickerOpen}
+        models={session.available_summary_models}
+        selectedModel={selectedSummaryModel}
+        confirmLabel={canUseAi ? "생성" : "보기"}
+        onSelectModel={setSelectedSummaryModel}
+        onConfirm={handleConfirmSummary}
+        onClose={() => setSummaryModelPickerOpen(false)}
+      />
 
       <div className={`layout ${pdfVisible ? "show-pdf" : ""}`} id="main-layout">
         <PdfPanel
@@ -356,7 +355,7 @@ export function PaperDetailPage({
           onClose={() => setPdfVisible(false)}
         />
 
-        <div className="main-panel">
+        <main className="main-panel">
           <PaperHeroCard
             paper={paper}
             isFavorited={Boolean(paper.is_favorited)}
@@ -365,23 +364,23 @@ export function PaperDetailPage({
             onRequireLogin={onRequireLogin}
           />
 
-          {!canUseAi ? (
-            <>
-              <AbstractCard abstractText={paper.abstract} noticeText={lockedNotice} />
-              <div className="info-box">상단 설정에서 API 키를 등록하면 AI 기능을 사용할 수 있습니다.</div>
-            </>
-          ) : (
-            <>
-              <OverviewCard
-                loading={analysisLoading}
-                overviewText={overview}
-                errorText={overviewError}
-              />
-              <FindingsCard findings={findings} />
-              <SummaryCard blocks={summaryBlocks} errorText={summaryError} />
-            </>
-          )}
-        </div>
+          <OverviewCard
+            state={analysisState}
+            overviewText={overview}
+            onCancel={() => analysisControllerRef.current?.abort()}
+            onRetry={() => void runAnalysis(paper.arxiv_id)}
+            onOpenSettings={openSettings}
+          />
+          {analysisReady ? <FindingsCard findings={findings} /> : null}
+          <SummaryCard
+            state={summaryState}
+            blocks={summaryBlocks}
+            onCancel={() => summaryControllerRef.current?.abort()}
+            onRetry={() => void runSummary(paper.arxiv_id, selectedSummaryModel)}
+            onOpenSettings={openSettings}
+          />
+          <AbstractCard abstractText={paper.abstract} />
+        </main>
       </div>
 
       {paper.related_papers && paper.related_papers.length > 0 ? (
@@ -390,7 +389,7 @@ export function PaperDetailPage({
         </div>
       ) : null}
 
-      {canUseAi ? <ChatPanel arxivId={paper.arxiv_id} /> : null}
+      <ChatPanel arxivId={paper.arxiv_id} access={chatAccess} onOpenSettings={openSettings} />
     </div>
   );
 }

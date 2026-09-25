@@ -5,7 +5,7 @@
   padding: 12px 24px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
   z-index: 200;
@@ -27,7 +27,7 @@
 
 .login-topbar .back-btn {
   text-decoration: none;
-  color: #343a40;
+  color: var(--color-text-strong);
   font-weight: 600;
   font-size: 0.95rem;
   display: flex;
@@ -40,7 +40,7 @@
   font-weight: 800;
   font-size: 1.3rem;
   letter-spacing: -0.04em;
-  color: #212529;
+  color: var(--color-text);
 }
 
 .login-page {
@@ -52,7 +52,7 @@
 
 .login-card {
   width: min(100%, 420px);
-  background: #fff;
+  background: var(--color-surface);
   border: 1px solid #d9dde2;
   border-radius: 18px;
   padding: 28px;
@@ -93,8 +93,8 @@
 
 .login-mode-tabs button.active,
 .login-submit {
-  background: #2f343b;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
 }
 
 .login-field {
@@ -125,7 +125,7 @@
 .login-feedback-error {
   border: 1px solid #f0c7c2;
   background: #fef3f2;
-  color: #b42318;
+  color: var(--color-danger);
 }
 
 .login-feedback-success {
@@ -138,4 +138,10 @@
   width: 100%;
   padding: 13px 16px;
   font-weight: 700;
+}
+
+.login-feedback-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-weight: 500;
 }

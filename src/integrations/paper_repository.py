@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 import re
-from contextlib import contextmanager
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 
+from src.integrations.db import get_connection
 from src.shared import AppSettings, build_postgres_connection_params, get_settings
+
+logger = logging.getLogger(__name__)
 
 # src/integrations/pdf_parser/section_roles.is_references_section_title의 SQL(~*) 버전.
 # 제목 전체가 참고문헌 제목일 때만 매치하므로 "Reference Model", "Direct Preference Optimization"은 제외된다.
@@ -17,6 +21,184 @@ REFERENCES_SECTION_TITLE_SQL_REGEX = (
     r"^\s*(?:(?:\d+(?:\.\d+)*[.)]?|[ivxlc]+[.)]?)\s+)?[\s.:]*"
     r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?[\s.:]*$"
 )
+
+PAPER_TITLE_ABSTRACT_VECTOR_SQL = (
+    "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+    "setweight(to_tsvector('english', coalesce(abstract, '')), 'B')"
+)
+PAPER_CHUNK_VECTOR_SQL = "setweight(to_tsvector('english', coalesce(chunk_text, '')), 'C')"
+
+LEXICAL_INDEX_DDL = (
+    f"""
+    ALTER TABLE papers
+        ADD COLUMN IF NOT EXISTS title_abstract_vector tsvector
+        GENERATED ALWAYS AS ({PAPER_TITLE_ABSTRACT_VECTOR_SQL}) STORED
+    """,
+    f"""
+    ALTER TABLE paper_chunks
+        ADD COLUMN IF NOT EXISTS chunk_vector tsvector
+        GENERATED ALWAYS AS ({PAPER_CHUNK_VECTOR_SQL}) STORED
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_papers_title_abstract_vector ON papers USING GIN (title_abstract_vector)",
+    "CREATE INDEX IF NOT EXISTS idx_paper_chunks_chunk_vector ON paper_chunks USING GIN (chunk_vector)",
+    # chunk_vector GIN으로 대체된 표현식 인덱스. 어떤 쿼리도 쓰지 않으므로 쓰기 비용만 든다.
+    "DROP INDEX IF EXISTS idx_paper_chunks_fts",
+)
+
+# pgvector 0.5.0 미만에는 hnsw 접근 방식이 없다. 실패해도 스키마 생성은 계속한다.
+VECTOR_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS paper_embeddings_embedding_hnsw "
+    "ON paper_embeddings USING hnsw (embedding vector_cosine_ops)"
+)
+
+_LIKE_SPECIAL_CHARS = re.compile(r"([\\%_])")
+
+
+def escape_like(value: str) -> str:
+    return _LIKE_SPECIAL_CHARS.sub(r"\\\1", value)
+
+
+# 질의의 모든 lexeme을 OR로 묶은 tsquery. lexeme은 이미 정규화된 값이라 text -> tsquery 캐스트로 그대로 쓴다.
+_ANY_QUERY_TERM_SQL = r"""
+    SELECT string_agg('''' || replace(replace(lexeme, '\', '\\'), '''', '''''') || '''', ' | ')::tsquery AS any_term
+    FROM unnest(
+        tsvector_to_array(to_tsvector('english', %(query)s) || to_tsvector('english', %(fts_query)s))
+    ) AS lexeme
+"""
+
+
+def build_lexical_candidates_query(
+    query: str,
+    *,
+    limit: int,
+    arxiv_id: str | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    """lexical 후보 조회 SQL과 파라미터를 만든다. 질의가 비어 있으면 None.
+
+    1. 후보: 질의 lexeme 중 하나라도 가진 청크. GIN 인덱스가 걸린 두 생성 컬럼
+       (`papers.title_abstract_vector`, `paper_chunks.chunk_vector`)을 각각 조회해 UNION한다.
+       AND 질의는 제목과 청크에 걸쳐 만족될 수 있어 컬럼별 `@@ 원래 질의`로는 후보가 빠진다.
+    2. 판정·점수: 두 벡터를 이어 붙인 tsvector(제목 A, 초록 B, 청크 C)에 원래 질의를 적용한다.
+       이전의 행별 to_tsvector 식과 같은 tsvector라 ts_rank_cd 값도 같다.
+    전체 질의 ILIKE는 후보 필터가 아니라 점수 보너스로만 쓴다.
+    """
+    normalized_query = " ".join(query.split())
+    if not normalized_query:
+        return None
+
+    chunk_scope_sql = ""
+    paper_scope_sql = ""
+    params: dict[str, Any] = {
+        "query": normalized_query,
+        "fts_query": re.sub(r"[-/]+", " ", normalized_query),
+        "like_pattern": f"%{escape_like(normalized_query)}%",
+        "limit": max(1, int(limit)),
+    }
+    if arxiv_id:
+        chunk_scope_sql = "AND c.arxiv_id = %(arxiv_id)s"
+        paper_scope_sql = "AND p.arxiv_id = %(arxiv_id)s"
+        params["arxiv_id"] = arxiv_id
+
+    sql = f"""
+        WITH query_terms AS ({_ANY_QUERY_TERM_SQL}),
+        matched AS (
+            SELECT c.id
+            FROM paper_chunks c
+            WHERE c.chunk_vector @@ (SELECT any_term FROM query_terms)
+                {chunk_scope_sql}
+            UNION
+            SELECT c.id
+            FROM papers p
+            JOIN paper_chunks c ON c.arxiv_id = p.arxiv_id
+            WHERE p.title_abstract_vector @@ (SELECT any_term FROM query_terms)
+                {paper_scope_sql}
+        ),
+        ranked AS (
+            SELECT
+                c.id AS chunk_id,
+                c.arxiv_id,
+                p.title AS paper_title,
+                p.abstract AS paper_abstract,
+                c.chunk_text,
+                c.chunk_index,
+                c.section_title,
+                COALESCE(c.metadata->>'content_role', '') AS content_role,
+                (
+                    ts_rank_cd(
+                        p.title_abstract_vector || c.chunk_vector,
+                        websearch_to_tsquery('english', %(query)s)
+                    )
+                    +
+                    0.65 * ts_rank_cd(
+                        p.title_abstract_vector || c.chunk_vector,
+                        plainto_tsquery('english', %(fts_query)s)
+                    )
+                ) AS fts_score,
+                CASE
+                    WHEN p.title ILIKE %(like_pattern)s THEN 0.45
+                    WHEN p.abstract ILIKE %(like_pattern)s THEN 0.2
+                    WHEN c.chunk_text ILIKE %(like_pattern)s THEN 0.15
+                    ELSE 0
+                END AS ilike_bonus,
+                CASE
+                    WHEN coalesce(c.metadata->>'content_role', '') = 'references' THEN -0.24
+                    WHEN coalesce(c.metadata->>'content_role', '') = 'toc' THEN -0.28
+                    WHEN coalesce(c.metadata->>'content_role', '') = 'front_matter' THEN -0.14
+                    WHEN coalesce(c.metadata->>'content_role', '') = 'table_like' THEN -0.12
+                    WHEN coalesce(c.metadata->>'content_role', '') = 'figure_caption' THEN -0.08
+                    WHEN coalesce(c.metadata->>'content_role', '') = 'appendix' THEN -0.08
+                    ELSE 0
+                END AS content_role_adjustment,
+                CASE
+                    WHEN c.section_title ILIKE 'Abstract' THEN 0.16
+                    WHEN c.section_title ILIKE '%%Introduction%%' THEN 0.1
+                    WHEN c.section_title ILIKE '%%Method%%' OR c.section_title ILIKE '%%Approach%%' THEN 0.04
+                    WHEN c.section_title ILIKE '%%Related Work%%' THEN 0.02
+                    WHEN c.section_title ILIKE '%%Conclusion%%' THEN -0.02
+                    WHEN c.section_title ILIKE '%%Discussion%%' THEN -0.02
+                    WHEN c.section_title ILIKE '%%Appendix%%' THEN -0.08
+                    WHEN c.section_title ILIKE '%%Additional Analysis%%' THEN -0.08
+                    WHEN c.section_title ILIKE '%%Experimental Details%%' THEN -0.06
+                    WHEN c.section_title ILIKE '%%Implementation Details%%' THEN -0.06
+                    ELSE 0
+                END AS section_boost,
+                CASE
+                    WHEN c.section_title ILIKE '%%Table of Contents%%' THEN -0.12
+                    WHEN c.section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
+                    WHEN c.section_title = 'Front Matter' THEN -0.03
+                    ELSE 0
+                END AS structural_adjustment
+            FROM matched m
+            JOIN paper_chunks c ON c.id = m.id
+            JOIN papers p ON p.arxiv_id = c.arxiv_id
+            WHERE
+                coalesce(c.metadata->>'content_role', '') <> 'toc'
+                AND (
+                    (p.title_abstract_vector || c.chunk_vector) @@ websearch_to_tsquery('english', %(query)s)
+                    OR (p.title_abstract_vector || c.chunk_vector) @@ plainto_tsquery('english', %(fts_query)s)
+                )
+        )
+        SELECT
+            chunk_id,
+            arxiv_id,
+            paper_title,
+            paper_abstract,
+            chunk_text,
+            chunk_index,
+            section_title,
+            content_role,
+            fts_score,
+            ilike_bonus,
+            content_role_adjustment,
+            section_boost,
+            structural_adjustment,
+            (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score
+        FROM ranked
+        WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01
+        ORDER BY score DESC, chunk_id DESC
+        LIMIT %(limit)s
+    """
+    return sql, params
 
 
 class PaperRepository:
@@ -140,12 +322,13 @@ class PaperRepository:
 
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute("DELETE FROM paper_chunks WHERE arxiv_id = %s", (arxiv_id,))
-            for chunk in sanitized_chunks:
-                cursor.execute(
-                    """
-                    INSERT INTO paper_chunks (arxiv_id, chunk_index, chunk_text, section_title, token_count, metadata, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    """,
+            execute_values(
+                cursor,
+                """
+                INSERT INTO paper_chunks (arxiv_id, chunk_index, chunk_text, section_title, token_count, metadata, updated_at)
+                VALUES %s
+                """,
+                [
                     (
                         arxiv_id,
                         int(chunk.get("chunk_index", 0)),
@@ -153,8 +336,11 @@ class PaperRepository:
                         chunk.get("section_title"),
                         int(chunk.get("token_count", 0)),
                         Json(chunk.get("metadata", {})),
-                    ),
-                )
+                    )
+                    for chunk in sanitized_chunks
+                ],
+                template="(%s, %s, %s, %s, %s, %s, NOW())",
+            )
 
     def list_recent_papers(self, *, limit: int = 200) -> list[dict[str, Any]]:
         """최근 저장 논문을 조회한다."""
@@ -390,6 +576,53 @@ class PaperRepository:
             for row in rows
         ]
 
+    def list_chunk_windows(
+        self,
+        centers: Sequence[tuple[str, int]],
+        *,
+        window: int = 1,
+    ) -> list[list[dict[str, Any]]]:
+        """여러 중심 청크의 앞뒤 문맥 창을 한 번의 쿼리로 조회한다. 반환 순서는 `centers` 순서와 같다."""
+        if not centers:
+            return []
+        normalized_window = max(0, int(window))
+
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT w.ord, c.id, c.arxiv_id, c.chunk_index, c.chunk_text, c.section_title,
+                       c.token_count, c.metadata, c.updated_at
+                FROM unnest(%(arxiv_ids)s::text[], %(center_indexes)s::integer[])
+                    WITH ORDINALITY AS w(arxiv_id, center_index, ord)
+                JOIN paper_chunks c
+                  ON c.arxiv_id = w.arxiv_id
+                 AND c.chunk_index BETWEEN GREATEST(0, w.center_index - %(window)s) AND w.center_index + %(window)s
+                ORDER BY w.ord ASC, c.chunk_index ASC
+                """,
+                {
+                    "arxiv_ids": [str(arxiv_id) for arxiv_id, _ in centers],
+                    "center_indexes": [int(center_index) for _, center_index in centers],
+                    "window": normalized_window,
+                },
+            )
+            rows = cursor.fetchall()
+
+        windows: list[list[dict[str, Any]]] = [[] for _ in centers]
+        for row in rows:
+            windows[int(row[0]) - 1].append(
+                {
+                    "chunk_id": row[1],
+                    "arxiv_id": row[2],
+                    "chunk_index": row[3],
+                    "chunk_text": row[4] or "",
+                    "section_title": row[5],
+                    "token_count": row[6] or 0,
+                    "metadata": row[7] or {},
+                    "updated_at": row[8].isoformat() if row[8] else None,
+                }
+            )
+        return windows
+
     def list_papers_for_topic(self, topic_id: int) -> list[dict[str, Any]]:
         """토픽 문서 생성에 사용할 논문 묶음을 반환한다."""
         with self._connection() as connection, connection.cursor() as cursor:
@@ -429,140 +662,15 @@ class PaperRepository:
         limit: int = 5,
         arxiv_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """최소 retrieval 용도로 FTS/ILIKE 기반 청크 후보를 조회한다."""
-        normalized_query = " ".join(query.split())
-        if not normalized_query:
+        """FTS 기반 청크 후보를 조회한다. SQL은 `build_lexical_candidates_query` 참고."""
+        built = build_lexical_candidates_query(query, limit=limit, arxiv_id=arxiv_id)
+        if built is None:
             return []
-        normalized_query_for_fts = re.sub(r"[-/]+", " ", normalized_query)
-
-        arxiv_filter_sql = ""
-        arxiv_filter_params: tuple[Any, ...] = ()
-        if arxiv_id:
-            arxiv_filter_sql = " AND c.arxiv_id = %s"
-            arxiv_filter_params = (arxiv_id,)
+        sql, params = built
+        normalized_query = params["query"]
 
         with self._connection() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                WITH ranked AS (
-                    SELECT
-                        c.id AS chunk_id,
-                        c.arxiv_id,
-                        p.title AS paper_title,
-                        p.abstract AS paper_abstract,
-                        c.chunk_text,
-                        c.chunk_index,
-                        c.section_title,
-                        COALESCE(c.metadata->>'content_role', '') AS content_role,
-                        (
-                            ts_rank_cd(
-                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
-                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
-                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C'),
-                                websearch_to_tsquery('english', %s)
-                            )
-                            +
-                            0.65 * ts_rank_cd(
-                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
-                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
-                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C'),
-                                plainto_tsquery('english', %s)
-                            )
-                        ) AS fts_score,
-                        CASE
-                            WHEN p.title ILIKE ('%%' || %s || '%%') THEN 0.45
-                            WHEN p.abstract ILIKE ('%%' || %s || '%%') THEN 0.2
-                            WHEN c.chunk_text ILIKE ('%%' || %s || '%%') THEN 0.15
-                            ELSE 0
-                        END AS ilike_bonus,
-                        CASE
-                            WHEN coalesce(c.metadata->>'content_role', '') = 'references' THEN -0.24
-                            WHEN coalesce(c.metadata->>'content_role', '') = 'toc' THEN -0.28
-                            WHEN coalesce(c.metadata->>'content_role', '') = 'front_matter' THEN -0.14
-                            WHEN coalesce(c.metadata->>'content_role', '') = 'table_like' THEN -0.12
-                            WHEN coalesce(c.metadata->>'content_role', '') = 'figure_caption' THEN -0.08
-                            WHEN coalesce(c.metadata->>'content_role', '') = 'appendix' THEN -0.08
-                            ELSE 0
-                        END AS content_role_adjustment,
-                        CASE
-                            WHEN c.section_title ILIKE 'Abstract' THEN 0.16
-                            WHEN c.section_title ILIKE '%%Introduction%%' THEN 0.1
-                            WHEN c.section_title ILIKE '%%Method%%' OR c.section_title ILIKE '%%Approach%%' THEN 0.04
-                            WHEN c.section_title ILIKE '%%Related Work%%' THEN 0.02
-                            WHEN c.section_title ILIKE '%%Conclusion%%' THEN -0.02
-                            WHEN c.section_title ILIKE '%%Discussion%%' THEN -0.02
-                            WHEN c.section_title ILIKE '%%Appendix%%' THEN -0.08
-                            WHEN c.section_title ILIKE '%%Additional Analysis%%' THEN -0.08
-                            WHEN c.section_title ILIKE '%%Experimental Details%%' THEN -0.06
-                            WHEN c.section_title ILIKE '%%Implementation Details%%' THEN -0.06
-                            ELSE 0
-                        END AS section_boost,
-                        CASE
-                            WHEN c.section_title ILIKE '%%Table of Contents%%' THEN -0.12
-                            WHEN c.section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
-                            WHEN c.section_title = 'Front Matter' THEN -0.03
-                            ELSE 0
-                        END AS structural_adjustment
-                    FROM paper_chunks c
-                    JOIN papers p ON p.arxiv_id = c.arxiv_id
-                    WHERE
-                        1 = 1
-                        {arxiv_filter_sql}
-                        AND coalesce(c.metadata->>'content_role', '') <> 'toc'
-                        AND
-                        (
-                            (
-                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
-                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
-                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C')
-                            ) @@ websearch_to_tsquery('english', %s)
-                            OR (
-                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
-                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
-                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C')
-                            ) @@ plainto_tsquery('english', %s)
-                            OR p.title ILIKE ('%%' || %s || '%%')
-                            OR p.abstract ILIKE ('%%' || %s || '%%')
-                            OR c.chunk_text ILIKE ('%%' || %s || '%%')
-                        )
-                )
-                SELECT
-                    chunk_id,
-                    arxiv_id,
-                    paper_title,
-                    paper_abstract,
-                    chunk_text,
-                    chunk_index,
-                    section_title,
-                    content_role,
-                    fts_score,
-                    ilike_bonus,
-                    content_role_adjustment,
-                    section_boost,
-                    structural_adjustment,
-                    (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score
-                FROM ranked
-                WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01
-                ORDER BY score DESC, chunk_id DESC
-                LIMIT %s
-                """,
-                (
-                    normalized_query,
-                    normalized_query_for_fts,
-                    normalized_query,
-                    normalized_query,
-                    normalized_query,
-                )
-                + arxiv_filter_params
-                + (
-                    normalized_query,
-                    normalized_query_for_fts,
-                    normalized_query,
-                    normalized_query,
-                    normalized_query,
-                    max(1, limit),
-                ),
-            )
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
 
         return [
@@ -594,18 +702,8 @@ class PaperRepository:
             for row in rows
         ]
 
-    @contextmanager
     def _connection(self):
-        params = self._build_postgres_connection_params()
-        connection = psycopg2.connect(**params)
-        try:
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        return get_connection(self._build_postgres_connection_params(), settings=self.settings)
 
     def ensure_schema(self) -> None:
         """테이블·인덱스를 멱등하게 생성한다. 요청 경로가 아닌 마이그레이션/프로세스 시작 시 1회만 호출한다."""
@@ -717,12 +815,9 @@ class PaperRepository:
                 );
                 """
             )
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_paper_chunks_fts
-                    ON paper_chunks USING GIN (to_tsvector('english', chunk_text));
-                """
-            )
+            for statement in LEXICAL_INDEX_DDL:
+                cursor.execute(statement)
+            self._ensure_vector_index(cursor)
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS paper_ai_overviews (
@@ -747,6 +842,21 @@ class PaperRepository:
                 );
                 """
             )
+
+    @staticmethod
+    def _ensure_vector_index(cursor) -> bool:
+        cursor.execute("SAVEPOINT paper_embeddings_hnsw")
+        try:
+            cursor.execute(VECTOR_INDEX_DDL)
+        except psycopg2.Error as exc:
+            cursor.execute("ROLLBACK TO SAVEPOINT paper_embeddings_hnsw")
+            logger.warning(
+                "paper_embeddings HNSW 인덱스를 만들지 못했습니다(pgvector 0.5.0 이상 필요). 벡터 검색은 순차 스캔으로 동작합니다: %s",
+                exc,
+            )
+            return False
+        cursor.execute("RELEASE SAVEPOINT paper_embeddings_hnsw")
+        return True
 
     def get_paper_overview(self, arxiv_id: str) -> dict[str, Any] | None:
         with self._connection() as connection, connection.cursor() as cursor:

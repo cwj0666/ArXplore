@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import select
-from contextlib import contextmanager
 from datetime import date as date_cls
 from typing import Any
 
 import psycopg2
 from psycopg2.extras import Json
 
+from src.integrations.db import get_connection
 from src.shared import AppSettings, build_postgres_connection_params, get_settings
 
 RETRY_BACKOFF_BASE_SECONDS = 60
@@ -469,7 +469,7 @@ class PrepareJobRepository:
         *,
         timeout_seconds: float = 120.0,
     ) -> bool:
-        """새 prepare 작업 알림이 올 때까지 기다린다"""
+        """새 prepare 작업 알림이 올 때까지 기다린다. LISTEN은 세션에 묶이므로 풀이 아닌 전용 연결을 쓴다."""
         connection = psycopg2.connect(**self._build_postgres_connection_params())
         connection.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
         try:
@@ -485,17 +485,8 @@ class PrepareJobRepository:
         finally:
             connection.close()
 
-    @contextmanager
     def _connection(self):
-        connection = psycopg2.connect(**self._build_postgres_connection_params())
-        try:
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        return get_connection(self._build_postgres_connection_params(), settings=self.settings)
 
     def ensure_schema(self) -> None:
         """prepare_jobs 테이블·컬럼·인덱스를 멱등하게 생성한다. 프로세스 시작/마이그레이션 시 1회만 호출한다."""

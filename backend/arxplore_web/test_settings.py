@@ -25,3 +25,13 @@ DATABASES = {
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 STATICFILES_DIRS = []
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "arxplore-tests",
+    }
+}
+RATE_LIMIT_ENABLED = False
+DEMO_MODE = True
+ADMIN_ENABLED = False

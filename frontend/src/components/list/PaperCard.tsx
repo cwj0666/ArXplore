@@ -1,4 +1,6 @@
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
+import { useNavigate } from "react-router-dom";
+
 import type { PaperListItem } from "../../pages/list/listTypes";
 
 function truncateText(text: string | undefined, max: number): string {
@@ -17,7 +19,6 @@ function getPublishedDate(value: string | null | undefined): string {
 
 interface PaperCardProps {
   paper: PaperListItem;
-  canOpenDetail: boolean;
   canFavorite: boolean;
   onToggleFavorite: (arxivId: string) => void;
   onRequireLogin: () => void;
@@ -25,12 +26,12 @@ interface PaperCardProps {
 
 export function PaperCard({
   paper,
-  canOpenDetail,
   canFavorite,
   onToggleFavorite,
   onRequireLogin,
 }: PaperCardProps) {
-  const detailLink = `/papers/${paper.arxiv_id}/`;
+  const navigate = useNavigate();
+  const detailLink = `/papers/${encodeURIComponent(paper.arxiv_id)}/`;
   const pdfLink = paper.pdf_url || `https://arxiv.org/abs/${paper.arxiv_id}`;
 
   const handleTitleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -46,16 +47,33 @@ export function PaperCard({
     onToggleFavorite(paper.arxiv_id);
   };
 
-  const handleCardClick = () => {
-    if (!canOpenDetail) {
-      window.location.href = `/login/?next=${encodeURIComponent(detailLink)}`;
+  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
+    if (event.metaKey || event.ctrlKey) {
+      window.open(detailLink, "_blank", "noopener");
       return;
     }
-    window.location.href = detailLink;
+    navigate(detailLink);
+  };
+
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      navigate(detailLink);
+    }
   };
 
   return (
-    <article className="paper-card" onClick={handleCardClick}>
+    <article
+      className="paper-card"
+      role="link"
+      tabIndex={0}
+      aria-label={`${paper.title} 상세 보기`}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+    >
       <div className="paper-card-top">
         <div className="paper-title">
           <a href={pdfLink} target="_blank" rel="noreferrer" onClick={handleTitleClick} data-tooltip="논문원본 바로가기">

@@ -39,10 +39,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-django "ruff==${RUFF_VERSION}"
+        run: pip install -r requirements-dev.txt "ruff==${RUFF_VERSION}"
 
       - name: Ruff lint
         run: ruff check --output-format=github .
@@ -86,10 +88,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-django
+        run: pip install -r requirements-dev.txt
 
       - name: Integration tests
         run: |

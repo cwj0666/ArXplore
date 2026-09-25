@@ -14,13 +14,17 @@ import {
   postPaperChat,
   streamPaperChat,
 } from "../../pages/detail/detail-api";
-import type { ChatMessage } from "../../pages/detail/detail-types";
+import type { AiAccessReason, ChatMessage } from "../../pages/detail/detail-types";
 import type { Citation } from "../../types/assistant";
 import { CitationList } from "../chat/CitationList";
 import { MarkdownContent } from "../chat/MarkdownContent";
+import { AiAccessNotice } from "./AiAccessNotice";
 
 interface ChatPanelProps {
   arxivId: string;
+  /** null이면 채팅 가능, 아니면 입력창 대신 안내를 보여 준다 */
+  access: AiAccessReason | null;
+  onOpenSettings: () => void;
 }
 
 type UiRole = "assistant" | "user" | "loading" | "notice";
@@ -53,7 +57,7 @@ function createMessage(role: UiRole, content: string): UiMessage {
   };
 }
 
-export function ChatPanel({ arxivId }: ChatPanelProps) {
+export function ChatPanel({ arxivId, access, onOpenSettings }: ChatPanelProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -142,7 +146,7 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
 
   const sendMessage = async () => {
     const message = inputText.trim();
-    if (!message || isSending) {
+    if (!message || isSending || access) {
       return;
     }
 
@@ -359,6 +363,8 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
       <div
         ref={panelRef}
         id="chat-panel"
+        role="region"
+        aria-label="논문 AI 채팅"
         className={`chat-panel ${isOpen ? "" : "is-hidden"}`}
         style={panelStyle}
       >
@@ -379,6 +385,8 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
                 min={30}
                 max={100}
                 value={opacityPercent}
+                aria-label="채팅창 투명도"
+                aria-valuetext={`${opacityPercent}%`}
                 className="opacity-slider"
                 onChange={(event) => setOpacityPercent(Number(event.target.value))}
               />
@@ -395,6 +403,7 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
               className="pdf-control-btn chat-close-btn"
               onClick={() => setIsOpen(false)}
               title="채팅창 닫기"
+              aria-label="채팅창 닫기"
             >
               &times;
             </button>
@@ -442,39 +451,46 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
             );
           })}
         </div>
-        <div className="chat-input-area">
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputText}
-            placeholder="질문하기..."
-            onChange={(event) => setInputText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !isImeComposing(event)) {
-                void sendMessage();
-              }
-            }}
-          />
-          {isSending ? (
-            <button
-              type="button"
-              className="chat-send-btn chat-stop-btn"
-              aria-label="답변 중단"
-              onClick={stopGeneration}
-            >
-              중지
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="chat-send-btn"
-              id="send-btn"
-              onClick={() => void sendMessage()}
-            >
-              전송
-            </button>
-          )}
-        </div>
+        {access ? (
+          <div className="chat-input-area chat-input-locked">
+            <AiAccessNotice feature="chat" reason={access} onOpenSettings={onOpenSettings} compact />
+          </div>
+        ) : (
+          <div className="chat-input-area">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputText}
+              placeholder="질문하기..."
+              aria-label="논문에 대해 질문하기"
+              onChange={(event) => setInputText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !isImeComposing(event)) {
+                  void sendMessage();
+                }
+              }}
+            />
+            {isSending ? (
+              <button
+                type="button"
+                className="chat-send-btn chat-stop-btn"
+                aria-label="답변 중단"
+                onClick={stopGeneration}
+              >
+                중지
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="chat-send-btn"
+                id="send-btn"
+                onClick={() => void sendMessage()}
+              >
+                전송
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <button

@@ -143,13 +143,9 @@ class PaperRetriever:
     def _build_contexts(self, candidates: list[dict], *, adjacency_window: int) -> list[dict]:
         """검색 결과를 주변 청크와 결합해 공용 context shape로 정규화한다."""
         normalized_window = max(0, adjacency_window)
+        windows = self._fetch_chunk_windows(candidates, window=normalized_window)
         contexts: list[dict] = []
-        for candidate in candidates:
-            raw_context_chunks = self.repository.list_chunk_window(
-                candidate["arxiv_id"],
-                int(candidate["chunk_index"]),
-                window=normalized_window,
-            )
+        for candidate, raw_context_chunks in zip(candidates, windows, strict=True):
             context_chunks = [self._normalize_context_chunk(chunk) for chunk in raw_context_chunks]
             contexts.append(
                 {
@@ -159,6 +155,16 @@ class PaperRetriever:
                 }
             )
         return contexts
+
+    def _fetch_chunk_windows(self, candidates: list[dict], *, window: int) -> list[list[dict]]:
+        """hit별 문맥 창을 한 번의 쿼리로 가져온다. 일괄 조회가 없는 저장소는 hit마다 조회한다."""
+        if not candidates:
+            return []
+        centers = [(candidate["arxiv_id"], int(candidate["chunk_index"])) for candidate in candidates]
+        list_chunk_windows = getattr(self.repository, "list_chunk_windows", None)
+        if callable(list_chunk_windows):
+            return list_chunk_windows(centers, window=window)
+        return [self.repository.list_chunk_window(arxiv_id, index, window=window) for arxiv_id, index in centers]
 
     def _rerank_vector_candidates(self, query: str, candidates: list[dict]) -> list[dict]:
         """벡터 검색 결과를 섹션 prior와 lexical overlap으로 한 번 더 정렬한다."""

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import type { MouseEvent } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import type { BootstrapPayload } from "../../types/app";
+import { AccountMenu, type SettingsTab } from "../account/AccountMenu";
 
 interface DetailTopBarProps {
   pdfUrl: string;
@@ -11,7 +12,7 @@ interface DetailTopBarProps {
   session: BootstrapPayload;
   onViewPdf: () => void;
   onGenerateSummary: () => void;
-  onOpenSettings: (tab?: "settings" | "favorites") => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   onLogout: () => void;
 }
 
@@ -26,36 +27,28 @@ export function DetailTopBar({
   onOpenSettings,
   onLogout,
 }: DetailTopBarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handleClick = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [menuOpen]);
-
-  const initial = session.username ? session.username.slice(0, 1).toUpperCase() : "?";
+  // 앱 안에서 들어온 경우 history로 돌아가 목록의 페이지·정렬·검색어를 그대로 복원한다.
+  const handleBack = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (location.key !== "default") {
+      event.preventDefault();
+      navigate(-1);
+    }
+  };
 
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <a href="/" className="back-btn">
+        <Link to="/" className="back-btn" onClick={handleBack}>
           뒤로가기
-        </a>
+        </Link>
       </div>
       <div className="topbar-center">
-        <a href="/" className="topbar-logo">
+        <Link to="/" className="topbar-logo">
           ArXplore
-        </a>
+        </Link>
       </div>
       <div className="topbar-right">
         <button type="button" className="layout-ctrl-btn" onClick={onViewPdf}>
@@ -80,7 +73,7 @@ export function DetailTopBar({
         <button
           type="button"
           className="layout-ctrl-btn"
-          onClick={() => window.open(pdfUrl, "_blank")}
+          onClick={() => window.open(pdfUrl, "_blank", "noopener")}
         >
           <svg
             className="btn-icon"
@@ -107,32 +100,18 @@ export function DetailTopBar({
             className="pdf-btn"
             onClick={onGenerateSummary}
             disabled={summaryLoading}
+            aria-haspopup="dialog"
           >
             {summaryLoading ? "생성 중..." : summaryLabel}
           </button>
         )}
 
-        <div className="topbar-account" ref={menuRef}>
-          {!session.is_authenticated ? (
-            <a className="app-header-login" href={`/login/?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`}>
-              로그인
-            </a>
-          ) : (
-            <>
-              <button type="button" className="account-trigger" onClick={() => setMenuOpen((v) => !v)}>
-                <span className="account-trigger-badge">{initial}</span>
-                <span>{session.username}</span>
-              </button>
-              {menuOpen ? (
-                <div className="account-menu">
-                  <button type="button" onClick={() => onOpenSettings("settings")}>내 설정</button>
-                  <button type="button" onClick={() => onOpenSettings("favorites")}>즐겨찾기</button>
-                  <button type="button" onClick={onLogout}>로그아웃</button>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
+        <AccountMenu
+          className="topbar-account"
+          session={session}
+          onOpenSettings={onOpenSettings}
+          onLogout={onLogout}
+        />
       </div>
     </div>
   );

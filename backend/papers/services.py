@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.http import HttpRequest
 
 from src.shared import get_settings, override_openai_runtime
 
 from .models import DEFAULT_SUMMARY_MODEL, FavoritePaper, UserSettings
+from .secret_box import InvalidToken, decrypt_secret, encrypt_secret
+
+logger = logging.getLogger(__name__)
 
 MAX_RECENT_PAPERS = 1500
 PAPERS_PER_PAGE = 21
@@ -39,8 +46,18 @@ class AuthenticationRequiredError(PermissionError):
     pass
 
 
-class InvalidSummaryModelError(ValueError):
+class InvalidRequestError(ValueError):
+    """사용자에게 그대로 보여줘도 되는 입력 검증 오류."""
+
+
+class InvalidSummaryModelError(InvalidRequestError):
     pass
+
+
+class PasswordValidationError(InvalidRequestError):
+    def __init__(self, messages: list[str]):
+        super().__init__(" ".join(messages))
+        self.messages = messages
 
 
 @lru_cache(maxsize=1)
@@ -85,7 +102,8 @@ def build_paper_list_payload(*, query: str, sort: str, mode: str, page: Any, use
 
 
 def build_paper_detail_payload(arxiv_id: str, *, user: AbstractBaseUser | AnonymousUser) -> dict[str, Any]:
-    _require_authenticated_user(user)
+    if not demo_mode_enabled():
+        _require_authenticated_user(user)
     paper = _get_paper_or_raise(arxiv_id)
     related_papers = _build_related_papers(paper)
     favorite_ids = _get_favorite_ids(
@@ -109,22 +127,28 @@ def build_bootstrap_payload(request: HttpRequest) -> dict[str, Any]:
     username = ""
     if getattr(user, "is_authenticated", False):
         username = user.get_username()
-        preferred_model = _get_or_create_user_settings(user).preferred_summary_model
+        preferred_model = _get_preferred_summary_model(user)
 
+    demo_mode = demo_mode_enabled()
     return {
         "is_authenticated": bool(getattr(user, "is_authenticated", False)),
         "username": username,
         "has_personal_api_key": has_personal_api_key(request),
         "preferred_summary_model": preferred_model,
         "available_summary_models": list(AVAILABLE_SUMMARY_MODELS),
+        "demo_mode": demo_mode,
+        "login_required_for": ["chat", "generate"] if demo_mode else ["detail", "chat", "generate"],
     }
+
+
+def demo_mode_enabled() -> bool:
+    return bool(getattr(settings, "DEMO_MODE", True))
 
 
 def build_settings_payload(user: AbstractBaseUser | AnonymousUser) -> dict[str, Any]:
     _require_authenticated_user(user)
-    settings_obj = _get_or_create_user_settings(user)
     return {
-        "preferred_summary_model": settings_obj.preferred_summary_model,
+        "preferred_summary_model": _get_preferred_summary_model(user),
         "available_summary_models": list(AVAILABLE_SUMMARY_MODELS),
     }
 
@@ -148,8 +172,8 @@ def save_personal_api_key(request: HttpRequest, api_key: str) -> dict[str, Any]:
     _require_authenticated_user(request.user)
     normalized = api_key.strip()
     if not normalized:
-        raise ValueError("API 키를 입력하세요.")
-    request.session[SESSION_API_KEY_KEY] = normalized
+        raise InvalidRequestError("API 키를 입력하세요.")
+    request.session[SESSION_API_KEY_KEY] = encrypt_secret(normalized)
     request.session.modified = True
     return {"ok": True, "has_personal_api_key": True}
 
@@ -162,10 +186,17 @@ def clear_personal_api_key(request: HttpRequest) -> dict[str, Any]:
 
 
 def get_session_api_key(request: HttpRequest) -> str | None:
+    """세션의 암호문을 복호화한다. 복호화할 수 없는 값(이전 평문 저장분, 키 교체)은 지우고 없는 것으로 본다."""
     value = request.session.get(SESSION_API_KEY_KEY)
     if not value:
         return None
-    normalized = str(value).strip()
+    try:
+        normalized = decrypt_secret(value).strip()
+    except InvalidToken:
+        logger.warning("세션 API 키를 복호화할 수 없어 삭제합니다.")
+        request.session.pop(SESSION_API_KEY_KEY, None)
+        request.session.modified = True
+        return None
     return normalized or None
 
 
@@ -176,13 +207,17 @@ def has_personal_api_key(request: HttpRequest) -> bool:
 def register_user(*, username: str, password: str) -> dict[str, Any]:
     normalized_username = username.strip()
     if not normalized_username:
-        raise ValueError("사용자 이름을 입력하세요.")
+        raise InvalidRequestError("사용자 이름을 입력하세요.")
     if not password:
-        raise ValueError("비밀번호를 입력하세요.")
+        raise InvalidRequestError("비밀번호를 입력하세요.")
 
     user_model = get_user_model()
     if user_model.objects.filter(username=normalized_username).exists():
-        raise ValueError("이미 존재하는 사용자 이름입니다.")
+        raise InvalidRequestError("이미 존재하는 사용자 이름입니다.")
+    try:
+        validate_password(password, user=user_model(username=normalized_username))
+    except ValidationError as exc:
+        raise PasswordValidationError([str(message) for message in exc.messages]) from exc
 
     user = user_model.objects.create_user(username=normalized_username, password=password)
     _get_or_create_user_settings(user)
@@ -192,11 +227,11 @@ def register_user(*, username: str, password: str) -> dict[str, Any]:
 def login_user(request: HttpRequest, *, username: str, password: str) -> dict[str, Any]:
     normalized_username = username.strip()
     if not normalized_username or not password:
-        raise ValueError("사용자 이름과 비밀번호를 입력하세요.")
+        raise InvalidRequestError("사용자 이름과 비밀번호를 입력하세요.")
 
     user = authenticate(request, username=normalized_username, password=password)
     if user is None:
-        raise ValueError("로그인에 실패했습니다.")
+        raise InvalidRequestError("로그인에 실패했습니다.")
 
     login(request, user)
     _get_or_create_user_settings(user)
@@ -244,8 +279,9 @@ def get_paper_analysis(
     user: AbstractBaseUser | AnonymousUser,
     session_api_key: str | None,
 ) -> dict[str, Any]:
-    _require_authenticated_user(user)
-    api_key = _require_personal_api_key(session_api_key)
+    """데모 모드에서는 캐시된 overview를 로그인·키 없이 반환한다. 새로 생성할 때만 로그인과 개인 키가 필요하다."""
+    if not demo_mode_enabled():
+        _require_generation_access(user, session_api_key)
 
     repo = get_paper_repository()
     paper = _get_paper_or_raise(arxiv_id)
@@ -257,6 +293,8 @@ def get_paper_analysis(
             "key_findings": cached.get("key_findings") or [],
             "cached": True,
         }
+
+    api_key = _require_generation_access(user, session_api_key)
 
     fulltext = repo.get_paper_fulltext(arxiv_id) or {}
     chunks = repo.list_paper_chunks(arxiv_id, limit=PAPER_CHUNK_LIMIT)
@@ -289,8 +327,9 @@ def get_paper_summary(
     user: AbstractBaseUser | AnonymousUser,
     session_api_key: str | None,
 ) -> dict[str, Any]:
-    _require_authenticated_user(user)
-    api_key = _require_personal_api_key(session_api_key)
+    """데모 모드에서는 요청한 모델의 캐시된 요약을 로그인·키 없이 반환한다."""
+    if not demo_mode_enabled():
+        _require_generation_access(user, session_api_key)
     normalized_model = model.strip()
     if normalized_model not in AVAILABLE_SUMMARY_MODELS:
         raise InvalidSummaryModelError("지원하지 않는 모델입니다.")
@@ -305,6 +344,8 @@ def get_paper_summary(
             "cached": True,
             "model": normalized_model,
         }
+
+    api_key = _require_generation_access(user, session_api_key)
 
     fulltext = repo.get_paper_fulltext(arxiv_id) or {}
     paper["text"] = fulltext.get("text") or ""
@@ -502,11 +543,11 @@ def _trace_runtime() -> str:
 def _validate_chat_input(user_message: str, chat_history: Any) -> tuple[str, list[tuple[str, str]]]:
     cleaned_message = user_message.strip()
     if not cleaned_message:
-        raise ValueError("메시지를 입력하세요.")
+        raise InvalidRequestError("메시지를 입력하세요.")
     if len(cleaned_message) > CHAT_MESSAGE_MAX_CHARS:
-        raise ValueError(f"메시지는 {CHAT_MESSAGE_MAX_CHARS:,}자 이하로 입력하세요.")
+        raise InvalidRequestError(f"메시지는 {CHAT_MESSAGE_MAX_CHARS:,}자 이하로 입력하세요.")
     if not isinstance(chat_history, list):
-        raise ValueError("잘못된 요청입니다.")
+        raise InvalidRequestError("잘못된 요청입니다.")
     return cleaned_message, _build_history_tuples(chat_history)
 
 
@@ -536,6 +577,11 @@ def _require_personal_api_key(session_api_key: str | None) -> str:
     return normalized
 
 
+def _require_generation_access(user: AbstractBaseUser | AnonymousUser, session_api_key: str | None) -> str:
+    _require_authenticated_user(user)
+    return _require_personal_api_key(session_api_key)
+
+
 def _parse_page_number(raw_page: Any) -> int:
     try:
         page_number = int(raw_page)
@@ -555,6 +601,11 @@ def _build_history_tuples(chat_history: list[dict[str, Any]]) -> list[tuple[str,
         and message["content"].strip()
     ]
     return messages[-CHAT_HISTORY_MAX_MESSAGES:]
+
+
+def _get_preferred_summary_model(user: AbstractBaseUser) -> str:
+    stored = UserSettings.objects.filter(user=user).values_list("preferred_summary_model", flat=True).first()
+    return stored or DEFAULT_SUMMARY_MODEL
 
 
 def _get_or_create_user_settings(user: AbstractBaseUser) -> UserSettings:

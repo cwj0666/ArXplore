@@ -22,16 +22,17 @@ Hugging Face Daily Papers에 올라오는 AI 논문을 매일 수집하고, PDF�
 
 - **수집(서버 Airflow)**: `arxplore_daily_collect`가 매일 18:00(KST) HF Daily Papers를 MongoDB에 raw로 저장하고 날짜 단위 prepare 작업을 등록합니다. `arxplore_maintenance`는 3시간마다 과거 raw를 backfill하고 arXiv 메타데이터를 보강합니다. `arxplore_langsmith_maintenance`는 매일 03:00에 오래된 LangSmith trace를 정리합니다.
 - **Prepare(로컬 worker)**: PDF를 3단계 폴백(HURIDOCS → pypdf → 초록)으로 파싱하고, 섹션과 `content_role`을 붙여 글자 수 기준(1,800자, 겹침 200자)으로 청킹한 뒤 OpenAI API로 임베딩합니다.
-- **논문 목록**: 최신순·추천순 정렬, 제목·초록 부분 문자열 검색(최근 1,500편 대상), 페이지네이션, 즐겨찾기.
-- **논문 상세**(로그인 필요, AI 기능은 개인 OpenAI 키 필요)
+- **논문 목록**: 최신순·추천순 정렬, 제목·초록 부분 문자열 검색(최근 1,500편 대상), 페이지네이션, 즐겨찾기. 페이지·정렬·검색어가 URL에 남아 뒤로/앞으로 가기로 그대로 돌아옵니다.
+- **데모 모드**(`DEMO_MODE=true`, 기본값): 로그인 없이 목록과 상세 페이지를 열고, 이미 캐시된 개요·핵심 포인트·상세 요약을 볼 수 있습니다. 캐시가 없는 결과를 새로 만들거나 챗을 쓰려면 로그인과 개인 OpenAI 키가 필요하고, 화면은 그 자리에서 로그인·키 등록 안내를 보여 줍니다. `DEMO_MODE=false`면 상세 페이지부터 로그인이 필요합니다.
+- **논문 상세**
   - PDF 분할 보기
-  - 개요와 핵심 포인트: gpt-5-mini로 생성하고 논문 단위로 캐시합니다.
+  - 개요와 핵심 포인트: gpt-5-mini로 생성하고 논문 단위로 캐시합니다. 생성 중에는 카드 안에 진행 상태와 취소 버튼이 나오고 초록은 계속 읽을 수 있습니다. 취소는 화면의 대기만 멈추며, 서버에서 이미 시작된 생성은 끝까지 진행되어 캐시됩니다.
   - 상세 요약: 사용자가 gpt-5-mini / gpt-5 중에서 고르고, LangGraph 요약 그래프가 섹션을 배경·방법·실험·한계로 묶어 요약합니다. 논문×모델 단위로 캐시합니다.
   - 관련 논문: 로컬 DB 후보를 카테고리·키워드 겹침으로 점수화하고, 부족하면 arXiv 검색으로 채웁니다.
-  - 논문 챗: 질의 검색 없이 논문의 앞 20개 청크를 컨텍스트로 넣어 **비스트리밍**으로 답합니다.
-- **AI 어시스턴트**: LangGraph ReAct 에이전트가 SSE로 응답을 스트리밍하고, 사용자는 중지 버튼으로 끊을 수 있습니다. 도구는 `search_paper_chunks_tool`(PostgreSQL 전문 검색)과 `get_trending_papers_tool`(최근 논문 추천수 순) 두 개입니다.
-- **계정**: 회원가입·로그인, 개인 OpenAI API 키를 세션에 저장해 AI 기능에 사용합니다.
-- **미구현**: 근거 청크 번역 UI(`translate_chunk` 체인만 있고 엔드포인트 없음), 구조화된 citation(에이전트 답변은 마크다운 링크가 들어간 평문).
+  - 논문 챗: 질문으로 **그 논문 안**을 검색(hybrid, 실패 시 lexical)해 초록 + 발췌 청크 최대 5개를 근거로 답하고, SSE로 스트리밍합니다. 답변의 `[1]`, `[2]` 번호를 발췌문과 대조해 출처 칩(섹션 이름 포함)으로 보여 주고, 중지 버튼으로 끊을 수 있습니다.
+- **AI 어시스턴트**: LangGraph ReAct 에이전트가 SSE로 응답을 스트리밍하고, 사용자는 중지 버튼으로 끊을 수 있습니다. 도구는 `search_paper_chunks_tool`(hybrid 검색, 임베딩 불가 시 lexical)과 `get_trending_papers_tool`(최근 논문 추천수 순) 두 개입니다. 답변 속 링크를 도구 결과와 대조한 구조화된 citation을 함께 보내고, 단계 수 제한(`AGENT_RECURSION_LIMIT`, 기본 12)에 걸리면 안내 문구로 마무리합니다.
+- **계정과 보호 장치**: 회원가입(Django 비밀번호 검증)·로그인. 개인 OpenAI API 키는 암호화해 세션에 저장합니다. 로그인·회원가입과 LLM 호출 엔드포인트에 분당 rate limit이 걸려 있고(초과 시 429와 `Retry-After`), 화면은 대기 시간을 안내합니다.
+- **미구현**: 근거 청크 번역 UI(`translate_chunk` 체인만 있고 엔드포인트 없음).
 
 ## 아키텍처
 
@@ -56,7 +57,7 @@ flowchart TD
 ```
 
 - **서버 스택**(`docker-compose.server.yml`): PostgreSQL(pgvector), MongoDB, Airflow. 항상 켜 두는 수집·저장 계층입니다.
-- **로컬 스택**(`docker-compose.yml`): Django(gunicorn) + nginx(React 빌드) + Vite. `parser` 프로필을 켜면 HURIDOCS 파서와 prepare-worker가 함께 올라옵니다.
+- **로컬 스택**(`docker-compose.yml`): Django(gunicorn) + nginx(React 빌드). `dev` 프로필은 Vite HMR 서버, `parser` 프로필은 HURIDOCS 파서와 prepare-worker, `local-db` 프로필은 로컬 PostgreSQL을 더합니다.
 - **GPU는 HURIDOCS 파서에만 씁니다.** 임베딩은 OpenAI API(`text-embedding-3-large`를 `dimensions=1536`으로 줄여 요청)로 만듭니다.
 - **도메인 범위**: HF Daily Papers 큐레이션 피드 전체입니다. arXiv 카테고리로 따로 거르지 않습니다.
 - **기술 스택**: Python 3.12, Django 5, React 18 + TypeScript + Vite, LangChain / LangGraph / LangSmith, PostgreSQL 16 + pgvector, MongoDB, Airflow 3.
@@ -65,15 +66,17 @@ flowchart TD
 
 ## 검색 계층
 
-`src/integrations/paper_retriever.py`에 세 가지 경로가 있지만, 제품에서 쓰는 것은 lexical 하나입니다.
+제품 경로는 `src/core/agent/retrieval.py`의 `retrieve_contexts` 하나로 모입니다. 에이전트 검색 도구와 상세 챗이 같은 규칙을 씁니다.
 
 | 경로 | 상태 | 내용 |
 | --- | --- | --- |
-| lexical | **제품 경로** (에이전트 검색 도구) | 제목(A)·초록(B)·청크(C) 가중 tsvector에 `websearch_to_tsquery` + `plainto_tsquery`로 `ts_rank_cd` 점수를 매기고, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌처럼 보이는 텍스트 필터, 논문 다양성 보정, 인접 청크 병합을 거칩니다. |
-| vector | 구현됨, 미연결 | `paper_embeddings`와 코사인 거리(`<=>`). 벡터 인덱스는 아직 없어 순차 스캔입니다. |
-| hybrid | 구현됨, 미연결 | lexical과 vector 결과를 RRF(k=60)와 방법별 가중치로 합칩니다. 평가를 마친 뒤 제품 경로에 연결할 예정입니다. |
+| hybrid | **제품 경로** (`RETRIEVAL_MODE=hybrid`, 기본값) | lexical과 vector 결과를 RRF(k=60)와 방법별 가중치로 합칩니다. 질의 임베딩 키(사용자 세션 키, 없으면 서버 `OPENAI_API_KEY`)가 있을 때만 씁니다. |
+| lexical | **폴백 경로** (키가 없거나 임베딩 호출 실패, 또는 `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector에 `websearch_to_tsquery` + `plainto_tsquery`로 `ts_rank_cd` 점수를 매기고, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌처럼 보이는 텍스트 필터, 논문 다양성 보정, 인접 청크 병합을 거칩니다. |
+| vector | hybrid의 구성 요소 | `paper_embeddings` 코사인 거리(`<=>`)와 섹션·`content_role` 감점. `VECTOR_MIN_SIMILARITY`(기본 0)로 낮은 유사도를 거를 수 있습니다. |
 
-알려진 제약: FTS 설정이 `english`라서 한국어 질의는 lexical에서 거의 맞지 않습니다. GIN 인덱스는 `to_tsvector('english', chunk_text)`에만 있고, 실제 쿼리는 제목·초록·청크를 합친 식이라 이 인덱스를 타지 않습니다.
+- 상세 챗은 같은 경로를 `arxiv_id`로 한정해 호출하고, 결과가 비면 논문의 앞 청크로 대신합니다(응답의 `retrieval_mode`가 `hybrid` / `lexical` / `first_chunks` 중 하나).
+- 인덱스: `scripts/migrate_schema.py`가 제목·초록과 청크의 tsvector 생성 컬럼에 GIN 인덱스를, `paper_embeddings`에 HNSW 인덱스(pgvector 0.5.0 이상)를 만듭니다. 기존 DB에 처음 적용할 때는 테이블을 다시 쓰므로 prepare-worker를 멈추고 실행합니다.
+- 알려진 제약: FTS 설정이 `english`라서 한국어 질의는 lexical에서 거의 맞지 않습니다. 키가 없어 lexical로 내려가면 한국어 질문의 검색 품질이 크게 떨어집니다.
 
 ## 데이터 파이프라인
 
@@ -98,6 +101,17 @@ HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker 
 
 ## Quick Start
 
+### compose 프로필
+
+| 프로필 | 서비스 | 용도 |
+| --- | --- | --- |
+| (기본) | `django`, `nginx` | 웹 앱. nginx는 django healthcheck가 통과한 뒤 뜹니다. |
+| `dev` | `vite` | 프론트엔드 HMR 개발 서버(`http://localhost:5173`) |
+| `parser` | `layout-parser`, `prepare-worker` | GPU PDF 파서와 prepare 큐 worker. worker는 파서 healthcheck 통과 뒤 뜹니다. |
+| `local-db` | `postgres-local` | 원격 서버 없이 쓰는 로컬 PostgreSQL(pgvector) |
+
+프로필은 겹쳐 쓸 수 있습니다. 예: `docker compose --profile local-db --profile dev up -d --build`.
+
 ### (a) 로컬 단독 실행
 
 원격 서버 없이 로컬 PostgreSQL 하나로 웹 앱을 띄웁니다. 수집(Airflow + MongoDB)은 돌지 않으므로 **논문 목록은 빈 상태로 시작합니다.**
@@ -111,13 +125,15 @@ docker compose --profile local-db up -d postgres-local   # pgvector/pgvector:pg1
 python scripts/migrate_schema.py   # 호스트 Python 3.12 + requirements.txt 필요
 # 호스트에 Python 환경이 없으면: docker compose run --rm django python /workspace/scripts/migrate_schema.py
 
-docker compose --profile local-db up -d --build
+docker compose --profile local-db up -d --build             # 웹: http://localhost
+docker compose --profile local-db --profile dev up -d vite  # (선택) Vite HMR: http://localhost:5173
 ```
 
-- 웹: `http://localhost` (nginx), Vite 개발 서버: `http://localhost:5173`
-- 회원가입 → 설정에서 개인 OpenAI API 키를 등록하면 AI 기능이 열립니다.
+- 데모 모드가 기본이라 로그인 없이 목록과 상세를 볼 수 있습니다. 회원가입 → 설정에서 개인 OpenAI API 키를 등록하면 생성과 챗이 열립니다.
+- `DJANGO_SECRET_KEY`가 비어 있으면 Django가 시작하지 않습니다. `DJANGO_DEBUG`는 기본으로 꺼져 있고 값이 `true`일 때만 켜집니다(compose는 항상 끕니다).
 - 접속 주소: `postgres-local`은 django·worker와 같은 compose 기본 네트워크에 있으므로 컨테이너는 `PROD_POSTGRES_HOST=postgres-local:5432`로 접속합니다(`host.docker.internal`이나 `extra_hosts`가 필요 없습니다). 호스트에서 돌리는 스크립트는 `POSTGRES_HOST=localhost`와 `SERVER_POSTGRES_PORT=15432`를 씁니다. `.env.example`의 기본값이 이 구성입니다.
 - `PROD_POSTGRES_HOST`와 `POSTGRES_HOST`는 `host` 또는 `host:port` 형식입니다. 포트를 생략하면 `SERVER_POSTGRES_PORT`(`.env.example` 값 15432)를 씁니다.
+- django 이미지는 root가 아닌 `app`(UID 1000) 사용자로 돕니다. 이전 이미지로 만든 `django_static` 볼륨은 root 소유라 `collectstatic`이 실패하므로 한 번 지우고 다시 올립니다: `docker compose down && docker volume rm arxplore_django_static`.
 
 ### (b) 원격 서버 모드
 
@@ -125,15 +141,24 @@ docker compose --profile local-db up -d --build
 
 ```bash
 bash scripts/setup-server.sh                  # 서버: PostgreSQL / MongoDB / Airflow
-bash scripts/setup.sh                         # 로컬: django + nginx + vite
+bash scripts/setup.sh                         # 로컬: django + nginx
 docker compose --profile parser up -d --build # 로컬 GPU: layout-parser + prepare-worker
 ```
+
+`parser` 프로필의 prepare-worker는 `LAYOUT_PARSER_BASE_URL`이 비어 있으면 `http://layout-parser:5060`을 씁니다. Airflow 이미지는 DAG에 필요한 패키지(`requirements-airflow.txt`)만 Airflow 공식 constraints 파일에 맞춰 설치합니다.
+
+### 운영 기본값
+
+- nginx: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` 헤더와 gzip을 켭니다. Django admin 경로는 프록시하지 않고, admin 자체도 `DJANGO_ADMIN_ENABLED=false`가 기본입니다.
+- HTTPS 뒤에 둘 때는 `DJANGO_SECURE_COOKIES=true`로 세션·CSRF 쿠키에 Secure를 붙입니다. nginx는 HTTP만 제공합니다.
+- rate limit 카운터는 기본으로 프로세스별 메모리 캐시라서 gunicorn 워커 4개가 따로 셉니다. 한도를 정확히 공유하려면 `REDIS_URL`을 지정합니다.
+- 세션에 저장한 개인 키는 `SESSION_KEY_ENCRYPTION_KEY`(비우면 `DJANGO_SECRET_KEY`에서 유도)로 암호화합니다. 이 값이나 `DJANGO_SECRET_KEY`를 바꾸면 사용자는 키를 다시 등록해야 합니다.
 
 ## 테스트와 CI
 
 ```bash
-pip install -r requirements.txt pytest pytest-django
-pytest tests/unit                  # DB·API 키 없이 도는 단위 테스트
+pip install -r requirements-dev.txt   # requirements.txt(런타임) + pytest·ruff·jupyter 등 개발 도구
+pytest tests/unit                     # DB·API 키 없이 도는 단위 테스트
 
 # 큐 통합 테스트: 일회용 PostgreSQL(pgvector) 필요
 TEST_DATABASE_URL=postgresql://arxplore:arxplore@localhost:5432/arxplore_test \
@@ -184,12 +209,11 @@ python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (O
 
 ## 알려진 한계와 로드맵
 
-- **hybrid 연결과 평가**: 위 Evaluation 표를 채운 뒤 에이전트 검색 도구를 hybrid로 옮깁니다. 한국어 질의가 lexical에서 거의 맞지 않는 문제가 가장 큰 이유입니다.
-- **상세 챗 질의 검색**: 앞 20개 청크 고정 대신 질문으로 해당 논문 안을 검색하고, 응답도 스트리밍으로 바꿉니다.
+- **검색 평가 수치**: 위 Evaluation 표는 아직 비어 있습니다. hybrid를 제품 경로로 먼저 연결했고, 재처리·백필을 마친 DB에서 lexical / vector / hybrid와 ablation을 측정해 채울 계획입니다. 인덱스 도입 전후 지연도 `EXPLAIN ANALYZE`로 함께 기록합니다.
+- **한국어 lexical**: FTS 설정이 `english`라 임베딩 키가 없는 lexical 폴백에서는 한국어 질문이 거의 맞지 않습니다.
 - **ASGI 전환**: 지금은 gunicorn gthread(워커 4 × 스레드 8)라 SSE 스트림 하나가 스레드 하나를 오래 점유합니다.
-- **인덱스**: 벡터 HNSW 인덱스, 제목·초록·청크를 합친 tsvector 생성 컬럼과 GIN 인덱스. 도입 전후를 `EXPLAIN ANALYZE`로 기록할 계획입니다.
-- **데모 모드**: 지금은 상세 페이지에 로그인이 필요하고 캐시된 개요도 개인 키가 있어야 보입니다. 키 없이 캐시 결과를 보여 주는 읽기 전용 모드를 만들 계획입니다.
-- **배포**: nginx가 HTTP만 제공합니다. 외부에 공개하기 전에 TLS나 Tailscale 전용 접근이 필요합니다.
+- **배포**: nginx가 HTTP만 제공합니다. 외부에 공개하기 전에 TLS(또는 Tailscale 전용 접근)와 `DJANGO_SECURE_COOKIES=true`, 공유 rate limit용 Redis가 필요합니다.
+- **캐시 무효화**: AI 결과 캐시에 프롬프트 버전이 없어서 프롬프트를 바꿔도 기존 결과가 그대로 보입니다.
 
 ## 프로젝트 구조
 

@@ -1,5 +1,10 @@
-import type { FormEvent } from "react";
+import { type FormEvent, type KeyboardEvent, useRef } from "react";
 import type { SearchMode } from "../../pages/list/listTypes";
+
+const MODE_TABS: { mode: SearchMode; label: string }[] = [
+  { mode: "search", label: "키워드 검색" },
+  { mode: "ai", label: "AI 어시스턴트" },
+];
 
 const SEARCH_MODE_CONFIG: Record<
   SearchMode,
@@ -33,6 +38,19 @@ export function ListSearchPanel({
   busy,
 }: ListSearchPanelProps) {
   const config = SEARCH_MODE_CONFIG[mode];
+  const tabRefs = useRef<Record<SearchMode, HTMLButtonElement | null>>({ search: null, ai: null });
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = MODE_TABS.findIndex((tab) => tab.mode === mode);
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const nextMode = MODE_TABS[(currentIndex + offset + MODE_TABS.length) % MODE_TABS.length].mode;
+    onModeChange(nextMode);
+    tabRefs.current[nextMode]?.focus();
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -44,30 +62,45 @@ export function ListSearchPanel({
       <div className="search-shell">
         <div className="search-mode-row">
           <div className="search-mode-segment" role="tablist" aria-label="검색 모드 선택">
-            <button
-              type="button"
-              className={`mode-chip${mode === "search" ? " active" : ""}`}
-              data-mode="search"
-              onClick={() => onModeChange("search")}
-            >
-              키워드 검색
-            </button>
-            <button
-              type="button"
-              className={`mode-chip${mode === "ai" ? " active" : ""}`}
-              data-mode="ai"
-              onClick={() => onModeChange("ai")}
-            >
-              AI 어시스턴트
-            </button>
+            {MODE_TABS.map((tab) => {
+              const selected = mode === tab.mode;
+              return (
+                <button
+                  key={tab.mode}
+                  ref={(element) => {
+                    tabRefs.current[tab.mode] = element;
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`search-mode-tab-${tab.mode}`}
+                  aria-selected={selected}
+                  aria-controls="search-mode-panel"
+                  tabIndex={selected ? 0 : -1}
+                  className={`mode-chip${selected ? " active" : ""}`}
+                  data-mode={tab.mode}
+                  onClick={() => onModeChange(tab.mode)}
+                  onKeyDown={handleTabKeyDown}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
-          <div className="search-mode-helper">{config.helper}</div>
+          <div className="search-mode-helper" id="search-mode-helper">{config.helper}</div>
         </div>
 
-        <form className="pill-search-bar" onSubmit={handleSubmit}>
+        <form
+          className="pill-search-bar"
+          id="search-mode-panel"
+          role="tabpanel"
+          aria-labelledby={`search-mode-tab-${mode}`}
+          onSubmit={handleSubmit}
+        >
           <input
             type="text"
             name="q"
+            aria-label={config.placeholder}
+            aria-describedby="search-mode-helper"
             value={queryInput}
             placeholder={config.placeholder}
             autoComplete="off"

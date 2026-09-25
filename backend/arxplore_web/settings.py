@@ -31,7 +31,25 @@ def _env_csv(name: str, default: list[str]) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-DEBUG = _env_bool("DJANGO_DEBUG", True)
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"{name} must be an integer.") from exc
+
+
+def _normalize_url_prefix(value: str) -> str:
+    prefix = value.strip().strip("/")
+    if not prefix:
+        raise ImproperlyConfigured("DJANGO_ADMIN_PATH must not be empty.")
+    return f"{prefix}/"
+
+
+# 명시적으로 "true"일 때만 켠다.
+DEBUG = os.getenv("DJANGO_DEBUG", "").strip().lower() == "true"
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
 if not SECRET_KEY:
     if not DEBUG:
@@ -121,3 +139,57 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [('frontend', FRONTEND_DIST_DIR)] if FRONTEND_DIST_DIR.exists() else []
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# HTTPS 뒤에서만 켠다. 켜면 쿠키가 HTTPS로만 전송되고 X-Forwarded-Proto: https를 신뢰한다.
+SECURE_COOKIES = _env_bool("DJANGO_SECURE_COOKIES", False)
+SESSION_COOKIE_SECURE = SECURE_COOKIES
+CSRF_COOKIE_SECURE = SECURE_COOKIES
+if SECURE_COOKIES:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+
+ADMIN_ENABLED = _env_bool("DJANGO_ADMIN_ENABLED", False)
+ADMIN_PATH = _normalize_url_prefix(os.getenv("DJANGO_ADMIN_PATH", "admin/"))
+
+# 데모 모드: 비로그인 상세 열람, 캐시된 overview/요약을 로그인·키 없이 반환한다.
+DEMO_MODE = _env_bool("DEMO_MODE", True)
+
+# 비어 있으면 SECRET_KEY에서 세션 API 키 암호화 키를 유도한다. 값을 바꾸면 기존 세션의 키는 폐기된다.
+SESSION_KEY_ENCRYPTION_KEY = os.getenv("SESSION_KEY_ENCRYPTION_KEY", "")
+
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    # 프로세스별 캐시. gunicorn worker가 여러 개면 rate limit 카운터가 worker마다 따로 쌓인다.
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "arxplore-default",
+        }
+    }
+
+RATE_LIMIT_ENABLED = _env_bool("RATE_LIMIT_ENABLED", True)
+RATE_LIMIT_AUTH_PER_MINUTE = _env_int("RATE_LIMIT_AUTH_PER_MINUTE", 10)
+RATE_LIMIT_LLM_PER_MINUTE = _env_int("RATE_LIMIT_LLM_PER_MINUTE", 30)
+# nginx가 덮어쓰는 헤더만 신뢰한다. 비우면 REMOTE_ADDR만 쓴다.
+RATE_LIMIT_IP_HEADER = os.getenv("RATE_LIMIT_IP_HEADER", "X-Real-IP").strip()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "papers": {"handlers": ["console"], "level": "INFO"},
+    },
+}

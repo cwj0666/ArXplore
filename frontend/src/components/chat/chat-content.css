@@ -60,7 +60,7 @@
 .chat-markdown pre {
   margin: 8px 0;
   padding: 10px 12px;
-  background: #1f2328;
+  background: var(--color-primary-hover);
   color: #e6edf3;
   border-radius: 8px;
   overflow-x: auto;
@@ -94,7 +94,7 @@
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #6b7280;
+  color: var(--color-text-muted);
 }
 
 .chat-citation-list {
@@ -111,10 +111,10 @@
   flex-direction: column;
   max-width: 240px;
   padding: 5px 9px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: #fff;
-  color: #4b5563;
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
   font-size: 0.76rem;
   line-height: 1.35;
   text-decoration: none;
@@ -122,8 +122,8 @@
 
 .chat-citation:hover,
 .chat-citation:focus-visible {
-  border-color: #6b7280;
-  color: #111827;
+  border-color: var(--color-text-muted);
+  color: var(--color-text-emphasis);
 }
 
 .chat-citation.is-cited {
@@ -139,7 +139,7 @@
 }
 
 .chat-citation-section {
-  color: #6b7280;
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

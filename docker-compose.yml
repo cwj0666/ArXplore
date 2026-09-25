@@ -26,6 +26,18 @@ services:
       gunicorn -c /workspace/docker/django/gunicorn.conf.py arxplore_web.wsgi:application"
     volumes:
       - django_static:/workspace/backend/staticfiles
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 8001), timeout=3).close()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   nginx:
@@ -37,16 +49,24 @@ services:
       args:
         VITE_BASE_PATH: /
     depends_on:
-      - django
+      django:
+        condition: service_healthy
     ports:
       - "0.0.0.0:${PROD_HTTP_PORT:-80}:80"
     volumes:
       - django_static:/srv/django-static:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   vite:
     image: arxplore-vite
     container_name: arxplore-vite
+    profiles: ["dev"]
     build:
       context: .
       dockerfile: docker/vite/Dockerfile
@@ -54,7 +74,7 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
     command: >
-      bash -lc "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+      bash -lc "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
     ports:
       - "0.0.0.0:${FRONTEND_PORT:-5173}:5173"
     volumes:
@@ -80,7 +100,11 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env before running}
       POSTGRES_HOST: ${PROD_POSTGRES_HOST:?Set PROD_POSTGRES_HOST to the main server PostgreSQL host}
       SERVER_POSTGRES_PORT: ${SERVER_POSTGRES_PORT:-15432}
+      LAYOUT_PARSER_BASE_URL: ${LAYOUT_PARSER_BASE_URL:-http://layout-parser:5060}
     working_dir: /workspace
+    depends_on:
+      layout-parser:
+        condition: service_healthy
     command: >
       bash -lc "python3 -m src.pipeline.prepare_worker --mode auto
       --max-jobs-per-run ${MAX_JOBS_PER_RUN:-1}

@@ -1,10 +1,15 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { toggleFavorite } from "../../helpers/accountApi";
+import { startTransition, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+
+import { AccountMenu, type SettingsTab } from "../../components/account/AccountMenu";
 import { ListPagination } from "../../components/list/ListPagination";
 import { ListSearchPanel } from "../../components/list/ListSearchPanel";
 import { PaperCard } from "../../components/list/PaperCard";
+import { toggleFavorite } from "../../helpers/accountApi";
+import { ApiError } from "../../helpers/http";
+import { buildLoginPath } from "../../helpers/loginPath";
 import { fetchPaperList } from "./listApi";
+import { buildListHref, buildListSearchParams, type ListParams, normalizeSort, readListParams } from "./listParams";
 import type { PaperListResponse, SearchMode, SortOption } from "./listTypes";
 import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
 import "./listPage.css";
@@ -14,65 +19,29 @@ const SORT_OPTIONS = [
   { value: "upvotes", label: "추천순" },
 ] as const;
 
-function normalizeSort(raw: string | null): SortOption {
-  return raw === "upvotes" ? "upvotes" : "latest";
-}
-
-function normalizeMode(raw: string | null): SearchMode {
-  return raw === "ai" ? "ai" : "search";
-}
-
-function normalizePage(raw: string | null): number {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return 1;
-  }
-  return Math.floor(parsed);
-}
-
 interface ListPageProps {
   session: BootstrapPayload;
-  onOpenSettings: (tab?: "settings" | "favorites") => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   onLogout: () => void;
 }
 
 export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
-  const initialQuery = searchParams.get("q") ?? "";
-  const initialSort = normalizeSort(searchParams.get("sort"));
-  const initialMode = normalizeMode(searchParams.get("mode"));
-  const initialPage = normalizePage(searchParams.get("page"));
+  // URL이 목록 상태의 원본이다. 뒤로/앞으로 가기가 페이지·정렬·검색어를 그대로 되살린다.
+  const params = readListParams(searchParams);
+  const { q: query, sort, mode, page } = params;
 
-  const [queryInput, setQueryInput] = useState(initialQuery);
-  const [query, setQuery] = useState(initialQuery);
-  const [sort, setSort] = useState<SortOption>(initialSort);
-  const [mode, setMode] = useState<SearchMode>(initialMode);
-  const [page, setPage] = useState(initialPage);
-
+  const [queryInput, setQueryInput] = useState(query);
   const [listData, setListData] = useState<PaperListResponse | null>(null);
   const [isListLoading, setIsListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
   useEffect(() => {
-    const nextParams = new URLSearchParams();
-    if (query) {
-      nextParams.set("q", query);
-    }
-    nextParams.set("sort", sort);
-    nextParams.set("mode", mode);
-    if (page > 1) {
-      nextParams.set("page", String(page));
-    }
-
-    if (nextParams.toString() !== searchParams.toString()) {
-      setSearchParams(nextParams, { replace: true });
-    }
-  }, [mode, page, query, searchParams, setSearchParams, sort]);
+    setQueryInput(query);
+  }, [query]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -102,34 +71,19 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
     return () => abortController.abort();
   }, [mode, page, query, sort]);
 
-  useEffect(() => {
-    setAccountMenuOpen(false);
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    if (!accountMenuOpen) {
-      return;
+  const updateParams = (patch: Partial<ListParams>, options: { replace?: boolean } = {}) => {
+    const next = buildListSearchParams({ ...params, ...patch });
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: options.replace });
     }
+  };
 
-    const handleClick = (event: MouseEvent) => {
-      if (!accountMenuRef.current?.contains(event.target as Node)) {
-        setAccountMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [accountMenuOpen]);
-
-  const showResultSection = useMemo(() => {
-    return !isListLoading && !listError && !!listData && listData.total_items > 0;
-  }, [isListLoading, listData, listError]);
+  const requireLogin = () => navigate(buildLoginPath(`${location.pathname}${location.search}`));
 
   const handleSearchSubmit = () => {
     const trimmed = queryInput.trim();
     if (mode === "search") {
-      setQuery(trimmed);
-      setPage(1);
+      updateParams({ q: trimmed, page: 1 });
       return;
     }
 
@@ -141,19 +95,21 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
   };
 
   const handleSortChange = (nextSort: SortOption) => {
-    setSort(nextSort);
-    setPage(1);
+    updateParams({ sort: nextSort, page: 1 });
   };
 
   const handleModeChange = (nextMode: SearchMode) => {
-    setMode(nextMode);
+    updateParams({ mode: nextMode }, { replace: true });
   };
 
   const handleFavoriteToggle = async (arxivId: string) => {
     let payload: FavoriteTogglePayload;
     try {
       payload = await toggleFavorite(arxivId);
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        requireLogin();
+      }
       return;
     }
     setListData((previous) => {
@@ -171,10 +127,10 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
     });
   };
 
+  const showResultSection = !isListLoading && !listError && !!listData && listData.total_items > 0;
   const totalPages = Math.max(1, listData?.total_pages ?? 1);
   const currentPage = listData?.page ?? page;
   const resultData = showResultSection ? listData : null;
-  const initial = session.username ? session.username.slice(0, 1).toUpperCase() : "?";
 
   return (
     <div className="list-page">
@@ -182,43 +138,14 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
         <header className="list-hero">
           <div className="list-hero-spacer" aria-hidden="true" />
           <h1>
-            <a href="/">ArXplore</a>
+            <Link to="/">ArXplore</Link>
           </h1>
-          <div className="list-hero-account" ref={accountMenuRef}>
-            {!session.is_authenticated ? (
-              <a
-                className="app-header-login"
-                href={`/login/?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`}
-              >
-                로그인
-              </a>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="account-trigger"
-                  onClick={() => setAccountMenuOpen((value) => !value)}
-                >
-                  <span className="account-trigger-badge">{initial}</span>
-                  <span>{session.username}</span>
-                </button>
-
-                {accountMenuOpen ? (
-                  <div className="account-menu">
-                    <button type="button" onClick={() => onOpenSettings("settings")}>
-                      내 설정
-                    </button>
-                    <button type="button" onClick={() => onOpenSettings("favorites")}>
-                      즐겨찾기
-                    </button>
-                    <button type="button" onClick={onLogout}>
-                      로그아웃
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
+          <AccountMenu
+            className="list-hero-account"
+            session={session}
+            onOpenSettings={onOpenSettings}
+            onLogout={onLogout}
+          />
         </header>
 
         <ListSearchPanel
@@ -230,9 +157,17 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
           busy={false}
         />
 
-        {listError ? <div className="no-papers list-error">{listError}</div> : null}
+        {listError ? (
+          <div className="no-papers list-error" role="alert">
+            {listError}
+          </div>
+        ) : null}
 
-        {!listError && isListLoading ? <div className="no-papers">불러오는 중...</div> : null}
+        {!listError && isListLoading ? (
+          <div className="no-papers" role="status">
+            불러오는 중...
+          </div>
+        ) : null}
 
         {!listError && !isListLoading && (!listData || listData.total_items === 0) ? (
           <div className="no-papers">수집된 논문이 없습니다.</div>
@@ -245,6 +180,7 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
                 총 {resultData.total_items}개 논문 — {resultData.page} / {resultData.total_pages} 페이지
               </span>
               <select
+                aria-label="정렬"
                 value={sort}
                 onChange={(event) => handleSortChange(normalizeSort(event.target.value))}
               >
@@ -256,19 +192,16 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
               </select>
             </div>
 
-            <section className="paper-grid">
+            <section className="paper-grid" aria-label="논문 목록">
               {resultData.items.map((paper) => (
                 <PaperCard
                   key={paper.arxiv_id}
                   paper={paper}
-                  canOpenDetail={session.is_authenticated}
                   canFavorite={session.is_authenticated}
                   onToggleFavorite={(arxivId) => {
                     void handleFavoriteToggle(arxivId);
                   }}
-                  onRequireLogin={() =>
-                    navigate(`/login/?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`)
-                  }
+                  onRequireLogin={requireLogin}
                 />
               ))}
             </section>
@@ -276,10 +209,7 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
             <ListPagination
               page={currentPage}
               totalPages={totalPages}
-              query={query}
-              sort={sort}
-              mode={mode}
-              onPageChange={setPage}
+              buildHref={(targetPage) => buildListHref({ ...params, page: targetPage })}
             />
           </>
         ) : null}

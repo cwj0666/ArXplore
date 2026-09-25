@@ -47,11 +47,12 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 
 ### 개발자 기본 모드
 
-시연 검증은 단일 `docker-compose.yml`의 `arxplore-django`, `arxplore-nginx`, `arxplore-vite` 컨테이너를 기준으로 진행한다. 프론트엔드 dev server는 기본 실행에 포함된다.
+시연 검증은 단일 `docker-compose.yml`의 `arxplore-django`, `arxplore-nginx` 컨테이너를 기준으로 진행한다. 프론트엔드 dev server(`arxplore-vite`)는 `dev` 프로필로 필요할 때만 띄운다.
 
 ```bash
 bash scripts/setup.sh
-docker compose ps django vite
+docker compose ps django nginx
+docker compose --profile dev up -d vite   # 프론트엔드 HMR이 필요할 때
 ```
 
 새 DB를 쓰거나 스키마가 바뀐 뒤에는 스키마를 한 번 만든다. 리포지토리 생성자는 DDL을 실행하지 않는다.
