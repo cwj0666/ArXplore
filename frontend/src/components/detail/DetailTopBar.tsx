@@ -2,19 +2,14 @@ import type { MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { toSafeHttpUrl } from "../../helpers/safeUrl";
-import type { BootstrapPayload } from "../../types/app";
-import { AccountMenu, type SettingsTab } from "../account/AccountMenu";
 
 interface DetailTopBarProps {
   pdfUrl: string;
   summaryLoading: boolean;
   summaryLabel: string;
   showSummaryAction: boolean;
-  session: BootstrapPayload;
   onViewPdf: () => void;
   onGenerateSummary: () => void;
-  onOpenSettings: (tab?: SettingsTab) => void;
-  onLogout: () => void;
 }
 
 export function DetailTopBar({
@@ -22,11 +17,8 @@ export function DetailTopBar({
   summaryLoading,
   summaryLabel,
   showSummaryAction,
-  session,
   onViewPdf,
   onGenerateSummary,
-  onOpenSettings,
-  onLogout,
 }: DetailTopBarProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -108,13 +100,6 @@ export function DetailTopBar({
             {summaryLoading ? "생성 중..." : summaryLabel}
           </button>
         )}
-
-        <AccountMenu
-          className="topbar-account"
-          session={session}
-          onOpenSettings={onOpenSettings}
-          onLogout={onLogout}
-        />
       </div>
     </div>
   );

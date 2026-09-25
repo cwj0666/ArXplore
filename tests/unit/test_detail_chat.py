@@ -19,6 +19,7 @@ from src.core.agent.paper_chat import (
     stream_paper_chat_answer,
 )
 from src.core.tracing import build_paper_chat_trace_config, resolve_trace_runtime
+from src.shared import get_settings
 
 PAPER = {
     "arxiv_id": "2401.00001",
@@ -219,20 +220,13 @@ def test_trace_runtime_resolution():
     assert resolve_trace_runtime("staging") == "dev"
 
 
-class _User:
-    is_authenticated = True
-
-    def get_username(self) -> str:
-        return "tester"
-
-
 class TestServices:
     def _repo(self, paper=PAPER):
         repo = MagicMock()
         repo.get_paper.return_value = paper
         return repo
 
-    def test_stream_paper_chat_uses_session_key_and_paper_scope(self):
+    def test_stream_paper_chat_uses_server_key_and_paper_scope(self):
         repo = self._repo()
         retriever = _retriever(hybrid=[_context(10)])
         seen_keys: list[str | None] = []
@@ -248,10 +242,12 @@ class TestServices:
             patch("src.integrations.paper_retriever.PaperRetriever", return_value=retriever) as retriever_cls,
             patch.object(paper_chat, "build_chat_llm", side_effect=build_llm),
         ):
-            prepared = services.prepare_paper_chat("2401.00001", "질문", [], user=_User(), session_api_key="sk-user")
+            prepared = services.prepare_paper_chat("2401.00001", "질문", [])
             events = list(services.stream_paper_chat(prepared))
 
-        assert seen_keys == ["sk-user"]
+        server_key = get_settings().openai_api_key
+        assert server_key
+        assert seen_keys == [server_key]
         assert retriever_cls.call_args.kwargs["repository"] is repo
         assert retriever.search_paper_contexts_by_hybrid.call_args.kwargs["arxiv_id"] == "2401.00001"
         assert events[-1]["citations"][0]["chunk_id"] == 10
@@ -264,7 +260,7 @@ class TestServices:
             patch("src.integrations.paper_retriever.PaperRetriever", return_value=retriever),
             patch.object(paper_chat, "build_chat_llm", return_value=FakeListChatModel(responses=["답변"])),
         ):
-            payload = services.answer_paper_chat("2401.00001", "질문", [], user=_User(), session_api_key="sk-user")
+            payload = services.answer_paper_chat("2401.00001", "질문", [])
 
         assert payload["answer"] == "답변"
         assert payload["retrieval_mode"] == FIRST_CHUNKS_MODE
@@ -277,4 +273,4 @@ class TestServices:
             patch.object(services, "get_paper_repository", return_value=repo),
             pytest.raises(services.PaperNotFoundError),
         ):
-            services.prepare_paper_chat("2401.99999", "질문", [], user=_User(), session_api_key="sk-user")
+            services.prepare_paper_chat("2401.99999", "질문", [])

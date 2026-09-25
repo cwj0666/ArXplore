@@ -20,32 +20,15 @@ function getPublishedDate(value: string | null | undefined): string {
 
 interface PaperCardProps {
   paper: PaperListItem;
-  canFavorite: boolean;
-  onToggleFavorite: (arxivId: string) => void;
-  onRequireLogin: () => void;
 }
 
-export function PaperCard({
-  paper,
-  canFavorite,
-  onToggleFavorite,
-  onRequireLogin,
-}: PaperCardProps) {
+export function PaperCard({ paper }: PaperCardProps) {
   const navigate = useNavigate();
   const detailLink = `/papers/${encodeURIComponent(paper.arxiv_id)}/`;
   const pdfLink = toSafeHttpUrl(paper.pdf_url, `https://arxiv.org/abs/${paper.arxiv_id}`);
 
   const handleTitleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.stopPropagation();
-  };
-
-  const handleFavoriteClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (!canFavorite) {
-      onRequireLogin();
-      return;
-    }
-    onToggleFavorite(paper.arxiv_id);
   };
 
   const handleCardClick = (event: MouseEvent<HTMLElement>) => {
@@ -81,26 +64,6 @@ export function PaperCard({
             {truncateText(paper.title, 65)}
           </a>
         </div>
-        <button
-          type="button"
-          className={`paper-favorite-btn ${paper.is_favorited ? "active" : ""}`}
-          onClick={handleFavoriteClick}
-          aria-label={paper.is_favorited ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill={paper.is_favorited ? "currentColor" : "none"}
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
-          </svg>
-        </button>
       </div>
       <div className="paper-abstract-wrapper">
         <div className="paper-abstract">{truncateText(paper.abstract, 200)}</div>

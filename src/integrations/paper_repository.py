@@ -911,7 +911,6 @@ class PaperRepository:
                     model TEXT NOT NULL,
                     summary TEXT NOT NULL,
                     generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    created_by_user_id BIGINT NULL,
                     UNIQUE (arxiv_id, model)
                 );
                 """
@@ -958,7 +957,7 @@ class PaperRepository:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT summary, model, generated_at, created_by_user_id
+                SELECT summary, model, generated_at
                 FROM paper_ai_detailed_summaries
                 WHERE arxiv_id = %s AND model = %s
                 """,
@@ -973,7 +972,6 @@ class PaperRepository:
             "summary": row[0],
             "model": row[1],
             "generated_at": row[2].isoformat() if row[2] else None,
-            "created_by_user_id": row[3],
         }
 
     def upsert_paper_overview(
@@ -1002,20 +1000,17 @@ class PaperRepository:
         arxiv_id: str,
         summary: str,
         model_name: str,
-        *,
-        created_by_user_id: int | None = None,
     ) -> None:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO paper_ai_detailed_summaries (arxiv_id, model, summary, generated_at, created_by_user_id)
-                VALUES (%s, %s, %s, NOW(), %s)
+                INSERT INTO paper_ai_detailed_summaries (arxiv_id, model, summary, generated_at)
+                VALUES (%s, %s, %s, NOW())
                 ON CONFLICT (arxiv_id, model) DO UPDATE SET
                     summary = EXCLUDED.summary,
-                    generated_at = NOW(),
-                    created_by_user_id = EXCLUDED.created_by_user_id
+                    generated_at = NOW()
                 """,
-                (arxiv_id, model_name, summary, created_by_user_id),
+                (arxiv_id, model_name, summary),
             )
 
     def _build_postgres_connection_params(self) -> dict[str, Any]:

@@ -26,9 +26,6 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     proxy: {
       "/bootstrap.json": proxy(djangoTarget),
-      "/auth/": proxy(djangoTarget),
-      "/settings/": proxy(djangoTarget),
-      "/favorites/": proxy(djangoTarget),
       "/papers/list.json": proxy(djangoTarget),
       "/papers/assistant/chat/": proxy(djangoTarget),
       "/papers/assistant/stream/": proxy(djangoTarget),
@@ -37,7 +34,6 @@ export default defineConfig(({ command }) => ({
       "^/papers/[^/]+/summary/$": proxy(djangoTarget),
       "^/papers/[^/]+/chat/$": proxy(djangoTarget),
       "^/papers/[^/]+/chat/stream/$": proxy(djangoTarget),
-      "/admin/": proxy(djangoTarget),
       "/static/": proxy(djangoTarget),
     }
   }

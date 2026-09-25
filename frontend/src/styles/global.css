@@ -60,174 +60,22 @@ a {
   font-family: var(--font-sans);
 }
 
-.account-menu-root {
-  position: relative;
-}
-
-.app-header-login,
-.account-trigger,
-.account-menu button,
-.settings-panel button,
-.settings-tabs button,
-.favorite-row {
-  font: inherit;
-}
-
-.app-header-login,
-.account-trigger {
-  border: 1px solid #d5d9df;
-  background: var(--color-surface);
-  color: var(--color-text);
-  border-radius: 999px;
-  padding: 10px 14px;
-  text-decoration: none;
-  font-weight: 700;
-}
-
-.account-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-}
-
-.account-trigger-badge {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  font-size: 0.85rem;
-}
-
-.account-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 180px;
-  background: var(--color-surface);
-  border: 1px solid #dde2e8;
-  border-radius: 14px;
-  padding: 8px;
-  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.08);
-}
-
-.account-menu button {
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  border-radius: 10px;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.account-menu button:hover {
-  background: #f5f7f9;
-}
-
-.settings-panel-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 300;
-  background: rgba(15, 23, 42, 0.28);
-  display: flex;
-  justify-content: flex-end;
-}
-
-.settings-panel {
-  width: min(100%, 460px);
-  background: var(--color-surface);
-  height: 100%;
-  padding: 24px 20px;
-  overflow-y: auto;
-  box-shadow: -16px 0 32px rgba(15, 23, 42, 0.12);
-}
-
-.settings-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.settings-panel-header h2 {
-  margin: 0;
-}
-
-.settings-panel-header button,
-.settings-tabs button,
-.settings-field-row button,
-.summary-model-actions button,
-.hero-favorite-btn,
-.paper-favorite-btn {
+.summary-model-actions button {
   border: 1px solid #d6dbe1;
   background: var(--color-surface);
   color: var(--color-text);
   border-radius: 12px;
   cursor: pointer;
-}
-
-.settings-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-
-.settings-tabs button {
   padding: 10px 14px;
   font-weight: 700;
 }
 
-.settings-tabs button.active,
-.summary-model-actions .primary,
-.hero-favorite-btn.active,
-.paper-favorite-btn.active {
+.summary-model-actions .primary {
   background: var(--color-primary);
   color: var(--color-on-primary);
   border-color: var(--color-primary);
 }
 
-.settings-section-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.settings-section {
-  border: 1px solid #e3e6ea;
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.settings-section h3 {
-  margin: 0;
-}
-
-.settings-section-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.settings-help {
-  margin: 0 0 12px;
-  color: #69707d;
-  line-height: 1.5;
-}
-
-.settings-field-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.settings-field-row input,
-.settings-field-row select,
 .summary-model-dialog select {
   flex: 1;
   min-width: 0;
@@ -235,57 +83,6 @@ a {
   border-radius: 12px;
   padding: 11px 12px;
   font: inherit;
-}
-
-.settings-field-row button,
-.summary-model-actions button,
-.settings-panel-header button,
-.assistant-notice-actions button,
-.assistant-notice-actions a,
-.hero-favorite-btn,
-.paper-favorite-btn {
-  padding: 10px 14px;
-  font-weight: 700;
-}
-
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: #f2f4f7;
-  color: #69707d;
-  font-size: 0.84rem;
-}
-
-.status-chip.active {
-  background: #e8f8ef;
-  color: #047857;
-}
-
-.settings-status {
-  margin-top: 8px;
-  color: var(--color-primary);
-}
-
-.settings-status.error {
-  color: var(--color-danger);
-}
-
-.favorites-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.favorite-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  text-decoration: none;
-  border: 1px solid #e3e6ea;
-  border-radius: 12px;
-  padding: 12px;
 }
 
 .summary-model-overlay {

@@ -85,15 +85,6 @@ export async function readApiError(response: Response): Promise<ApiError> {
 }
 
 
-export function getPasswordErrors(error: unknown): string[] {
-  if (!(error instanceof ApiError) || !error.payload || typeof error.payload !== "object") {
-    return [];
-  }
-  const raw = (error.payload as { password_errors?: unknown }).password_errors;
-  return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
-}
-
-
 async function performJsonRequest<T>(input: RequestInfo | URL, init: RequestInit | undefined): Promise<T> {
   const response = await fetch(input, {
     credentials: "same-origin",
@@ -112,7 +103,7 @@ async function performJsonRequest<T>(input: RequestInfo | URL, init: RequestInit
 }
 
 
-function buildBodyInit(method: "POST" | "DELETE", body: unknown, signal?: AbortSignal): RequestInit {
+function buildBodyInit(method: "POST", body: unknown, signal?: AbortSignal): RequestInit {
   const csrfToken = getCsrfTokenFromCookie();
   const headers: Record<string, string> = {};
   if (body !== undefined) {
@@ -137,7 +128,7 @@ export async function requestJson<T>(input: RequestInfo | URL, init?: RequestIni
 
 export async function requestJsonWithBody<T>(
   input: RequestInfo | URL,
-  method: "POST" | "DELETE",
+  method: "POST",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -147,14 +138,6 @@ export async function requestJsonWithBody<T>(
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
-}
-
-
-export function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError && error.message) {
     return error.message;
   }
   return fallback;

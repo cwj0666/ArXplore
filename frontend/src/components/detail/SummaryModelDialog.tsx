@@ -6,7 +6,6 @@ interface SummaryModelDialogProps {
   open: boolean;
   models: string[];
   selectedModel: string;
-  confirmLabel: string;
   onSelectModel: (model: string) => void;
   onConfirm: () => void;
   onClose: () => void;
@@ -20,7 +19,6 @@ export function SummaryModelDialog({
   open,
   models,
   selectedModel,
-  confirmLabel,
   onSelectModel,
   onConfirm,
   onClose,
@@ -62,7 +60,7 @@ export function SummaryModelDialog({
             취소
           </button>
           <button type="button" className="primary" onClick={onConfirm}>
-            {confirmLabel}
+            생성
           </button>
         </div>
       </div>

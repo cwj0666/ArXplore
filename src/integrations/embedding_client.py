@@ -11,8 +11,8 @@ from src.shared.settings import get_runtime_openai_api_key_override
 class EmbeddingClient:
     """문자열 목록을 OpenAI 임베딩 벡터로 변환한다.
 
-    키는 호출 시점에 고른다. 요청 범위 키(`override_openai_runtime`, 웹 요청의 사용자 세션 키)가
-    있으면 그 키를, 없으면 서버 `OPENAI_API_KEY`를 쓴다.
+    키는 호출 시점에 고른다. 요청 범위 키(`override_openai_runtime`)가 있으면 그 키를,
+    없으면 서버 `OPENAI_API_KEY`를 쓴다.
     """
 
     def __init__(

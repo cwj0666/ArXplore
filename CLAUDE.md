@@ -92,7 +92,7 @@ HF Daily Papers / arXiv
   → PostgreSQL: papers, paper_fulltexts, paper_chunks, paper_embeddings (pgvector)
   → Retrieval (RETRIEVAL_MODE=hybrid 기본: 질의 임베딩 키가 있으면 hybrid, 없거나 실패하면 lexical)
   → LangChain chains (개요·핵심 포인트·상세 요약, 결과 캐시) + LangGraph ReAct Agent + 상세 챗
-  → Django API (데모 모드, rate limit, SSE) → React UI
+  → Django API (공개 접근, IP당 rate limit, SSE) → React UI
 ```
 
 ### Docker Compose 구조
@@ -110,7 +110,7 @@ HF Daily Papers / arXiv
 
 서버 인프라(PostgreSQL, Airflow)는 `docker-compose.server.yml`로 별도 운영합니다. Airflow 서비스 4개는 `x-airflow-common` 앵커로 이미지·환경 변수·볼륨을 공유합니다.
 
-nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API만 Django로 프록시한다. 새 API 경로를 추가하면 nginx location과 `frontend/vite.config.ts` 프록시에 같이 넣어야 한다. SSE 경로(`/papers/assistant/stream/`, `/papers/<id>/chat/stream/`)는 버퍼링을 끈 location을 쓴다. admin 경로는 프록시하지 않는다.
+nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API만 Django로 프록시한다. 새 API 경로를 추가하면 nginx location과 `frontend/vite.config.ts` 프록시에 같이 넣어야 한다. SSE 경로(`/papers/assistant/stream/`, `/papers/<id>/chat/stream/`)는 버퍼링을 끈 location을 쓴다.
 
 의존성 파일: `requirements.txt`(런타임, django 이미지), `requirements-dev.txt`(테스트·린트·노트북), `requirements-airflow.txt`(Airflow 이미지, 공식 constraints와 함께 설치).
 
@@ -127,18 +127,17 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 ### Module Responsibilities
 
 - **`backend/`** — Django 프로젝트 루트 (`manage.py`, `arxplore_web/` 설정, `papers/` 앱)
-  - `papers/api_views.py` — REST 엔드포인트 (인증, 논문 조회·분석·채팅, 즐겨찾기, `assistant/stream/`·`<id>/chat/stream/` SSE). 캐시 없음 + 미로그인은 401 `login_required`, 키 없음은 400 `api_key_required`
-  - `papers/services.py` — 비즈니스 로직 계층 (LLM 체인 호출, AI 요약 캐싱, 로컬 + arXiv 외부 검색을 결합한 관련 논문 합성, 권한, 데모 모드 판단)
-  - `papers/ratelimit.py` — Django cache 기반 분당 고정 윈도 rate limit (429 + `Retry-After`)
-  - `papers/secret_box.py` — 세션에 저장하는 개인 OpenAI 키 암호화(Fernet)
-  - `papers/models.py` — `UserSettings`, `FavoritePaper` (Django ORM)
-  - AI overview/요약 결과는 모델이 아니라 `src/integrations/paper_repository.py`가 PostgreSQL `paper_ai_overviews`, `paper_ai_detailed_summaries` 테이블에 직접 캐싱한다
+  - `papers/api_views.py` — JSON 엔드포인트 (bootstrap, 논문 분석·요약·채팅, `assistant/stream/`·`<id>/chat/stream/` SSE). 서버 `OPENAI_API_KEY`가 없으면 생성·챗은 503
+  - `papers/page_views.py` — React 셸, `list.json`, `<id>/detail.json`
+  - `papers/services.py` — 비즈니스 로직 계층 (LLM 체인 호출, AI 요약 캐싱, 로컬 + arXiv 외부 검색을 결합한 관련 논문 합성, 입력 검증)
+  - `papers/ratelimit.py` — Django cache 기반 클라이언트 IP당 분당 고정 윈도 rate limit (429 + `Retry-After`)
+  - Django ORM 모델·마이그레이션은 없다. AI overview/요약 결과는 `src/integrations/paper_repository.py`가 PostgreSQL `paper_ai_overviews`, `paper_ai_detailed_summaries` 테이블에 직접 캐싱한다
 - **`src/core/`** — LLM 체인, 프롬프트, 상세 요약 그래프, LangGraph 에이전트
 - **`src/integrations/`** — 외부 I/O: PostgreSQL 리포지토리(raw 저장소 포함), HURIDOCS 클라이언트, OpenAI 임베딩, hybrid retriever
 - **`src/pipeline/`** — Airflow DAG 및 prepare-worker가 호출하는 진입점 스크립트
 - **`src/shared/`** — Pydantic `AppSettings` (`.env` 로드), LangSmith 트레이싱
 - **`dags/`** — Airflow DAG 3개 (TaskFlow `@dag`/`@task`로 `src/pipeline/` 호출)
-- **`frontend/`** — React 18 + Vite + TanStack Query + TypeScript. 목록 상태는 URL 쿼리가 원본(`pages/list/listParams.ts`), 화면 이동은 react-router `Link`/`navigate`, 계정 메뉴는 `components/account/AccountMenu.tsx` 공용, 모달은 `helpers/useModalDialog.ts`(Esc·포커스 복귀). 색상은 `styles/global.css`의 `:root` 토큰을 쓴다
+- **`frontend/`** — React 18 + Vite + TanStack Query + TypeScript. 목록 상태는 URL 쿼리가 원본(`pages/list/listParams.ts`), 화면 이동은 react-router `Link`/`navigate`, 모달은 `helpers/useModalDialog.ts`(Esc·포커스 복귀). 색상은 `styles/global.css`의 `:root` 토큰을 쓴다
 
 ### PDF Parsing Strategy
 
@@ -154,7 +153,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 ### Retrieval
 
 제품 경로 선택: `src/core/agent/retrieval.py`의 `retrieve_contexts`. 에이전트 도구와 상세 챗이 공유한다.
-- `RETRIEVAL_MODE=hybrid`(기본)이고 질의 임베딩 키(사용자 세션 키 > 서버 `OPENAI_API_KEY`)가 있으면 hybrid, 키가 없거나 임베딩 호출이 `OpenAIError`로 실패하면 lexical. `RETRIEVAL_MODE=lexical`이면 항상 lexical
+- `RETRIEVAL_MODE=hybrid`(기본)이고 질의 임베딩 키(요청 범위 `override_openai_runtime` 키 > 서버 `OPENAI_API_KEY`)가 있으면 hybrid, 키가 없거나 임베딩 호출이 `OpenAIError`로 실패하면 lexical. `RETRIEVAL_MODE=lexical`이면 항상 lexical
 
 구현: `src/integrations/paper_retriever.py`
 - **Lexical** — PostgreSQL 전문 검색(`english` 설정). 제목·초록·청크 tsvector 생성 컬럼 + GIN 인덱스. 한국어 질의는 거의 맞지 않는다
@@ -177,9 +176,11 @@ SSE 이벤트 계약(`docs/architecture/AGENTS.md` 3절): `chunk`* → `citation
 
 ### Web access model
 
-- `DEMO_MODE=true`(기본): 목록·`detail.json`은 익명 허용. `analyze/`·`summary/`는 캐시가 있으면 누구에게나 `{"cached": true, ...}`, 없으면 미로그인 401 `login_required`, 키 없음 400 `api_key_required`. 챗은 항상 로그인 + 키. bootstrap에 `demo_mode`, `login_required_for`
-- 프론트는 이 응답으로 카드 안에 로그인/설정 안내를 띄운다. 생성 요청은 AbortController로 취소하지만 서버 쪽 생성은 계속될 수 있다
-- rate limit: 인증 `RATE_LIMIT_AUTH_PER_MINUTE`(IP당), LLM `RATE_LIMIT_LLM_PER_MINUTE`(사용자당, 비로그인은 IP). `REDIS_URL`이 없으면 프로세스별 LocMem이라 워커 수만큼 허용량이 늘어난다
+- 계정·로그인·세션·즐겨찾기가 없다. 모든 엔드포인트가 공개이고, LLM·임베딩 호출은 서버 `OPENAI_API_KEY`를 쓴다
+- `analyze/`·`summary/`는 캐시가 있으면 `{"cached": true, ...}`, 없으면 생성해 캐시한 뒤 `{"cached": false, ...}`. 상세 요약 모델은 요청 body의 `model`(허용 목록 밖이면 400). 서버 키가 없으면 생성·챗·에이전트는 503
+- bootstrap(`/bootstrap.json`)은 CSRF 쿠키를 심고 `default_summary_model`, `available_summary_models`만 돌려준다. POST는 `X-CSRFToken` 헤더가 필요하다
+- 생성 요청은 AbortController로 취소하지만 서버 쪽 생성은 계속될 수 있다
+- rate limit은 클라이언트 IP(`RATE_LIMIT_IP_HEADER`) 단위: LLM 4개 엔드포인트가 `RATE_LIMIT_LLM_PER_MINUTE`을 공유, `detail.json`은 `RATE_LIMIT_DETAIL_PER_MINUTE`. `REDIS_URL`이 없으면 프로세스별 LocMem이라 워커 수만큼 허용량이 늘어난다
 
 ### Architectural Contracts (do not break)
 
@@ -204,7 +205,7 @@ POSTGRES_DB / APP_POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD
 서버·worker 필수:
 
 ```
-OPENAI_API_KEY              # prepare-worker 임베딩. 웹 AI 기능은 사용자 개인 키(세션)를 쓴다
+OPENAI_API_KEY              # 웹 AI 기능(개요·요약 생성, 챗, 에이전트, 질의 임베딩)과 prepare-worker 임베딩
 LAYOUT_PARSER_BASE_URL      # 코드 기본값 없음. compose prepare-worker는 비면 http://layout-parser:5060
 TAILSCALE_SERVER_IP         # 서버 compose 포트 바인딩 + setup.sh forward
 AIRFLOW_ADMIN_USER          # Airflow SimpleAuthManager admin 사용자
@@ -215,12 +216,9 @@ AIRFLOW_FERNET_KEY          # 비어 있으면 서버 compose가 실행을 거�
 
 ```
 DJANGO_DEBUG                # 비어 있으면 False. "true"일 때만 켜짐
-DJANGO_SECURE_COOKIES=false # HTTPS 뒤에서만 true
-DJANGO_ADMIN_ENABLED=false / DJANGO_ADMIN_PATH=admin/
-DEMO_MODE=true
-SESSION_KEY_ENCRYPTION_KEY= # 비우면 DJANGO_SECRET_KEY에서 유도. 바꾸면 저장된 세션 키 폐기
+DJANGO_SECURE_COOKIES=false # HTTPS 뒤에서만 true (CSRF 쿠키 Secure)
 REDIS_URL=                  # rate limit 공유 캐시. 비우면 프로세스별 LocMem
-RATE_LIMIT_ENABLED=true / RATE_LIMIT_AUTH_PER_MINUTE=10 / RATE_LIMIT_LLM_PER_MINUTE=30 / RATE_LIMIT_DETAIL_PER_MINUTE=60 / RATE_LIMIT_IP_HEADER=X-Real-IP
+RATE_LIMIT_ENABLED=true / RATE_LIMIT_LLM_PER_MINUTE=30 / RATE_LIMIT_DETAIL_PER_MINUTE=60 / RATE_LIMIT_IP_HEADER=X-Real-IP
 RETRIEVAL_MODE=hybrid       # hybrid | lexical
 VECTOR_MIN_SIMILARITY=0
 AGENT_RECURSION_LIMIT=12    # 최소 4

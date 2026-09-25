@@ -9,19 +9,13 @@ from django.shortcuts import redirect
 from django.views.decorators.http import require_GET
 
 from .ratelimit import rate_limit
-from .services import (
-    AuthenticationRequiredError,
-    PaperNotFoundError,
-    build_paper_detail_payload,
-    build_paper_list_payload,
-    demo_mode_enabled,
-)
+from .services import PaperNotFoundError, build_paper_detail_payload, build_paper_list_payload
 
 logger = logging.getLogger(__name__)
 
 DATA_LOAD_ERROR_MESSAGE = "논문 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 
-detail_rate_limit = rate_limit("detail", limit_setting="RATE_LIMIT_DETAIL_PER_MINUTE", per="ip")
+detail_rate_limit = rate_limit("detail", limit_setting="RATE_LIMIT_DETAIL_PER_MINUTE")
 
 
 def paper_list(request: HttpRequest) -> HttpResponse:
@@ -43,7 +37,6 @@ def paper_list_data(request: HttpRequest) -> JsonResponse:
             sort=request.GET.get("sort", "latest"),
             mode=request.GET.get("mode", "search"),
             page=request.GET.get("page", 1),
-            user=request.user,
         )
     except Exception:
         logger.exception("논문 목록 조회 실패")
@@ -53,8 +46,6 @@ def paper_list_data(request: HttpRequest) -> JsonResponse:
 
 
 def paper_detail(request: HttpRequest, arxiv_id: str) -> HttpResponse:
-    if not demo_mode_enabled() and not getattr(request.user, "is_authenticated", False):
-        return redirect(f"/login/?next=/papers/{arxiv_id}/")
     return _render_react_shell()
 
 
@@ -62,9 +53,7 @@ def paper_detail(request: HttpRequest, arxiv_id: str) -> HttpResponse:
 @detail_rate_limit
 def paper_detail_data(request: HttpRequest, arxiv_id: str) -> JsonResponse:
     try:
-        return JsonResponse(build_paper_detail_payload(arxiv_id, user=request.user))
-    except AuthenticationRequiredError as exc:
-        return JsonResponse({"error": str(exc), "login_required": True}, status=401)
+        return JsonResponse(build_paper_detail_payload(arxiv_id))
     except PaperNotFoundError as exc:
         return JsonResponse({"error": str(exc)}, status=404)
     except Exception:
@@ -73,10 +62,6 @@ def paper_detail_data(request: HttpRequest, arxiv_id: str) -> JsonResponse:
 
 
 def paper_agent(request: HttpRequest) -> HttpResponse:
-    return _render_react_shell()
-
-
-def login_page(request: HttpRequest) -> HttpResponse:
     return _render_react_shell()
 
 

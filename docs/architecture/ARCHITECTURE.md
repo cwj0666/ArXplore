@@ -63,7 +63,7 @@ PostgreSQL(15432), Airflow(18080) 포트는 `TAILSCALE_SERVER_IP`에만 바인�
 
 ### 로컬 서비스 런타임
 
-로컬 `docker-compose.yml`의 기본 서비스는 `arxplore-nginx`, `arxplore-django`다. nginx는 React 빌드를 서빙하고 API 경로만 Django로 프록시하며(SPA 경로는 `index.html`), 보안 헤더와 gzip을 붙인다. SSE 경로는 버퍼링을 끄고 읽기 제한을 300초로 둔다. Django admin 경로는 프록시하지 않는다. Django는 gunicorn(gthread, 워커 4 × 스레드 8)으로 root가 아닌 `app` 사용자로 돌고, nginx는 django의 TCP healthcheck가 통과한 뒤 시작한다. 프론트엔드 수정용 Vite dev server(`arxplore-vite`)는 `dev` 프로필이다.
+로컬 `docker-compose.yml`의 기본 서비스는 `arxplore-nginx`, `arxplore-django`다. nginx는 React 빌드를 서빙하고 API 경로만 Django로 프록시하며(SPA 경로는 `index.html`), 보안 헤더와 gzip을 붙인다. SSE 경로는 버퍼링을 끄고 읽기 제한을 300초로 둔다. Django는 gunicorn(gthread, 워커 4 × 스레드 8)으로 root가 아닌 `app` 사용자로 돌고, nginx는 django의 TCP healthcheck가 통과한 뒤 시작한다. 프론트엔드 수정용 Vite dev server(`arxplore-vite`)는 `dev` 프로필이다.
 
 원격 서버 없이 웹만 띄울 때는 `local-db` 프로필의 `postgres-local`(pgvector/pgvector:pg16, `127.0.0.1:${SERVER_POSTGRES_PORT:-15432}`)을 함께 올린다. 같은 compose 기본 네트워크에 있으므로 django는 `PROD_POSTGRES_HOST=postgres-local:5432`로 접속한다. 수집 계층이 없으므로 이 모드의 DB는 비어 있다.
 
@@ -134,19 +134,17 @@ Airflow가 파싱하는 DAG 정의만 둔다: `daily_collect.py`, `maintenance.p
 ### `backend`
 
 - `backend/arxplore_web/`: Django 설정과 URL. DB 접속은 `src.shared`의 설정을 그대로 쓴다
-- `backend/papers/api_views.py`: 인증, 설정, 즐겨찾기, 분석(POST), 요약, 상세 챗, 에이전트 API와 SSE
+- `backend/arxplore_web/`의 `INSTALLED_APPS`는 `staticfiles`와 `papers`뿐이다. auth·admin·sessions 앱과 Django ORM 모델·마이그레이션이 없고, CSRF 미들웨어는 켜 둔다
+- `backend/papers/api_views.py`: bootstrap, 분석(POST), 요약, 상세 챗, 에이전트 API와 SSE
 - `backend/papers/page_views.py`: React shell과 목록·상세 JSON endpoint
-- `backend/papers/services.py`: LLM 호출, AI 결과 캐싱, 관련 논문 합성, 개인 API 키 처리, 데모 모드 판단
-- `backend/papers/ratelimit.py`: Django cache 기반 분당 rate limit(인증은 IP당, LLM은 사용자당)
-- `backend/papers/secret_box.py`: 세션에 저장하는 개인 API 키 암호화
-- `backend/papers/models.py`: `UserSettings`, `FavoritePaper` (AI 캐시는 모델이 아니라 PostgreSQL 테이블에서 직접 관리)
+- `backend/papers/services.py`: LLM 호출(서버 `OPENAI_API_KEY`), AI 결과 캐싱(PostgreSQL 테이블 직접 관리), 관련 논문 합성, 입력 검증
+- `backend/papers/ratelimit.py`: Django cache 기반 클라이언트 IP당 분당 rate limit
 
 ### `frontend`
 
 - `frontend/src/pages/list/`: 논문 목록. 페이지·정렬·검색어는 URL 쿼리가 원본이다
-- `frontend/src/pages/detail/`: 논문 상세. 개요·상세 요약 카드가 로딩·취소·로그인/키 안내 상태를 가진다
+- `frontend/src/pages/detail/`: 논문 상세. 개요·상세 요약 카드가 로딩·취소·오류 상태를 가진다
 - `frontend/src/pages/assistant/`: 에이전트 채팅
-- `frontend/src/components/account/`: 공용 계정 메뉴와 설정 패널
 - `frontend/src/helpers/`: HTTP(`ApiError`, 429 안내), SSE 클라이언트, 모달 접근성 훅
 
 UI는 API만 소비하고 저장 구조나 외부 연동 코드를 직접 구현하지 않는다.
@@ -182,10 +180,9 @@ PostgreSQL이 유일한 저장소다. 애플리케이션 DB(`APP_POSTGRES_DB`) �
 | `paper_chunks` | `id` BIGSERIAL PK, FK `arxiv_id` -> `papers` (CASCADE) | `chunk_index`, `chunk_text`, `section_title`, `token_count`, `metadata` JSONB(`content_role` 포함), `chunk_vector` tsvector 생성 컬럼(청크 C, `english`) | `UNIQUE(arxiv_id, chunk_index)`, `idx_paper_chunks_chunk_vector` GIN(`chunk_vector`) |
 | `paper_embeddings` | `chunk_id` PK, FK -> `paper_chunks` (CASCADE) | `embedding VECTOR(1536)`, `model_name` | `paper_embeddings_embedding_hnsw` HNSW(`embedding vector_cosine_ops`). pgvector 0.5.0 미만이면 경고만 남기고 생략 |
 | `paper_ai_overviews` | `arxiv_id` PK, FK -> `papers` | `overview`, `key_findings` JSONB, `model`(기록용) | PK만 |
-| `paper_ai_detailed_summaries` | `id` PK, FK `arxiv_id` -> `papers` | `model`, `summary`, `created_by_user_id` | `UNIQUE(arxiv_id, model)` |
+| `paper_ai_detailed_summaries` | `id` PK, FK `arxiv_id` -> `papers` | `model`, `summary` | `UNIQUE(arxiv_id, model)` |
 | `prepare_jobs` | `id` BIGSERIAL PK | `mode`, `target_date`, `status`, `attempt_count`, `worker_id`, `claim_generation`, `claimed_at`, `heartbeat_at`, `next_attempt_at`, `raw_revision`, `pending_refresh`, `payload`/`result` JSONB, `error` | `UNIQUE(mode, target_date)`, `(mode, status, target_date)`, `(status, updated_at DESC)` |
 | `topics`, `topic_papers`, `topic_documents` | - | 이전 토픽 계층의 잔재 | 현재 제품 경로에서 쓰지 않음 |
-| `user_settings`, `favorite_papers`, Django `auth_*`/`django_*` | Django ORM | 요약 모델 선호, 즐겨찾기, 계정·세션 | Django 마이그레이션이 관리 (`favorite_papers`는 `(user, arxiv_id)` 유일) |
 
 raw 저장 규칙:
 
@@ -232,21 +229,21 @@ prepare 단계의 보호 장치:
 | lexical | 폴백(키 없음, 임베딩 호출 `OpenAIError`, `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector + `websearch_to_tsquery`/`plainto_tsquery` `ts_rank_cd`, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌 유사 텍스트 필터, 논문 다양성, 인접 청크 병합 |
 | vector | hybrid 구성 요소 | `paper_embeddings` 코사인 거리, 섹션·`content_role` 감점 후 rerank, `VECTOR_MIN_SIMILARITY` 하한 |
 
-- 질의 임베딩 키는 요청 범위의 사용자 세션 키가 우선이고, 없으면 서버 `OPENAI_API_KEY`를 쓴다
+- 질의 임베딩 키는 서버 `OPENAI_API_KEY`다. `override_openai_runtime`으로 요청 범위 키를 넣으면(평가 스크립트) 그 키가 우선한다
 - FTS 설정이 `english`라 한국어 질의는 lexical에서 거의 맞지 않는다. 키가 없어 lexical로 내려가면 한국어 검색 품질이 크게 떨어진다
 - `references` 판정은 섹션 제목이 참고문헌 제목과 정확히 일치할 때만 참이다(`pdf_parser/section_roles.py`). 같은 규칙을 청커, retriever, SQL이 공유한다
 - 상세 페이지 챗은 같은 경로를 `arxiv_id`로 한정해 호출하고, 결과가 비면 논문의 앞 청크로 대신한다(`retrieval_mode: "first_chunks"`)
 
 ## 9. 에이전트와 상세 챗
 
-- **어시스턴트 페이지**: `src/core/agent/chatbot.py`의 LangGraph ReAct 에이전트(`create_react_agent`, `stream_mode=["messages", "updates"]`). Django `/papers/assistant/stream/`이 `StreamingHttpResponse` + `text/event-stream`으로 내보내고, React는 fetch ReadableStream으로 읽으며 중지 버튼으로 요청을 abort한다. 인증·키·입력 검증은 스트림 시작 전에 끝나서 401/400이 그대로 나간다
+- **어시스턴트 페이지**: `src/core/agent/chatbot.py`의 LangGraph ReAct 에이전트(`create_react_agent`, `stream_mode=["messages", "updates"]`). Django `/papers/assistant/stream/`이 `StreamingHttpResponse` + `text/event-stream`으로 내보내고, React는 fetch ReadableStream으로 읽으며 중지 버튼으로 요청을 abort한다. 입력 검증과 서버 키 확인은 스트림 시작 전에 끝나서 400/503이 JSON으로 그대로 나간다
 - **도구**(`src/core/agent/tools.py`)
   - `search_paper_chunks_tool`: `retrieve_contexts`(hybrid → lexical)로 5개 문맥을 찾아 `[번호] 제목 | arxiv_id | 섹션 | chunk_id` 헤더, 출처 URL, 본문으로 LLM에 넘기고 hit을 요청 범위 레지스트리에 기록한다
   - `get_trending_papers_tool`: 최근 논문 10편을 추천수 순으로 정렬해 돌려준다
 - **가드레일**: `recursion_limit=AGENT_RECURSION_LIMIT`(기본 12). 초과하면 그때까지의 답에 단계 제한 안내를 붙여 끝낸다. 대화 이력은 최근 20개, 메시지당 4,000자로 자른다. 도구 결과는 지시가 아니라 데이터로 다루도록 프롬프트에 규칙이 있다
 - **인용**: 답변 속 마크다운 링크를 도구 hit과 대조해 `citations` 이벤트(`in_answer`)를 한 번 보낸다. 도구 결과에 없는 링크는 서버 로그에 경고로 남긴다
 - **상세 페이지 챗**: `src/core/agent/paper_chat.py`. 초록(1번 출처) + 질문으로 논문 안을 검색한 청크 최대 5개를 넣고 `/papers/<id>/chat/stream/`으로 스트리밍한다. 답변의 `[n]` 번호를 발췌문과 대조해 `citations`를 만든다. 비스트리밍 `/papers/<id>/chat/`도 남아 있다
-- **접근 모델**: `DEMO_MODE=true`(기본)이면 목록·상세 JSON과 캐시된 개요·상세 요약은 익명으로 볼 수 있다. 캐시가 없으면 미로그인 401(`login_required`), 개인 키 없음 400(`api_key_required`)이고, 챗과 에이전트는 항상 로그인 + 키가 필요하다. LLM 호출 엔드포인트는 `RATE_LIMIT_LLM_PER_MINUTE`, 로그인·회원가입은 `RATE_LIMIT_AUTH_PER_MINUTE`로 제한되고 초과 시 429 + `Retry-After`를 돌려준다
+- **접근 모델**: 계정·로그인·세션이 없고 모든 엔드포인트가 공개다. 개요·상세 요약은 캐시가 있으면 그대로, 없으면 서버 `OPENAI_API_KEY`로 생성해 캐시한다. 서버 키가 없으면 생성·챗·에이전트는 503이다. LLM 호출 엔드포인트 4개는 `RATE_LIMIT_LLM_PER_MINUTE`, `detail.json`은 `RATE_LIMIT_DETAIL_PER_MINUTE`로 클라이언트 IP당 제한되고 초과 시 429 + `Retry-After`를 돌려준다
 
 ## 10. `PaperDetailDocument` 계약
 

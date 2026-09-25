@@ -21,8 +21,7 @@ services:
       AIRFLOW_BASE_URL: ${AIRFLOW_BASE_URL:-}
     working_dir: /workspace/backend
     command: >
-      bash -lc "python manage.py migrate --noinput &&
-      python manage.py collectstatic --noinput &&
+      bash -lc "python manage.py collectstatic --noinput &&
       gunicorn -c /workspace/docker/django/gunicorn.conf.py arxplore_web.wsgi:application"
     volumes:
       - django_static:/workspace/backend/staticfiles

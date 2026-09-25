@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, SimpleTestCase
 from django.urls import resolve
 
@@ -32,51 +31,30 @@ def _sse_payloads(body: str) -> list:
     return events
 
 
-class _AuthenticatedUser:
-    is_authenticated = True
-    id = 1
-
-    def get_username(self) -> str:
-        return "tester"
-
-
 class AgentStreamViewTests(SimpleTestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
 
-    def _post_stream(self, *, user, message: str = "hello", api_key: str | None = "sk-user"):
+    def _post_stream(self, *, message: str = "hello"):
         request = self.factory.post(
             STREAM_PATH,
             data=json.dumps({"message": message, "history": []}),
             content_type="application/json",
         )
-        request.user = user
-        request._dont_enforce_csrf_checks = True
-        with (
-            patch.object(api_views, "get_session_api_key", return_value=api_key),
-            patch.object(api_views, "stream_agent_chat") as stream_mock,
-        ):
+        with patch.object(api_views, "stream_agent_chat") as stream_mock:
             response = api_views.paper_agent_stream(request)
         return response, stream_mock
 
-    def test_unauthenticated_request_returns_401(self):
-        response, stream_mock = self._post_stream(user=AnonymousUser())
+    def test_missing_server_api_key_returns_503(self):
+        with patch.object(services, "get_runtime_openai_api_key", return_value=None):
+            response, stream_mock = self._post_stream()
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 503)
         self.assertIn("error", json.loads(response.content))
-        self.assertIs(json.loads(response.content)["login_required"], True)
-        stream_mock.assert_not_called()
-
-    def test_missing_api_key_returns_400(self):
-        response, stream_mock = self._post_stream(user=_AuthenticatedUser(), api_key=None)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(json.loads(response.content)["error"], "개인 API 키를 먼저 등록하세요.")
-        self.assertIs(json.loads(response.content)["api_key_required"], True)
         stream_mock.assert_not_called()
 
     def test_empty_message_returns_400(self):
-        response, stream_mock = self._post_stream(user=_AuthenticatedUser(), message="   ")
+        response, stream_mock = self._post_stream(message="   ")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(json.loads(response.content)["error"], "메시지를 입력하세요.")
@@ -88,12 +66,8 @@ class AgentStreamViewTests(SimpleTestCase):
             data=json.dumps({"message": "hello", "history": [{"role": "user", "content": "hi"}]}),
             content_type="application/json",
         )
-        request.user = _AuthenticatedUser()
 
-        with (
-            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
-            patch.object(api_views, "stream_agent_chat", return_value=iter(["a", "b"])) as stream_mock,
-        ):
+        with patch.object(api_views, "stream_agent_chat", return_value=iter(["a", "b"])) as stream_mock:
             response = api_views.paper_agent_stream(request)
             body = b"".join(response.streaming_content).decode()
 
@@ -105,20 +79,15 @@ class AgentStreamViewTests(SimpleTestCase):
         )
         prepared = stream_mock.call_args.args[0]
         self.assertEqual(prepared.message, "hello")
-        self.assertEqual(prepared.api_key, "sk-user")
         self.assertEqual(prepared.history, [("user", "hi")])
 
     def test_citations_event_is_sent_once_before_done(self):
         request = self.factory.post(
             STREAM_PATH, data=json.dumps({"message": "hello", "history": []}), content_type="application/json"
         )
-        request.user = _AuthenticatedUser()
         events = iter([{"chunk": "a"}, {"citations": [CITATION]}])
 
-        with (
-            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
-            patch.object(api_views, "stream_agent_chat", return_value=events),
-        ):
+        with patch.object(api_views, "stream_agent_chat", return_value=events):
             response = api_views.paper_agent_stream(request)
             payloads = _sse_payloads(b"".join(response.streaming_content).decode())
 
@@ -128,16 +97,12 @@ class AgentStreamViewTests(SimpleTestCase):
         request = self.factory.post(
             STREAM_PATH, data=json.dumps({"message": "hello", "history": []}), content_type="application/json"
         )
-        request.user = _AuthenticatedUser()
 
         def failing():
             yield {"chunk": "a"}
             raise RuntimeError("db password leaked in message")
 
-        with (
-            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
-            patch.object(api_views, "stream_agent_chat", return_value=failing()),
-        ):
+        with patch.object(api_views, "stream_agent_chat", return_value=failing()):
             response = api_views.paper_agent_stream(request)
             payloads = _sse_payloads(b"".join(response.streaming_content).decode())
 
@@ -152,19 +117,15 @@ class PaperChatStreamViewTests(SimpleTestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
 
-    def _post(
-        self, *, user, body: dict | None = None, api_key: str | None = "sk-user", paper: dict | None = None, events=None
-    ):
+    def _post(self, *, body: dict | None = None, paper: dict | None = None, events=None):
         request = self.factory.post(
             PAPER_STREAM_PATH,
             data=json.dumps(body if body is not None else {"message": "loss?", "history": []}),
             content_type="application/json",
         )
-        request.user = user
         repo = MagicMock()
         repo.get_paper.return_value = paper
         with (
-            patch.object(api_views, "get_session_api_key", return_value=api_key),
             patch.object(services, "get_paper_repository", return_value=repo),
             patch.object(api_views, "stream_paper_chat", return_value=iter(events or [])) as stream_mock,
         ):
@@ -178,23 +139,15 @@ class PaperChatStreamViewTests(SimpleTestCase):
 
     def test_get_is_not_allowed(self):
         request = self.factory.get(PAPER_STREAM_PATH)
-        request.user = _AuthenticatedUser()
 
         self.assertEqual(api_views.paper_chat_stream(request, "2401.00001").status_code, 405)
 
-    def test_unauthenticated_returns_401(self):
-        response, _, stream_mock = self._post(user=AnonymousUser(), paper={"arxiv_id": "2401.00001"})
+    def test_missing_server_api_key_returns_503(self):
+        with patch.object(services, "get_runtime_openai_api_key", return_value="  "):
+            response, content, stream_mock = self._post(paper={"arxiv_id": "2401.00001"})
 
-        self.assertEqual(response.status_code, 401)
-        stream_mock.assert_not_called()
-
-    def test_missing_api_key_returns_400(self):
-        response, content, stream_mock = self._post(
-            user=_AuthenticatedUser(), api_key=None, paper={"arxiv_id": "2401.00001"}
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(json.loads(content)["error"], "개인 API 키를 먼저 등록하세요.")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("error", json.loads(content))
         stream_mock.assert_not_called()
 
     def test_invalid_body_returns_400(self):
@@ -203,14 +156,12 @@ class PaperChatStreamViewTests(SimpleTestCase):
             {"message": "hi", "history": "nope"},
             {"message": "x" * 4001, "history": []},
         ):
-            response, _, stream_mock = self._post(
-                user=_AuthenticatedUser(), body=body, paper={"arxiv_id": "2401.00001"}
-            )
+            response, _, stream_mock = self._post(body=body, paper={"arxiv_id": "2401.00001"})
             self.assertEqual(response.status_code, 400, body)
             stream_mock.assert_not_called()
 
     def test_unknown_paper_returns_404(self):
-        response, content, stream_mock = self._post(user=_AuthenticatedUser(), paper=None)
+        response, content, stream_mock = self._post(paper=None)
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("error", json.loads(content))
@@ -221,7 +172,6 @@ class PaperChatStreamViewTests(SimpleTestCase):
         events = [{"chunk": "답"}, {"chunk": "변 [2]"}, {"citations": [CITATION]}]
 
         response, content, stream_mock = self._post(
-            user=_AuthenticatedUser(),
             body={"message": "loss?", "history": [{"role": "assistant", "content": "prev"}]},
             paper=paper,
             events=events,
@@ -246,7 +196,6 @@ class PaperChatStreamViewTests(SimpleTestCase):
         ]
 
         _, _, stream_mock = self._post(
-            user=_AuthenticatedUser(),
             body={"message": "loss?", "history": history},
             paper=paper,
             events=[{"chunk": "ok"}],
@@ -280,13 +229,9 @@ class PaperChatViewTests(SimpleTestCase):
             data=json.dumps({"message": "loss?", "history": []}),
             content_type="application/json",
         )
-        request.user = _AuthenticatedUser()
         payload = {"answer": "답변", "citations": [CITATION], "retrieval_mode": "hybrid"}
 
-        with (
-            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
-            patch.object(api_views, "answer_paper_chat", return_value=payload),
-        ):
+        with patch.object(api_views, "answer_paper_chat", return_value=payload):
             response = api_views.paper_chat(request, "2401.00001")
 
         self.assertEqual(response.status_code, 200)
@@ -299,7 +244,6 @@ class PaperAnalyzeViewTests(SimpleTestCase):
 
     def test_get_is_not_allowed(self):
         request = self.factory.get("/papers/2401.00001/analyze/")
-        request.user = _AuthenticatedUser()
 
         with patch.object(api_views, "get_paper_analysis") as analysis_mock:
             response = api_views.paper_analyze(request, "2401.00001")
@@ -309,24 +253,19 @@ class PaperAnalyzeViewTests(SimpleTestCase):
 
     def test_post_calls_analysis(self):
         request = self.factory.post("/papers/2401.00001/analyze/")
-        request.user = _AuthenticatedUser()
         payload = {"overview": "ok", "key_findings": [], "cached": True}
 
-        with (
-            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
-            patch.object(api_views, "get_paper_analysis", return_value=payload) as analysis_mock,
-        ):
+        with patch.object(api_views, "get_paper_analysis", return_value=payload) as analysis_mock:
             response = api_views.paper_analyze(request, "2401.00001")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content), payload)
-        analysis_mock.assert_called_once()
+        analysis_mock.assert_called_once_with("2401.00001")
 
 
 class PaperSummaryViewTests(SimpleTestCase):
     def test_get_is_not_allowed(self):
         request = RequestFactory().get("/papers/2401.00001/summary/")
-        request.user = _AuthenticatedUser()
 
         with patch.object(api_views, "get_paper_summary") as summary_mock:
             response = api_views.paper_summary(request, "2401.00001")
@@ -338,10 +277,8 @@ class PaperSummaryViewTests(SimpleTestCase):
         request = RequestFactory().post(
             "/papers/2401.00001/summary/", data=json.dumps({"model": "gpt-5-mini"}), content_type="application/json"
         )
-        request.user = _AuthenticatedUser()
 
         with (
-            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
             patch.object(api_views, "get_paper_summary", side_effect=ValueError("internal detail /srv/secret")),
             self.assertLogs("papers.api_views", level="ERROR"),
         ):

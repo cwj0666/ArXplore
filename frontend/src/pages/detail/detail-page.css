@@ -51,11 +51,6 @@
   justify-self: end;
 }
 
-.detail-page .topbar-account {
-  position: relative;
-  margin-left: 4px;
-}
-
 .detail-page .layout-ctrl-btn {
   background: var(--color-surface-muted);
   border: 1px solid #d7dbe0;
@@ -177,10 +172,6 @@
   color: #7b8190;
   font-size: 0.92rem;
   white-space: nowrap;
-}
-
-.detail-page .hero-favorite-btn {
-  min-width: 108px;
 }
 
 .detail-page .paper-side-item {
@@ -772,8 +763,7 @@
   line-height: 1.5;
 }
 
-.detail-page .ai-secondary-btn,
-.detail-page .ai-access-action {
+.detail-page .ai-secondary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -794,16 +784,6 @@
   background: var(--color-surface-muted);
 }
 
-.detail-page .ai-access-action {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: var(--color-on-primary);
-}
-
-.detail-page .ai-access-action:hover {
-  background: var(--color-primary-hover);
-}
-
 .detail-page .ai-status-block {
   display: flex;
   flex-direction: column;
@@ -814,36 +794,6 @@
 .detail-page .ai-status-block .error-box,
 .detail-page .ai-status-block .info-box {
   width: 100%;
-}
-
-.detail-page .ai-access-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 16px;
-  border: 1px dashed var(--color-border-strong);
-  border-radius: 10px;
-  background: var(--color-surface-muted);
-  color: var(--color-text-subtle);
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-.detail-page .ai-access-notice p {
-  flex: 1;
-  min-width: 200px;
-}
-
-.detail-page .ai-access-notice-compact {
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 0.82rem;
-}
-
-.detail-page .chat-input-locked {
-  display: block;
 }
 
 @media (max-width: 1100px) {

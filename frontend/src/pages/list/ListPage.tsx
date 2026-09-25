@@ -1,17 +1,12 @@
 import { startTransition, useEffect, useState } from "react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
-import { AccountMenu, type SettingsTab } from "../../components/account/AccountMenu";
 import { ListPagination } from "../../components/list/ListPagination";
 import { ListSearchPanel } from "../../components/list/ListSearchPanel";
 import { PaperCard } from "../../components/list/PaperCard";
-import { toggleFavorite } from "../../helpers/accountApi";
-import { ApiError } from "../../helpers/http";
-import { buildLoginPath } from "../../helpers/loginPath";
 import { fetchPaperList } from "./listApi";
 import { buildListHref, buildListSearchParams, type ListParams, normalizeSort, readListParams } from "./listParams";
 import type { PaperListResponse, SearchMode, SortOption } from "./listTypes";
-import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
 import "./listPage.css";
 
 const SORT_OPTIONS = [
@@ -19,15 +14,8 @@ const SORT_OPTIONS = [
   { value: "upvotes", label: "추천순" },
 ] as const;
 
-interface ListPageProps {
-  session: BootstrapPayload;
-  onOpenSettings: (tab?: SettingsTab) => void;
-  onLogout: () => void;
-}
-
-export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
+export function ListPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const params = readListParams(searchParams);
@@ -77,8 +65,6 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
     }
   };
 
-  const requireLogin = () => navigate(buildLoginPath(`${location.pathname}${location.search}`));
-
   const handleSearchSubmit = () => {
     const trimmed = queryInput.trim();
     if (mode === "search") {
@@ -101,31 +87,6 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
     updateParams({ mode: nextMode }, { replace: true });
   };
 
-  const handleFavoriteToggle = async (arxivId: string) => {
-    let payload: FavoriteTogglePayload;
-    try {
-      payload = await toggleFavorite(arxivId);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        requireLogin();
-      }
-      return;
-    }
-    setListData((previous) => {
-      if (!previous) {
-        return previous;
-      }
-      return {
-        ...previous,
-        items: previous.items.map((paper) =>
-          paper.arxiv_id === arxivId
-            ? { ...paper, is_favorited: payload.is_favorited ?? false }
-            : paper,
-        ),
-      };
-    });
-  };
-
   const showResultSection = !isListLoading && !listError && !!listData && listData.total_items > 0;
   const totalPages = Math.max(1, listData?.total_pages ?? 1);
   const currentPage = listData?.page ?? page;
@@ -135,16 +96,9 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
     <div className="list-page">
       <div className="container">
         <header className="list-hero">
-          <div className="list-hero-spacer" aria-hidden="true" />
           <h1>
             <Link to="/">ArXplore</Link>
           </h1>
-          <AccountMenu
-            className="list-hero-account"
-            session={session}
-            onOpenSettings={onOpenSettings}
-            onLogout={onLogout}
-          />
         </header>
 
         <ListSearchPanel
@@ -193,15 +147,7 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
 
             <section className="paper-grid" aria-label="논문 목록">
               {resultData.items.map((paper) => (
-                <PaperCard
-                  key={paper.arxiv_id}
-                  paper={paper}
-                  canFavorite={session.is_authenticated}
-                  onToggleFavorite={(arxivId) => {
-                    void handleFavoriteToggle(arxivId);
-                  }}
-                  onRequireLogin={requireLogin}
-                />
+                <PaperCard key={paper.arxiv_id} paper={paper} />
               ))}
             </section>
 

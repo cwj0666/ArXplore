@@ -1,5 +1,5 @@
 import { toInternalPaperHref } from "../../helpers/assistant/renderAssistantContent";
-import { isSameOriginPathname } from "../../helpers/safeRedirect";
+import { isSameOriginPathname } from "../../helpers/safeUrl";
 import type { Citation } from "../../types/assistant";
 import "./chat-content.css";
 

@@ -25,7 +25,6 @@ DATABASES = {
     }
 }
 
-PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 STATICFILES_DIRS = []
 
 CACHES = {
@@ -35,5 +34,3 @@ CACHES = {
     }
 }
 RATE_LIMIT_ENABLED = False
-DEMO_MODE = True
-ADMIN_ENABLED = False

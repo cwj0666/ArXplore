@@ -13,7 +13,6 @@ export interface PaperDetail {
   published_at: string;
   upvotes?: number | null;
   pdf_url: string;
-  is_favorited?: boolean;
   related_papers?: RelatedPaper[];
 }
 
@@ -25,7 +24,6 @@ export interface RelatedPaper {
   published_at: string | null;
   upvotes?: number | null;
   pdf_url?: string | null;
-  is_favorited?: boolean;
   source?: "local" | "arxiv" | string;
   relation_score?: number;
 }
@@ -54,12 +52,9 @@ export interface ChatResponse {
   error?: string;
 }
 
-export type AiAccessReason = "login" | "api_key";
-
 export type AiSectionState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "ready" }
-  | { status: "denied"; reason: AiAccessReason }
   | { status: "error"; message: string }
   | { status: "cancelled" };

@@ -1,6 +1,5 @@
 import type { AiSectionState } from "../../pages/detail/detail-types";
 import type { SummaryBlock } from "../../pages/detail/detail-summary";
-import { AiAccessNotice } from "./AiAccessNotice";
 
 const CANCELLED_TEXT =
   "요청을 취소했습니다. 서버에서는 처리가 계속될 수 있어서, 잠시 후 다시 시도하면 저장된 결과가 바로 표시될 수 있습니다.";
@@ -46,19 +45,15 @@ function AiProgress({ message, onCancel }: AiProgressProps) {
 
 interface AiStatusBodyProps {
   state: AiSectionState;
-  feature: "overview" | "summary";
   loadingMessage: string;
   onCancel: () => void;
   onRetry: () => void;
-  onOpenSettings: () => void;
 }
 
-function AiStatusBody({ state, feature, loadingMessage, onCancel, onRetry, onOpenSettings }: AiStatusBodyProps) {
+function AiStatusBody({ state, loadingMessage, onCancel, onRetry }: AiStatusBodyProps) {
   switch (state.status) {
     case "loading":
       return <AiProgress message={loadingMessage} onCancel={onCancel} />;
-    case "denied":
-      return <AiAccessNotice feature={feature} reason={state.reason} onOpenSettings={onOpenSettings} />;
     case "error":
       return (
         <div className="ai-status-block">
@@ -95,10 +90,9 @@ interface OverviewCardProps {
   overviewText: string;
   onCancel: () => void;
   onRetry: () => void;
-  onOpenSettings: () => void;
 }
 
-export function OverviewCard({ state, overviewText, onCancel, onRetry, onOpenSettings }: OverviewCardProps) {
+export function OverviewCard({ state, overviewText, onCancel, onRetry }: OverviewCardProps) {
   if (state.status === "idle") {
     return null;
   }
@@ -120,11 +114,9 @@ export function OverviewCard({ state, overviewText, onCancel, onRetry, onOpenSet
       ) : null}
       <AiStatusBody
         state={state}
-        feature="overview"
         loadingMessage="AI가 논문을 분석하고 있습니다. 처음 분석하는 논문은 시간이 조금 걸립니다."
         onCancel={onCancel}
         onRetry={onRetry}
-        onOpenSettings={onOpenSettings}
       />
     </section>
   );
@@ -156,10 +148,9 @@ interface SummaryCardProps {
   blocks: SummaryBlock[];
   onCancel: () => void;
   onRetry: () => void;
-  onOpenSettings: () => void;
 }
 
-export function SummaryCard({ state, blocks, onCancel, onRetry, onOpenSettings }: SummaryCardProps) {
+export function SummaryCard({ state, blocks, onCancel, onRetry }: SummaryCardProps) {
   if (state.status === "idle") {
     return null;
   }
@@ -183,11 +174,9 @@ export function SummaryCard({ state, blocks, onCancel, onRetry, onOpenSettings }
       {state.status === "ready" && !showBlocks ? <div className="info-box">생성된 요약이 없습니다.</div> : null}
       <AiStatusBody
         state={state}
-        feature="summary"
         loadingMessage="AI가 상세 요약을 만들고 있습니다. 섹션별로 요약하므로 시간이 걸릴 수 있습니다."
         onCancel={onCancel}
         onRetry={onRetry}
-        onOpenSettings={onOpenSettings}
       />
     </section>
   );

@@ -9,7 +9,6 @@ export interface PaperListItem {
   published_at?: string | null;
   upvotes?: number | null;
   pdf_url?: string | null;
-  is_favorited?: boolean;
 }
 
 export interface PaperListResponse {

@@ -1,4 +1,4 @@
-"""Django cache 기반 고정 윈도 rate limiter.
+"""Django cache 기반 고정 윈도 rate limiter. 클라이언트 IP마다 따로 센다.
 
 카운터는 `default` 캐시에 저장한다. LocMemCache는 프로세스마다 따로라서 gunicorn worker가 N개면
 실제 허용량이 N배가 된다. 여러 프로세스가 한도를 공유하려면 REDIS_URL로 Redis 캐시를 지정한다.
@@ -19,10 +19,8 @@ WINDOW_SECONDS = 60
 RATE_LIMITED_MESSAGE = "요청이 너무 많습니다. {retry_after}초 후 다시 시도하세요."
 
 
-def rate_limit(scope: str, *, limit_setting: str, per: str) -> Callable:
-    """`per`는 "ip"(클라이언트 IP) 또는 "user"(로그인 사용자, 비로그인은 IP)."""
-    if per not in {"ip", "user"}:
-        raise ValueError(f"unsupported rate limit identity: {per}")
+def rate_limit(scope: str, *, limit_setting: str) -> Callable:
+    """`scope` 안에서 클라이언트 IP당 분당 `limit_setting` 설정값만큼 허용하고, 넘으면 429를 돌려준다."""
 
     def decorator(view: Callable) -> Callable:
         @functools.wraps(view)
@@ -30,7 +28,7 @@ def rate_limit(scope: str, *, limit_setting: str, per: str) -> Callable:
             if getattr(settings, "RATE_LIMIT_ENABLED", True):
                 retry_after = register_hit(
                     scope,
-                    _identity(request, per),
+                    f"ip:{client_ip(request)}",
                     limit=int(getattr(settings, limit_setting)),
                 )
                 if retry_after is not None:
@@ -73,10 +71,3 @@ def client_ip(request: HttpRequest) -> str:
         if forwarded:
             return forwarded
     return request.META.get("REMOTE_ADDR") or "unknown"
-
-
-def _identity(request: HttpRequest, per: str) -> str:
-    user = getattr(request, "user", None)
-    if per == "user" and getattr(user, "is_authenticated", False):
-        return f"user:{getattr(user, 'pk', None) or user.get_username()}"
-    return f"ip:{client_ip(request)}"

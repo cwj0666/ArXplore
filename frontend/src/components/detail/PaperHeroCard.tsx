@@ -2,10 +2,6 @@ import type { PaperDetail } from "../../pages/detail/detail-types";
 
 interface PaperHeroCardProps {
   paper: PaperDetail;
-  isFavorited: boolean;
-  canFavorite: boolean;
-  onToggleFavorite: () => void;
-  onRequireLogin: () => void;
 }
 
 function formatPublishedAt(raw: string): string {
@@ -22,7 +18,7 @@ function authorsToText(authors: PaperDetail["authors"]): string {
   return authors;
 }
 
-export function PaperHeroCard({ paper, isFavorited, canFavorite, onToggleFavorite, onRequireLogin }: PaperHeroCardProps) {
+export function PaperHeroCard({ paper }: PaperHeroCardProps) {
   return (
     <div className="card">
       <div className="paper-hero">
@@ -34,26 +30,6 @@ export function PaperHeroCard({ paper, isFavorited, canFavorite, onToggleFavorit
           </div>
         </div>
         <div className="paper-hero-side">
-          <button
-            type="button"
-            className={`paper-favorite-btn ${isFavorited ? "active" : ""}`}
-            onClick={canFavorite ? onToggleFavorite : onRequireLogin}
-            aria-label={isFavorited ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill={isFavorited ? "currentColor" : "none"}
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
-            </svg>
-          </button>
           <div className="paper-side-item">
             <svg
               width="14"

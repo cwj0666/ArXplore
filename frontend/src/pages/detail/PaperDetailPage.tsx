@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, useLocation, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
-import type { SettingsTab } from "../../components/account/AccountMenu";
 import {
   AbstractCard,
   FindingsCard,
@@ -14,25 +13,20 @@ import { PaperHeroCard } from "../../components/detail/PaperHeroCard";
 import { PdfPanel } from "../../components/detail/PdfPanel";
 import { RelatedPapersCard } from "../../components/detail/RelatedPapersCard";
 import { SummaryModelDialog } from "../../components/detail/SummaryModelDialog";
-import { toggleFavorite } from "../../helpers/accountApi";
 import { ApiError, getErrorMessage } from "../../helpers/http";
-import { buildLoginPath } from "../../helpers/loginPath";
-import type { BootstrapPayload, FavoriteTogglePayload } from "../../types/app";
+import type { BootstrapPayload } from "../../types/app";
 import {
   fetchPaperAnalysis,
   fetchPaperDetail,
   fetchPaperSummary,
 } from "./detail-api";
 import { formatSummaryBlocks, type SummaryBlock } from "./detail-summary";
-import type { AiAccessReason, AiSectionState, PaperDetail } from "./detail-types";
+import type { AiSectionState, PaperDetail } from "./detail-types";
 import "./detail-page.css";
 
 
 interface PaperDetailPageProps {
-  session: BootstrapPayload;
-  onRequireLogin: () => void;
-  onOpenSettings: (tab?: SettingsTab) => void;
-  onLogout: () => void;
+  bootstrap: BootstrapPayload;
 }
 
 
@@ -47,39 +41,11 @@ function describeRequestError(error: unknown, prefix: string): string {
 }
 
 
-function payloadFlag(error: ApiError, key: string): boolean {
-  const payload = error.payload;
-  return Boolean(payload && typeof payload === "object" && (payload as Record<string, unknown>)[key]);
-}
-
-
-function classifyAccessError(error: unknown): AiAccessReason | null {
-  if (!(error instanceof ApiError)) {
-    return null;
-  }
-  if (error.status === 401) {
-    return "login";
-  }
-  if (error.status === 400 && payloadFlag(error, "api_key_required")) {
-    return "api_key";
-  }
-  return null;
-}
-
-
-export function PaperDetailPage({
-  session,
-  onRequireLogin,
-  onOpenSettings,
-  onLogout,
-}: PaperDetailPageProps) {
+export function PaperDetailPage({ bootstrap }: PaperDetailPageProps) {
   const { arxivId = "" } = useParams<{ arxivId: string }>();
-  const location = useLocation();
-  const canUseAi = session.is_authenticated && session.has_personal_api_key;
 
   const [paper, setPaper] = useState<PaperDetail | null>(null);
   const [pageError, setPageError] = useState("");
-  const [pageLoginRequired, setPageLoginRequired] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [pdfVisible, setPdfVisible] = useState(false);
 
@@ -89,7 +55,7 @@ export function PaperDetailPage({
 
   const [summaryState, setSummaryState] = useState<AiSectionState>(IDLE);
   const [summaryBlocks, setSummaryBlocks] = useState<SummaryBlock[]>([]);
-  const [selectedSummaryModel, setSelectedSummaryModel] = useState(session.preferred_summary_model);
+  const [selectedSummaryModel, setSelectedSummaryModel] = useState(bootstrap.default_summary_model);
   const [summaryModelPickerOpen, setSummaryModelPickerOpen] = useState(false);
 
   const analysisControllerRef = useRef<AbortController | null>(null);
@@ -105,15 +71,10 @@ export function PaperDetailPage({
   }, []);
 
   useEffect(() => {
-    setSelectedSummaryModel(session.preferred_summary_model);
-  }, [session.preferred_summary_model]);
-
-  useEffect(() => {
     const controller = new AbortController();
 
     abortPending();
     setPageError("");
-    setPageLoginRequired(false);
     setPaper(null);
     setPdfVisible(false);
     setAnalysisState(IDLE);
@@ -142,10 +103,6 @@ export function PaperDetailPage({
         if (controller.signal.aborted) {
           return;
         }
-        if (error instanceof ApiError && error.status === 401) {
-          setPageLoginRequired(true);
-          return;
-        }
         setPageError(describeRequestError(error, "데이터 로드 실패"));
       })
       .finally(() => {
@@ -158,7 +115,7 @@ export function PaperDetailPage({
       controller.abort();
       abortPending();
     };
-  }, [abortPending, arxivId, session.is_authenticated]);
+  }, [abortPending, arxivId]);
 
   const paperId = paper?.arxiv_id ?? "";
 
@@ -189,12 +146,7 @@ export function PaperDetailPage({
         setAnalysisState({ status: "cancelled" });
         return;
       }
-      const reason = classifyAccessError(error);
-      setAnalysisState(
-        reason
-          ? { status: "denied", reason }
-          : { status: "error", message: describeRequestError(error, "분석 요청 실패") },
-      );
+      setAnalysisState({ status: "error", message: describeRequestError(error, "분석 요청 실패") });
     } finally {
       if (isCurrent()) {
         analysisControllerRef.current = null;
@@ -209,7 +161,7 @@ export function PaperDetailPage({
       return;
     }
     void runAnalysis(paperId);
-  }, [analysisReady, canUseAi, paperId, runAnalysis, session.is_authenticated]);
+  }, [analysisReady, paperId, runAnalysis]);
 
   const runSummary = useCallback(async (targetId: string, model: string) => {
     summaryControllerRef.current?.abort();
@@ -237,12 +189,7 @@ export function PaperDetailPage({
         setSummaryState({ status: "cancelled" });
         return;
       }
-      const reason = classifyAccessError(error);
-      setSummaryState(
-        reason
-          ? { status: "denied", reason }
-          : { status: "error", message: describeRequestError(error, "요약 생성 실패") },
-      );
+      setSummaryState({ status: "error", message: describeRequestError(error, "요약 생성 실패") });
     } finally {
       if (isCurrent()) {
         summaryControllerRef.current = null;
@@ -251,11 +198,7 @@ export function PaperDetailPage({
   }, []);
 
   const summaryLoading = summaryState.status === "loading";
-  const summaryButtonLabel = !canUseAi
-    ? "저장된 상세요약 보기"
-    : summaryBlocks.length > 0
-      ? "다른 모델로 상세요약"
-      : "상세요약 생성하기";
+  const summaryButtonLabel = summaryBlocks.length > 0 ? "다른 모델로 상세요약" : "상세요약 생성하기";
 
   const handleConfirmSummary = () => {
     if (!paperId) {
@@ -264,27 +207,6 @@ export function PaperDetailPage({
     setSummaryModelPickerOpen(false);
     void runSummary(paperId, selectedSummaryModel);
   };
-
-  const handleFavoriteToggle = async (targetId: string) => {
-    let payload: FavoriteTogglePayload;
-    try {
-      payload = await toggleFavorite(targetId);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        onRequireLogin();
-      }
-      return;
-    }
-    setPaper((previous) =>
-      previous ? { ...previous, is_favorited: payload.is_favorited ?? false } : previous,
-    );
-  };
-
-  const openSettings = () => onOpenSettings("settings");
-
-  if (pageLoginRequired) {
-    return <Navigate replace to={buildLoginPath(`${location.pathname}${location.search}`)} />;
-  }
 
   if (pageError) {
     return (
@@ -316,12 +238,6 @@ export function PaperDetailPage({
     );
   }
 
-  const chatAccess: AiAccessReason | null = !session.is_authenticated
-    ? "login"
-    : !session.has_personal_api_key
-      ? "api_key"
-      : null;
-
   return (
     <div className="detail-page">
       <DetailTopBar
@@ -329,18 +245,14 @@ export function PaperDetailPage({
         summaryLoading={summaryLoading}
         summaryLabel={summaryButtonLabel}
         showSummaryAction
-        session={session}
         onViewPdf={() => setPdfVisible(true)}
         onGenerateSummary={() => setSummaryModelPickerOpen(true)}
-        onOpenSettings={onOpenSettings}
-        onLogout={onLogout}
       />
 
       <SummaryModelDialog
         open={summaryModelPickerOpen}
-        models={session.available_summary_models}
+        models={bootstrap.available_summary_models}
         selectedModel={selectedSummaryModel}
-        confirmLabel={canUseAi ? "생성" : "보기"}
         onSelectModel={setSelectedSummaryModel}
         onConfirm={handleConfirmSummary}
         onClose={() => setSummaryModelPickerOpen(false)}
@@ -354,20 +266,13 @@ export function PaperDetailPage({
         />
 
         <main className="main-panel">
-          <PaperHeroCard
-            paper={paper}
-            isFavorited={Boolean(paper.is_favorited)}
-            canFavorite={session.is_authenticated}
-            onToggleFavorite={() => { void handleFavoriteToggle(paper.arxiv_id); }}
-            onRequireLogin={onRequireLogin}
-          />
+          <PaperHeroCard paper={paper} />
 
           <OverviewCard
             state={analysisState}
             overviewText={overview}
             onCancel={() => analysisControllerRef.current?.abort()}
             onRetry={() => void runAnalysis(paper.arxiv_id)}
-            onOpenSettings={openSettings}
           />
           {analysisReady ? <FindingsCard findings={findings} /> : null}
           <SummaryCard
@@ -375,7 +280,6 @@ export function PaperDetailPage({
             blocks={summaryBlocks}
             onCancel={() => summaryControllerRef.current?.abort()}
             onRetry={() => void runSummary(paper.arxiv_id, selectedSummaryModel)}
-            onOpenSettings={openSettings}
           />
           <AbstractCard abstractText={paper.abstract} />
         </main>
@@ -387,7 +291,7 @@ export function PaperDetailPage({
         </div>
       ) : null}
 
-      <ChatPanel arxivId={paper.arxiv_id} access={chatAccess} onOpenSettings={openSettings} />
+      <ChatPanel arxivId={paper.arxiv_id} />
     </div>
   );
 }

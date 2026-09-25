@@ -196,20 +196,20 @@ class TestEmbeddingKeyResolution:
         )
         return EmbeddingClient(settings=settings)
 
-    def test_session_key_wins_over_server_key(self):
+    def test_request_key_wins_over_server_key(self):
         client = self._client("sk-server")
 
-        with override_openai_runtime(api_key="sk-session"):
-            assert client.resolve_api_key() == "sk-session"
-            assert client._get_client().api_key == "sk-session"
+        with override_openai_runtime(api_key="sk-request"):
+            assert client.resolve_api_key() == "sk-request"
+            assert client._get_client().api_key == "sk-request"
 
-    def test_server_key_is_used_without_session_key(self):
+    def test_server_key_is_used_without_request_key(self):
         client = self._client("sk-server")
 
         assert client.resolve_api_key() == "sk-server"
         assert client._get_client().api_key == "sk-server"
 
-    def test_blank_session_key_falls_back_to_server_key(self):
+    def test_blank_request_key_falls_back_to_server_key(self):
         client = self._client("sk-server")
 
         with override_openai_runtime(api_key="  "):
@@ -238,9 +238,9 @@ class TestEmbeddingKeyResolution:
         assert (contexts, mode) == ([], "lexical")
         retriever.search_paper_contexts_by_hybrid.assert_not_called()
 
-    def test_session_key_alone_enables_hybrid(self):
+    def test_request_key_alone_enables_hybrid(self):
         retriever = MagicMock()
         retriever.embedding_client = self._client(None)
 
-        with override_openai_runtime(api_key="sk-session"):
+        with override_openai_runtime(api_key="sk-request"):
             assert retrieval.resolve_retrieval_mode(retriever) == "hybrid"

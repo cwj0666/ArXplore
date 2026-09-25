@@ -313,11 +313,11 @@ def test_agent_tool_hits_are_collected_across_graph_threads():
         seen["key"] = get_runtime_openai_api_key()
         return original(*args, **kwargs)
 
-    with patch.object(tools, "retrieve_contexts", side_effect=spy), override_openai_runtime(api_key="sk-session"):
+    with patch.object(tools, "retrieve_contexts", side_effect=spy), override_openai_runtime(api_key="sk-request"):
         events = _run_agent(model, retriever)
 
     assert seen["thread"] != threading.get_ident()
-    assert seen["key"] == "sk-session"
+    assert seen["key"] == "sk-request"
     citations = events[-1]["citations"]
     assert [citation["chunk_id"] for citation in citations] == [42, 43]
     assert all(citation["in_answer"] is False for citation in citations)
@@ -469,19 +469,12 @@ def test_record_tool_hits_outside_collection_is_noop():
     assert hits == [{"arxiv_id": "y"}]
 
 
-class _User:
-    is_authenticated = True
-
-    def get_username(self) -> str:
-        return "tester"
-
-
 class TestHistoryCap:
     def test_history_is_capped_to_last_20_messages_and_4000_chars(self):
         history = [{"role": "user", "content": f"m{i}"} for i in range(30)]
         history[-1]["content"] = "x" * 5000
 
-        prepared = services.prepare_agent_chat("질문", history, user=_User(), session_api_key="sk-user")
+        prepared = services.prepare_agent_chat("질문", history)
 
         assert len(prepared.history) == services.CHAT_HISTORY_MAX_MESSAGES
         assert prepared.history[0] == ("user", "m10")
@@ -496,18 +489,20 @@ class TestHistoryCap:
             "not a dict",
         ]
 
-        prepared = services.prepare_agent_chat("질문", history, user=_User(), session_api_key="sk-user")
+        prepared = services.prepare_agent_chat("질문", history)
 
         assert prepared.history == [("assistant", "ok")]
 
     def test_too_long_message_is_rejected(self):
         with pytest.raises(ValueError):
-            services.prepare_agent_chat("x" * 4001, [], user=_User(), session_api_key="sk-user")
+            services.prepare_agent_chat("x" * 4001, [])
 
-    def test_prepared_repr_hides_api_key(self):
-        prepared = services.prepare_agent_chat("질문", [], user=_User(), session_api_key="sk-secret")
-
-        assert "sk-secret" not in repr(prepared)
+    def test_missing_server_key_is_rejected(self):
+        with (
+            patch.object(services, "get_runtime_openai_api_key", return_value=None),
+            pytest.raises(services.MissingApiKeyError),
+        ):
+            services.prepare_agent_chat("질문", [])
 
 
 @pytest.mark.parametrize(

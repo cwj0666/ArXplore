@@ -31,9 +31,9 @@ AI는 아래 운영 사실을 현재 기준선으로 사용한다.
 - parser runtime은 같은 `docker-compose.yml`의 `layout-parser` 서비스(profile: parser, HURIDOCS 컨테이너)다
 - PDF 파싱 경로는 `layout -> pypdf -> abstract fallback` 순서다. GPU는 layout parser에만 쓰고, 임베딩은 OpenAI API로 만든다
 - 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다. 리포지토리 생성자나 요청 경로에 DDL을 넣지 않는다
-- 제품 검색 경로는 `src/core/agent/retrieval.py`의 `retrieve_contexts`가 고른다. `RETRIEVAL_MODE=hybrid`(기본)이고 질의 임베딩 키(사용자 세션 키 > 서버 `OPENAI_API_KEY`)가 있으면 `PaperRetriever.search_paper_contexts_by_hybrid`(lexical + vector RRF)를 쓰고, 키가 없거나 임베딩 호출이 실패하면 `search_paper_contexts`(lexical)로 내려간다. 에이전트 도구 `search_paper_chunks_tool`과 상세 챗이 같은 경로를 쓴다
+- 제품 검색 경로는 `src/core/agent/retrieval.py`의 `retrieve_contexts`가 고른다. `RETRIEVAL_MODE=hybrid`(기본)이고 질의 임베딩 키(서버 `OPENAI_API_KEY`, 요청 범위 `override_openai_runtime` 키가 있으면 그 키)가 있으면 `PaperRetriever.search_paper_contexts_by_hybrid`(lexical + vector RRF)를 쓰고, 키가 없거나 임베딩 호출이 실패하면 `search_paper_contexts`(lexical)로 내려간다. 에이전트 도구 `search_paper_chunks_tool`과 상세 챗이 같은 경로를 쓴다
 - 상세 페이지 챗은 질문으로 해당 논문 안(`arxiv_id` 한정)을 검색해 초록 + 발췌 청크 최대 5개로 답하고, SSE로 스트리밍하며 `[n]` 번호 인용을 `citations`로 돌려준다. 검색 결과가 없으면 앞 청크로 대신한다(`retrieval_mode: "first_chunks"`)
-- `DEMO_MODE=true`(기본)이면 목록·상세와 캐시된 개요·상세 요약은 로그인 없이 보인다. 새 생성과 챗은 로그인 + 개인 키가 필요하고, LLM 호출 엔드포인트는 rate limit(`RATE_LIMIT_*`)을 받는다
+- 계정·로그인이 없고 모든 기능이 공개다. 개요·상세 요약은 캐시가 없을 때만 서버 `OPENAI_API_KEY`로 생성하고, 챗·에이전트도 서버 키를 쓴다. LLM 호출 엔드포인트와 `detail.json`은 클라이언트 IP당 rate limit(`RATE_LIMIT_LLM_PER_MINUTE`, `RATE_LIMIT_DETAIL_PER_MINUTE`)을 받는다
 
 ## 3. 절대 임의 변경하면 안 되는 것
 
@@ -73,8 +73,8 @@ data: [DONE]
 
 - `in_answer`: 답변이 실제로 이 출처를 인용했으면 `true`. 에이전트는 답변 속 `[제목](URL)` 링크를 도구 결과와 대조하고(URL 또는 arXiv ID 일치), 상세 챗은 `[1]`, `[2]` 같은 발췌문 번호를 대조한다. 답변에 인용이 하나도 없으면 사용한 출처 전체를 `in_answer: false`로 보낸다. 도구 결과에 없는 링크는 서버 로그에 경고로 남기고 답변은 고치지 않는다.
 - 상세 챗의 1번 출처는 논문 초록이다(`section_title: "Abstract"`, `chunk_id: null`). 트렌딩 도구에서 온 에이전트 출처도 `chunk_id: null`이다.
-- 스트리밍을 시작하기 전 검증 실패는 JSON으로 응답한다: 미로그인 401, 개인 키 없음·빈 메시지·4,000자 초과 메시지·잘못된 `history` 400, 없는 논문 404(상세 챗). `history`는 서버에서 user/assistant만 남기고 최근 20개, 메시지당 4,000자로 자른다.
-- `error` 문구는 사용자용 고정 문구다(키 인증 실패만 별도 문구). 예외 메시지는 응답에 싣지 않고 서버 로그에 남긴다.
+- 스트리밍을 시작하기 전 검증 실패는 JSON으로 응답한다: 빈 메시지·4,000자 초과 메시지·잘못된 `history` 400, 없는 논문 404(상세 챗), 서버 `OPENAI_API_KEY` 없음 503. `history`는 서버에서 user/assistant만 남기고 최근 20개, 메시지당 4,000자로 자른다.
+- `error` 문구는 사용자용 고정 문구다. 예외 메시지는 응답에 싣지 않고 서버 로그에 남긴다.
 
 **비스트리밍 엔드포인트**
 
@@ -89,7 +89,7 @@ data: [DONE]
 내용: {context_text, 없으면 chunk_text}
 ```
 
-결과가 없으면 "검색된 관련 논문이 없습니다. …지어내지 말고…" 문구를 돌려준다. 도구는 돌려준 hit을 요청 범위 레지스트리에 기록하고, 스트리밍 계층이 이를 `citations`로 만든다. 검색 방식은 `RETRIEVAL_MODE`(기본 `hybrid`)를 따르고, 질의 임베딩 키(사용자 세션 키 > 서버 `OPENAI_API_KEY`)가 없거나 임베딩 호출이 실패하면 lexical로 내려간다.
+결과가 없으면 "검색된 관련 논문이 없습니다. …지어내지 말고…" 문구를 돌려준다. 도구는 돌려준 hit을 요청 범위 레지스트리에 기록하고, 스트리밍 계층이 이를 `citations`로 만든다. 검색 방식은 `RETRIEVAL_MODE`(기본 `hybrid`)를 따르고, 질의 임베딩 키(서버 `OPENAI_API_KEY`)가 없거나 임베딩 호출이 실패하면 lexical로 내려간다.
 
 계약 변경이 필요하면 아래 순서를 따른다.
 

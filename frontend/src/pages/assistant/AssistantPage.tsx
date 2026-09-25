@@ -3,12 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { AssistantChatHistory } from "../../components/assistant/AssistantChatHistory";
 import { AssistantComposer } from "../../components/assistant/AssistantComposer";
 import { AssistantHero } from "../../components/assistant/AssistantHero";
-import { AssistantNotice } from "../../components/assistant/AssistantNotice";
 import { streamAssistantChat } from "../../helpers/assistant/assistantChatApi";
 import { ApiError } from "../../helpers/http";
 import { StreamEventError } from "../../helpers/sse";
 import type { AssistantChatMessage, AssistantDisplayMessage, Citation } from "../../types/assistant";
-import type { BootstrapPayload } from "../../types/app";
 import "./assistant-page.css";
 
 const INITIAL_ASSISTANT_MESSAGE =
@@ -17,20 +15,10 @@ const STREAM_ENDPOINT = "/papers/assistant/stream/";
 const MAX_HISTORY_MESSAGES = 20;
 
 export interface AssistantPageProps {
-  session: BootstrapPayload;
   initialQuery?: string;
-  homeHref?: string;
-  onRequireLogin: () => void;
-  onOpenSettings: () => void;
 }
 
-export function AssistantPage({
-  session,
-  initialQuery = "",
-  homeHref = "/",
-  onRequireLogin,
-  onOpenSettings,
-}: AssistantPageProps) {
+export function AssistantPage({ initialQuery = "" }: AssistantPageProps) {
   const [messages, setMessages] = useState<AssistantDisplayMessage[]>([
     { role: "assistant", content: INITIAL_ASSISTANT_MESSAGE },
   ]);
@@ -43,7 +31,6 @@ export function AssistantPage({
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMountedRef = useRef(false);
-  const canUseAssistant = session.is_authenticated && session.has_personal_api_key;
 
   const scrollToBottom = () => {
     if (!chatHistoryRef.current) return;
@@ -69,7 +56,7 @@ export function AssistantPage({
   };
 
   const sendMessage = async (prefilledMessage = "") => {
-    if (!canUseAssistant || isSending) return;
+    if (isSending) return;
 
     const message = (prefilledMessage || inputValue).trim();
     if (!message) return;
@@ -138,23 +125,15 @@ export function AssistantPage({
   };
 
   useEffect(() => {
-    if (!canUseAssistant || !initialQuery.trim() || hasSubmittedInitialQueryRef.current) return;
+    if (!initialQuery.trim() || hasSubmittedInitialQueryRef.current) return;
     hasSubmittedInitialQueryRef.current = true;
     void sendMessage(initialQuery.trim());
-  }, [canUseAssistant, initialQuery]);
+  }, [initialQuery]);
 
   return (
     <main className="assistant-page">
       <div className="assistant-page-inner">
         <AssistantHero />
-        {canUseAssistant ? null : (
-          <AssistantNotice
-            isAuthenticated={session.is_authenticated}
-            homeHref={homeHref}
-            onRequireLogin={onRequireLogin}
-            onOpenSettings={onOpenSettings}
-          />
-        )}
 
         <div className="assistant-chat-shell">
           <AssistantChatHistory
@@ -165,7 +144,6 @@ export function AssistantPage({
           />
           <AssistantComposer
             value={inputValue}
-            disabled={!canUseAssistant}
             isSending={isSending}
             inputRef={inputRef}
             onChange={setInputValue}

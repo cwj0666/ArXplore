@@ -42,13 +42,6 @@ def _env_int(name: str, default: int) -> int:
         raise ImproperlyConfigured(f"{name} must be an integer.") from exc
 
 
-def _normalize_url_prefix(value: str) -> str:
-    prefix = value.strip().strip("/")
-    if not prefix:
-        raise ImproperlyConfigured("DJANGO_ADMIN_PATH must not be empty.")
-    return f"{prefix}/"
-
-
 DEBUG = os.getenv("DJANGO_DEBUG", "").strip().lower() == "true"
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
 if not SECRET_KEY:
@@ -77,22 +70,14 @@ CSRF_TRUSTED_ORIGINS = _env_csv(
 )
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
     "papers",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -106,8 +91,6 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
@@ -121,21 +104,6 @@ try:
     }
 except ValueError as exc:
     raise ImproperlyConfigured(str(exc)) from exc
-
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
-]
 
 LANGUAGE_CODE = "ko-kr"
 
@@ -152,23 +120,13 @@ STATICFILES_DIRS = [("frontend", FRONTEND_DIST_DIR)] if FRONTEND_DIST_DIR.exists
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SECURE_COOKIES = _env_bool("DJANGO_SECURE_COOKIES", False)
-SESSION_COOKIE_SECURE = SECURE_COOKIES
 CSRF_COOKIE_SECURE = SECURE_COOKIES
 if SECURE_COOKIES:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
-
-ADMIN_ENABLED = _env_bool("DJANGO_ADMIN_ENABLED", False)
-ADMIN_PATH = _normalize_url_prefix(os.getenv("DJANGO_ADMIN_PATH", "admin/"))
-
-DEMO_MODE = _env_bool("DEMO_MODE", True)
-
-SESSION_KEY_ENCRYPTION_KEY = os.getenv("SESSION_KEY_ENCRYPTION_KEY", "")
 
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if REDIS_URL:
@@ -187,7 +145,6 @@ else:
     }
 
 RATE_LIMIT_ENABLED = _env_bool("RATE_LIMIT_ENABLED", True)
-RATE_LIMIT_AUTH_PER_MINUTE = _env_int("RATE_LIMIT_AUTH_PER_MINUTE", 10)
 RATE_LIMIT_LLM_PER_MINUTE = _env_int("RATE_LIMIT_LLM_PER_MINUTE", 30)
 RATE_LIMIT_DETAIL_PER_MINUTE = _env_int("RATE_LIMIT_DETAIL_PER_MINUTE", 60)
 RATE_LIMIT_IP_HEADER = os.getenv("RATE_LIMIT_IP_HEADER", "X-Real-IP").strip()
