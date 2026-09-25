@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 from eval.dataset import EvalQuery
 from eval.metrics import hit_at_k, mean, mrr_at_k, percentile, recall_at_k
-from src.integrations.paper_retriever import candidate_fetch_limit, hybrid_branch_limit
+from src.integrations.paper_retriever import candidate_fetch_limit, hybrid_branch_limit, normalize_search_query
 
 NOISE_ROLES = frozenset({"references", "toc", "front_matter"})
 HIT_KS = (1, 5, 10)
@@ -33,6 +33,9 @@ SearchFn = Callable[[Any, str, int, int], list[dict]]
 
 
 def _lexical_pipeline(retriever: Any, query: str, limit: int, *, apply_filter: bool = True) -> list[dict]:
+    query = normalize_search_query(query)
+    if not query:
+        return []
     candidates = retriever.repository.list_chunk_candidates_by_query(
         query, limit=candidate_fetch_limit(limit), arxiv_id=None
     )
@@ -44,6 +47,9 @@ def _lexical_pipeline(retriever: Any, query: str, limit: int, *, apply_filter: b
 
 
 def _vector_pipeline(retriever: Any, query: str, limit: int, *, apply_rerank: bool = True) -> list[dict]:
+    query = normalize_search_query(query)
+    if not query:
+        return []
     embedding = retriever.embedding_client.embed_texts([query])[0]
     candidates = retriever.vector_repository.search_paper_chunks(
         embedding, limit=candidate_fetch_limit(limit), arxiv_id=None
