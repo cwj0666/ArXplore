@@ -123,7 +123,7 @@ def test_re_prepare_is_idempotent_and_never_downgrades_without_force(dsn):
     assert first["saved_fulltext"] == 1
     assert first["chunks_unchanged"] is True
     state = repository.get_paper_fulltext_state(ARXIV_ID)
-    assert state == {"source": "layout_pdf", "content_hash": first["content_hash"]}
+    assert state == {"source": "layout_pdf", "content_hash": first["content_hash"], "chunk_count": len(SEEDED_CHUNKS)}
 
     second = prepare_papers.prepare_single_paper(candidate, parser=_Parser("layout_pdf"), paper_repository=repository)
     assert second["skipped_unchanged"] is True
@@ -142,3 +142,36 @@ def test_re_prepare_is_idempotent_and_never_downgrades_without_force(dsn):
     assert {key: value for key, value in _chunk_ids(dsn).items() if key[0] == ARXIV_ID} == {
         key: value for key, value in ids.items() if key[0] == ARXIV_ID
     }
+
+
+def test_chunk_write_failure_leaves_hash_unset_so_retry_rewrites_chunks(dsn, monkeypatch):
+    repository = DsnPaperRepository(dsn)
+    repository.ensure_schema()
+    arxiv_id = "2601.00009"
+    candidate = {"arxiv_id": arxiv_id, "prepared": {"arxiv_id": arxiv_id, "title": "T", "abstract": "A"}}
+    original_save_chunks = repository.save_paper_chunks
+    calls = {"count": 0}
+
+    def flaky_save_chunks(target_id, chunks):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise psycopg2.OperationalError("connection lost")
+        return original_save_chunks(target_id, chunks)
+
+    monkeypatch.setattr(repository, "save_paper_chunks", flaky_save_chunks)
+
+    with pytest.raises(psycopg2.OperationalError):
+        prepare_papers.prepare_single_paper(candidate, parser=_Parser("layout_pdf"), paper_repository=repository)
+    assert repository.get_paper_fulltext_state(arxiv_id) == {"source": "layout_pdf", "content_hash": None, "chunk_count": 0}
+
+    retried = prepare_papers.prepare_single_paper(candidate, parser=_Parser("layout_pdf"), paper_repository=repository)
+
+    assert "skipped_unchanged" not in retried
+    assert retried["saved_chunks"] == len(SEEDED_CHUNKS)
+    assert repository.get_paper_fulltext_state(arxiv_id) == {
+        "source": "layout_pdf",
+        "content_hash": retried["content_hash"],
+        "chunk_count": len(SEEDED_CHUNKS),
+    }
+    again = prepare_papers.prepare_single_paper(candidate, parser=_Parser("layout_pdf"), paper_repository=repository)
+    assert again["skipped_unchanged"] is True

@@ -150,7 +150,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 
 청크에 `content_role`, `section_title`, `parser_metadata`, `quality_metrics` 저장. 청킹은 글자 수 기준(1800자, 겹침 200자).
 
-재처리는 멱등하다. source 순위 `layout_pdf > pdf > fallback_abstract`에서 기존보다 낮은 순위 결과는 저장하지 않고, 같은 source에 `content_hash`(정규화 본문 + 섹션 제목의 sha256)까지 같으면 본문·청크 교체를 건너뛴다. 청크 텍스트가 같으면 DELETE/INSERT 없이 메타데이터만 갱신해 청크 id와 임베딩을 보존한다. 강제 재처리는 `--force`(worker CLI, requeue 스크립트 `--apply --force`, job payload `force: true`). 날짜 잡에서 논문 1건이라도 실패하면 잡은 backoff 후 재시도되고, 성공했던 논문은 unchanged로 건너뛴다.
+재처리는 멱등하다. source 순위 `layout_pdf > pdf > fallback_abstract`에서 기존보다 낮은 순위 결과는 저장하지 않고, 같은 source에 `content_hash`(정규화 본문 + 섹션 제목의 sha256)까지 같으면 본문·청크 교체를 건너뛴다. 청크 텍스트가 같으면 DELETE/INSERT 없이 메타데이터만 갱신해 청크 id와 임베딩을 보존한다. 강제 재처리는 `--force`(worker CLI, requeue 스크립트 `--apply --force`, job payload `force: true`). 날짜 잡에서 논문 1건이라도 실패하면 잡은 backoff 후 재시도되고, 성공했던 논문은 본문·청크가 모두 저장된 경우에만 unchanged로 건너뛴다(`content_hash`는 청크 저장 뒤에 기록).
 
 ### Retrieval
 

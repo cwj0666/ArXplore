@@ -558,16 +558,29 @@ class PaperRepository:
         }
 
     def get_paper_fulltext_state(self, arxiv_id: str) -> dict[str, Any] | None:
-        """저장된 fulltext의 source와 content_hash만 조회한다. fulltext가 없으면 None."""
+        """저장된 fulltext의 source·content_hash와 저장된 청크 수를 조회한다. fulltext가 없으면 None."""
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT source, content_hash FROM paper_fulltexts WHERE arxiv_id = %s",
+                """
+                SELECT f.source, f.content_hash,
+                       (SELECT COUNT(*) FROM paper_chunks c WHERE c.arxiv_id = f.arxiv_id)
+                FROM paper_fulltexts f
+                WHERE f.arxiv_id = %s
+                """,
                 (arxiv_id,),
             )
             row = cursor.fetchone()
         if row is None:
             return None
-        return {"source": row[0], "content_hash": row[1]}
+        return {"source": row[0], "content_hash": row[1], "chunk_count": int(row[2] or 0)}
+
+    def update_paper_fulltext_content_hash(self, arxiv_id: str, content_hash: str | None) -> None:
+        """본문·청크 저장이 모두 끝난 뒤 content_hash를 기록한다."""
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE paper_fulltexts SET content_hash = %s WHERE arxiv_id = %s",
+                (content_hash, arxiv_id),
+            )
 
     def get_paper_fulltext_source(self, arxiv_id: str) -> str | None:
         """저장된 fulltext의 source 값만 조회한다. fulltext가 없으면 None."""

@@ -464,3 +464,41 @@ class TestProductionSettings:
         values = _load_settings_in_subprocess({"REDIS_URL": "redis://cache:6379/0"})
 
         assert values["CACHE_BACKEND"] == "RedisCache"
+
+
+def _import_settings_module(settings_module: str, secret_key: str, **extra_env: str) -> subprocess.CompletedProcess:
+    env = {
+        **os.environ,
+        **extra_env,
+        "DJANGO_SETTINGS_MODULE": settings_module,
+        "DJANGO_SECRET_KEY": secret_key,
+        "PYTHONPATH": f"{REPO_ROOT}{os.pathsep}{REPO_ROOT / 'backend'}",
+    }
+    return subprocess.run(
+        [sys.executable, "-c", "import django; django.setup(); from django.conf import settings; print(settings.SECRET_KEY)"],
+        cwd=REPO_ROOT / "backend",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+class TestPlaceholderSecretKey:
+    @pytest.mark.parametrize("debug", ["", "true"])
+    def test_production_settings_refuse_change_me_secret(self, debug):
+        result = _import_settings_module("arxplore_web.settings", "change-me-django-secret-key", DJANGO_DEBUG=debug)
+
+        assert result.returncode != 0
+        assert "ImproperlyConfigured" in result.stderr
+        assert "placeholder (starts with 'change-me')" in result.stderr
+
+    def test_test_settings_allow_change_me_secret(self):
+        result = _import_settings_module("arxplore_web.test_settings", "change-me-django-secret-key")
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "change-me-django-secret-key"
+
+    def test_real_secret_is_accepted(self):
+        result = _import_settings_module("arxplore_web.settings", "a-real-secret-value")
+
+        assert result.returncode == 0, result.stderr

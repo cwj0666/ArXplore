@@ -1,6 +1,7 @@
 """Django settings for arxplore_web project."""
 
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -55,6 +56,15 @@ if not SECRET_KEY:
     if not DEBUG:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=False.")
     SECRET_KEY = "django-insecure-dev-only-arxplore-secret-key"
+# test_settings는 이 모듈을 import하기 전에 ALLOW_PLACEHOLDER_SECRET_KEY = True를 둔다.
+_ALLOW_PLACEHOLDER_SECRET_KEY = bool(
+    getattr(sys.modules.get("arxplore_web.test_settings"), "ALLOW_PLACEHOLDER_SECRET_KEY", False)
+)
+if SECRET_KEY.startswith("change-me") and not _ALLOW_PLACEHOLDER_SECRET_KEY:
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY is still the .env.example placeholder (starts with 'change-me'). "
+        "Set a real secret key, e.g. python -c \"import secrets; print(secrets.token_urlsafe(50))\"."
+    )
 FRONTEND_PORT = os.getenv("FRONTEND_PORT", "5173")
 
 ALLOWED_HOSTS = _env_csv("DJANGO_ALLOWED_HOSTS", ["*"] if DEBUG else ["localhost", "127.0.0.1"])

@@ -201,17 +201,38 @@ def test_encrypted_pdf_falls_back_to_abstract(caplog):
     assert "pypdf text extraction failed" in caplog.text
 
 
-def test_download_failure_returns_fallback_abstract():
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.RequestException("network down"),
+        requests.Timeout("read timed out"),
+        requests.HTTPError("404 Client Error: Not Found"),
+    ],
+)
+def test_download_failure_returns_fallback_abstract_and_logs(caplog, error):
     client = _fake_layout_client(configured=True, segments=LAYOUT_SEGMENTS)
     parser = FulltextParser(layout_parser_client=client)
 
-    with patch(REQUESTS_GET, side_effect=requests.RequestException("network down")):
+    with caplog.at_level("WARNING"), patch(REQUESTS_GET, side_effect=error):
         result = parser.parse_from_pdf_url(PDF_URL, fallback_text="We align models with preferences.")
 
+    assert f"pdf download failed ({PDF_URL}): {error}" in caplog.text
     assert result.source == "fallback_abstract"
     assert result.quality_metrics["fallback_used"] is True
     assert result.sections == [{"title": "Abstract", "text": "We align models with preferences."}]
     client.analyze_pdf_bytes.assert_not_called()
+
+
+def test_http_error_status_is_logged_and_falls_back(caplog):
+    response = _fake_response(b"")
+    response.raise_for_status.side_effect = requests.HTTPError("503 Server Error")
+    parser = FulltextParser(layout_parser_client=_fake_layout_client(configured=False))
+
+    with caplog.at_level("WARNING"), patch(REQUESTS_GET, return_value=response):
+        result = parser.parse_from_pdf_url(PDF_URL, fallback_text="abstract only")
+
+    assert result.source == "fallback_abstract"
+    assert f"pdf download failed ({PDF_URL}): 503 Server Error" in caplog.text
 
 
 def test_fallback_abstract_can_be_chunked():

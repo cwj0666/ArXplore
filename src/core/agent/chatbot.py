@@ -106,7 +106,7 @@ def stream_agent_search(
     parts: list[str] = []
     step_limit_hit = False
     # 모델은 같은 메시지 안에서 텍스트를 먼저 내보낸 뒤 tool_call_chunks를 붙일 수 있다. 메시지 텍스트는
-    # tool_call_chunk가 나오거나(버림), buffer_chars에 닿거나 줄바꿈이 나오거나, 메시지가 끝날 때(내보냄)까지
+    # tool_call_chunk가 나오거나(버림), buffer_chars에 닿거나 메시지가 끝날 때(내보냄)까지
     # 모아 둔다. 내보낸 뒤의 토큰은 바로 흘려보낸다. buffer_chars를 넘긴 앞말 뒤의 도구 호출은 막지 못하므로
     # 시스템 프롬프트가 도구 호출 차례에 텍스트를 쓰지 않도록 지시한다.
     pending: dict[str, list[str]] = {}
@@ -150,7 +150,7 @@ def stream_agent_search(
                     continue
                 buffered = pending.setdefault(message_id, [])
                 buffered.append(text)
-                if sum(len(piece) for piece in buffered) >= buffer_chars or "\n" in text:
+                if sum(len(piece) for piece in buffered) >= buffer_chars:
                     live_message_ids.add(message_id)
                     for piece in pending.pop(message_id):
                         parts.append(piece)

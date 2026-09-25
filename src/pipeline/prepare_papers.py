@@ -316,7 +316,8 @@ def prepare_single_paper(
     """후보 논문 1건을 저장, 파싱, 청크 생성까지 수행한다.
 
     force가 아니면 기존 본문보다 낮은 순위(layout_pdf > pdf > fallback_abstract)의 결과로 덮어쓰지 않고,
-    source와 content_hash가 기존과 같으면 본문·청크 교체를 건너뛴다.
+    source와 content_hash가 기존과 같고 청크가 저장돼 있으면 본문·청크 교체를 건너뛴다.
+    content_hash는 청크 저장이 끝난 뒤에 기록한다.
     """
     parser = parser or FulltextParser()
     paper_repository = paper_repository or PaperRepository()
@@ -353,7 +354,11 @@ def prepare_single_paper(
     if existing and not force:
         if fulltext_source_rank(fulltext.source) < fulltext_source_rank(existing_source):
             skipped_lower_rank_overwrite = True
-        elif existing_source == fulltext.source and existing.get("content_hash") == content_hash:
+        elif (
+            existing_source == fulltext.source
+            and existing.get("content_hash") == content_hash
+            and int(existing.get("chunk_count") or 0) > 0
+        ):
             skipped_unchanged = True
 
     saved_fulltext = 0
@@ -369,7 +374,7 @@ def prepare_single_paper(
                 quality_metrics=fulltext_quality_metrics,
                 artifacts=fulltext.artifacts,
                 parser_metadata=fulltext.parser_metadata,
-                content_hash=content_hash,
+                content_hash=None,
             )
             saved_fulltext = 1
         if chunks:
@@ -377,6 +382,9 @@ def prepare_single_paper(
                 saved_chunks = len(chunks)
             else:
                 chunks_unchanged = True
+        # 청크 저장 전에 실패하면 hash가 NULL로 남아 재시도 때 unchanged로 건너뛰지 않는다.
+        if saved_fulltext:
+            paper_repository.update_paper_fulltext_content_hash(arxiv_id, content_hash)
 
     result = {
         "arxiv_id": arxiv_id,
@@ -719,8 +727,21 @@ def run_backfill_prepare_papers(
             next_cursor_date = target_str
             break
 
-        if result.get("status") == "failed":
-            failures.append({"date": target_str, "error": _summarize_paper_failures(result)})
+        paper_failure_count = int(result.get("failure_count", 0) or 0)
+        if paper_failure_count > 0 or result.get("status") in {"failed", "partial_failed"}:
+            failures.append(
+                {
+                    "date": target_str,
+                    "status": str(result.get("status") or "failed"),
+                    "error": _summarize_paper_failures(result),
+                    "paper_success_count": int(result.get("success_count", 0) or 0),
+                    "paper_failure_count": paper_failure_count,
+                    "paper_failures": list(result.get("failures") or []),
+                    "prepared_arxiv_ids": [
+                        str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()
+                    ],
+                }
+            )
             stopped_reason = "prepare_failed"
             next_cursor_date = target_str
             break
@@ -865,7 +886,9 @@ def run_consume_prepare_queue(
         }
         target_date = str(job.get("date") or "").strip()
         if not target_date:
-            prepare_job_repository.fail_prepare_job(**claim_token, error="missing target_date")
+            if not prepare_job_repository.fail_prepare_job(**claim_token, error="missing target_date"):
+                _record_lost_claim(lost_claims, target_date="", claim_token=claim_token, stage="fail")
+            failures.append({"date": "", "job_id": claim_token["job_id"], "error": "missing target_date"})
             continue
         claimed_dates.append(target_date)
         job_payload = job.get("payload")
@@ -935,7 +958,7 @@ def run_consume_prepare_queue(
             }
         )
 
-    if not claimed_dates:
+    if not claimed_dates and not failures and not lost_claims:
         status = "no_op"
     elif failures and not successes:
         status = "failed"

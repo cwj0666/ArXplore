@@ -93,7 +93,7 @@ HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker 
 
 **2026-09 점검(Phase 0)에서 추가한 보호 장치**
 
-- 논문 단위 격리: 한 논문의 예외는 기록만 하고 나머지 논문을 계속 처리합니다. 날짜 잡은 모든 논문이 실패했을 때만 실패로 봅니다.
+- 논문 단위 격리: 한 논문의 예외는 기록하고 나머지 논문을 계속 처리합니다. 큐 잡은 실패한 논문이 하나라도 있으면 backoff 후 재시도되고(최대 `PREPARE_JOB_MAX_ATTEMPTS`), 이미 저장된 논문은 재시도에서 건너뜁니다. 날짜 backfill은 실패가 있는 날짜에서 커서를 진행하지 않습니다.
 - 멱등 재처리: 본문 source 순위(`layout_pdf` > `pdf` > `fallback_abstract`)에서 낮은 순위 결과로는 덮어쓰지 않고, 같은 source에 내용 해시까지 같으면 저장을 건너뜁니다. 청크 텍스트가 같으면 청크 id와 임베딩을 보존합니다. 일시적인 다운로드·파서 실패가 기존 임베딩을 CASCADE로 지우던 문제를 막고, 강제 재처리는 `--force`로 합니다. 논문 1건이라도 실패한 날짜 잡은 backoff 후 재시도됩니다.
 - 임베딩 backlog: prepare 성공 여부와 상관없이 매 루프에서 누락된 임베딩을 `EMBED_BACKLOG_MAX_CHUNKS`(기본 400)까지 채우고, backlog 오류가 worker를 멈추지 않습니다.
 - 참고문헌 판정: 섹션 제목이 참고문헌 제목과 정확히 맞을 때만 `references`로 분류합니다. "Direct Preference Optimization" 같은 본문 섹션이 검색에서 빠지던 문제를 고쳤습니다.
@@ -138,7 +138,7 @@ docker compose --profile local-db --profile dev up -d vite  # (선택) Vite HMR:
 
 ### (b) 원격 서버 모드
 
-서버(PostgreSQL · MongoDB · Airflow)를 Tailscale로 공유하고, 로컬에서 웹과 GPU 파서·prepare-worker를 돌리는 원래 팀 구성입니다. 절차는 [TEAM_SETUP.md](./docs/management/TEAM_SETUP.md)를 따릅니다.
+서버(PostgreSQL · MongoDB · Airflow)를 Tailscale로 공유하고(참고: 팀 시절 커밋 c7b2c34에 포함됐던 Tailscale 인증 키는 폐기되었고 현재 문서는 플레이스홀더만 담습니다), 로컬에서 웹과 GPU 파서·prepare-worker를 돌리는 원래 팀 구성입니다. 절차는 [TEAM_SETUP.md](./docs/management/TEAM_SETUP.md)를 따릅니다.
 
 ```bash
 bash scripts/setup-server.sh                  # 서버: PostgreSQL / MongoDB / Airflow

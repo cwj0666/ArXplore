@@ -407,16 +407,27 @@ def test_save_paper_chunks_replaces_when_texts_or_count_differ(monkeypatch, exis
     assert cursor.executed[-1] == ("DELETE FROM paper_chunks WHERE arxiv_id = %s", ("2401.00001",))
 
 
-def test_get_paper_fulltext_state():
-    cursor = RecordingCursor(fetchone_results=[("layout_pdf", "abc")])
+def test_get_paper_fulltext_state_includes_chunk_count():
+    cursor = RecordingCursor(fetchone_results=[("layout_pdf", "abc", 3)])
     assert _repository_with_cursor(cursor).get_paper_fulltext_state("2604.00001") == {
         "source": "layout_pdf",
         "content_hash": "abc",
+        "chunk_count": 3,
     }
     sql, params = cursor.executed[0]
-    assert "SELECT source, content_hash FROM paper_fulltexts WHERE arxiv_id = %s" in _normalize_sql(sql)
+    normalized = _normalize_sql(sql)
+    assert "SELECT f.source, f.content_hash" in normalized
+    assert "(SELECT COUNT(*) FROM paper_chunks c WHERE c.arxiv_id = f.arxiv_id)" in normalized
     assert params == ("2604.00001",)
     assert _repository_with_cursor(RecordingCursor()).get_paper_fulltext_state("missing") is None
+
+
+def test_update_paper_fulltext_content_hash():
+    cursor = RecordingCursor()
+    _repository_with_cursor(cursor).update_paper_fulltext_content_hash("2604.00001", "abc")
+    assert cursor.executed == [
+        ("UPDATE paper_fulltexts SET content_hash = %s WHERE arxiv_id = %s", ("abc", "2604.00001"))
+    ]
 
 
 def test_save_paper_fulltext_stores_content_hash():

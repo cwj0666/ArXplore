@@ -78,6 +78,7 @@ class PrepareJobRepository:
 
         raw_revision이 기존 잡보다 크면 done 잡은 pending으로 되돌리고, processing 잡은 pending_refresh로 표시한다.
         failed 잡은 새 입력이므로 시도 횟수를 초기화해 pending으로 되돌린다.
+        payload는 기존 payload에 병합되므로 requeue가 넣은 force는 작업이 완료될 때까지 유지된다.
         """
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -89,7 +90,7 @@ class PrepareJobRepository:
                 ON CONFLICT (mode, target_date)
                 DO UPDATE SET
                     source = EXCLUDED.source,
-                    payload = EXCLUDED.payload,
+                    payload = prepare_jobs.payload || EXCLUDED.payload,
                     status = CASE
                         WHEN {_ENQUEUE_KEEP_STATE} THEN prepare_jobs.status
                         ELSE 'pending'
@@ -309,6 +310,7 @@ class PrepareJobRepository:
                     pending_refresh = FALSE,
                     heartbeat_at = NULL,
                     next_attempt_at = NULL,
+                    payload = payload - 'force',
                     result = %s,
                     error = NULL,
                     updated_at = NOW()

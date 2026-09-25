@@ -213,7 +213,7 @@ raw payload는 MongoDB가 source of truth이고, PostgreSQL 정제층은 다시 
 
 prepare 단계의 보호 장치:
 
-- 논문 단위 격리: 한 논문의 예외는 결과에 기록하고 나머지를 계속 처리한다. 날짜 잡은 모든 논문이 실패했을 때만 실패로 기록한다
+- 논문 단위 격리: 한 논문의 예외는 결과에 기록하고 나머지를 계속 처리한다. 큐 잡은 실패한 논문이 하나라도 있으면 fail → backoff → pending으로 재시도되고(`PREPARE_JOB_MAX_ATTEMPTS`), 저장이 끝난 논문은 재시도에서 unchanged로 건너뛴다. backfill은 실패가 있는 날짜에서 커서를 진행하지 않는다
 - 멱등 재처리: source 순위 `layout_pdf > pdf > fallback_abstract`에서 하향 저장을 막고, 같은 source + 같은 `content_hash`면 저장을 건너뛴다. 청크 텍스트가 같으면 id와 임베딩을 보존한 채 메타데이터만 갱신한다. `--force`로 우회한다. 논문 단위 실패가 있는 날짜 잡은 backoff 후 재시도된다
 - 임베딩 backlog: prepare 성공 여부와 상관없이 매 루프 `EMBED_BACKLOG_MAX_CHUNKS`(기본 400)까지 누락 임베딩을 채운다. backlog 오류는 worker를 멈추지 않는다
 

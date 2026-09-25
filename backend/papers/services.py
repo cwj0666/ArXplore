@@ -548,7 +548,7 @@ def _validate_chat_input(user_message: str, chat_history: Any) -> tuple[str, lis
         raise InvalidRequestError(f"메시지는 {CHAT_MESSAGE_MAX_CHARS:,}자 이하로 입력하세요.")
     if not isinstance(chat_history, list):
         raise InvalidRequestError("잘못된 요청입니다.")
-    return cleaned_message, _build_history_tuples(chat_history)
+    return cleaned_message, _build_history_tuples(chat_history, current_message=cleaned_message)
 
 
 def _get_paper_or_raise(arxiv_id: str) -> dict[str, Any]:
@@ -590,8 +590,15 @@ def _parse_page_number(raw_page: Any) -> int:
     return page_number if page_number > 0 else 1
 
 
-def _build_history_tuples(chat_history: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    """user/assistant 메시지만 남기고, 최근 CHAT_HISTORY_MAX_MESSAGES개와 메시지당 CHAT_MESSAGE_MAX_CHARS자로 자른다."""
+def _build_history_tuples(
+    chat_history: list[dict[str, Any]],
+    *,
+    current_message: str | None = None,
+) -> list[tuple[str, str]]:
+    """user/assistant 메시지만 남기고, 최근 CHAT_HISTORY_MAX_MESSAGES개와 메시지당 CHAT_MESSAGE_MAX_CHARS자로 자른다.
+
+    마지막 user 메시지가 current_message와 같으면 현재 질문이 history에도 실려 온 것이므로 뺀다.
+    """
     messages = [
         (message["role"], message["content"][:CHAT_MESSAGE_MAX_CHARS])
         for message in chat_history
@@ -600,6 +607,8 @@ def _build_history_tuples(chat_history: list[dict[str, Any]]) -> list[tuple[str,
         and isinstance(message.get("content"), str)
         and message["content"].strip()
     ]
+    if current_message and messages and messages[-1][0] == "user" and messages[-1][1].strip() == current_message.strip():
+        messages.pop()
     return messages[-CHAT_HISTORY_MAX_MESSAGES:]
 
 

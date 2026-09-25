@@ -14,6 +14,8 @@ _TEST_ENV_DEFAULTS = {
 for _key, _value in _TEST_ENV_DEFAULTS.items():
     os.environ.setdefault(_key, _value)
 
+ALLOW_PLACEHOLDER_SECRET_KEY = True
+
 from .settings import *  # noqa: E402,F403
 
 DATABASES = {

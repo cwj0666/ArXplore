@@ -27,7 +27,8 @@ class PdfExtractorMixin:
         try:
             response = requests.get(normalized_url, timeout=self.timeout_seconds)
             response.raise_for_status()
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            logger.warning('pdf download failed (%s): %s', normalized_url, exc)
             return self._build_fallback_result(fallback_text)
         layout_result = self._parse_with_layout_parser(response.content)
         if layout_result is not None:

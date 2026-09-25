@@ -175,7 +175,7 @@ export function ChatPanel({ arxivId, access, onOpenSettings }: ChatPanelProps) {
       let answered = false;
       if (paperChatStreamAvailable) {
         try {
-          await streamPaperChat(arxivId, message, nextHistory, controller.signal, {
+          await streamPaperChat(arxivId, message, history, controller.signal, {
             onChunk: (chunk) => {
               if (isSuperseded()) {
                 return;
@@ -200,7 +200,7 @@ export function ChatPanel({ arxivId, access, onOpenSettings }: ChatPanelProps) {
       }
 
       if (!answered) {
-        const data = await postPaperChat(arxivId, message, nextHistory, controller.signal);
+        const data = await postPaperChat(arxivId, message, history, controller.signal);
         accumulated = data.answer ?? "";
       }
 

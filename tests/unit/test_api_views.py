@@ -217,6 +217,42 @@ class PaperChatStreamViewTests(SimpleTestCase):
         self.assertEqual(prepared.history, [("assistant", "prev")])
 
 
+    def test_current_question_echoed_in_history_is_dropped(self):
+        paper = {"arxiv_id": "2401.00001", "title": "T", "abstract": "A"}
+        history = [
+            {"role": "user", "content": "first?"},
+            {"role": "assistant", "content": "prev"},
+            {"role": "user", "content": " loss? "},
+        ]
+
+        _, _, stream_mock = self._post(
+            user=_AuthenticatedUser(),
+            body={"message": "loss?", "history": history},
+            paper=paper,
+            events=[{"chunk": "ok"}],
+        )
+
+        prepared = stream_mock.call_args.args[0]
+        self.assertEqual(prepared.history, [("user", "first?"), ("assistant", "prev")])
+
+
+class ChatHistoryTupleTests(SimpleTestCase):
+    def test_only_trailing_user_turn_matching_current_message_is_dropped(self):
+        history = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]
+        self.assertEqual(
+            services._build_history_tuples([*history, {"role": "user", "content": "q"}], current_message="q"),
+            [("user", "q"), ("assistant", "a")],
+        )
+        self.assertEqual(
+            services._build_history_tuples([*history, {"role": "user", "content": "other"}], current_message="q"),
+            [("user", "q"), ("assistant", "a"), ("user", "other")],
+        )
+        self.assertEqual(
+            services._build_history_tuples(history, current_message="a"),
+            [("user", "q"), ("assistant", "a")],
+        )
+
+
 class PaperChatViewTests(SimpleTestCase):
     def test_non_streaming_chat_returns_answer_and_citations(self):
         request = RequestFactory().post(

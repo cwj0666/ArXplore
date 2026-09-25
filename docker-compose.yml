@@ -135,7 +135,7 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     ports:
-      - "${LAYOUT_PARSER_PORT:-5060}:5060"
+      - "127.0.0.1:${LAYOUT_PARSER_PORT:-5060}:5060"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5060/', timeout=5).read()"]
       interval: 30s

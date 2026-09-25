@@ -266,6 +266,16 @@ def test_enqueue_passes_raw_revision_and_applies_refresh_rules():
     assert _notifies(cursor) == [("arxplore_prepare_jobs", "auto:2026-04-07")]
 
 
+def test_enqueue_merges_payload_so_requeued_force_survives():
+    cursor = RecordingCursor(fetchone_results=[(7, "pending", False, 0, False)])
+    _repository_with_cursor(cursor).enqueue_prepare_job(target_date="2026-04-07", payload={"collected": 3})
+    sql, params = cursor.executed[0]
+    normalized = _normalize_sql(sql)
+    assert "payload = prepare_jobs.payload || EXCLUDED.payload," in normalized
+    assert "payload = EXCLUDED.payload," not in normalized
+    assert params[3].adapted == {"collected": 3}
+
+
 def test_enqueue_without_revision_passes_null():
     cursor = RecordingCursor(fetchone_results=[(7, "done", False, 3, False)])
     result = _repository_with_cursor(cursor).enqueue_prepare_job(target_date="2026-04-07")
@@ -356,6 +366,7 @@ def test_complete_is_fenced_and_reports_applied():
     assert "status = CASE WHEN pending_refresh THEN 'pending' ELSE 'done' END" in normalized
     assert "attempt_count = CASE WHEN pending_refresh THEN 0 ELSE attempt_count END" in normalized
     assert "pending_refresh = FALSE" in normalized
+    assert "payload = payload - 'force'" in normalized
     assert "WHERE mode = %s AND target_date = %s" not in normalized
     assert params[1:] == (5, "w1", 4)
     assert _notifies(cursor) == []

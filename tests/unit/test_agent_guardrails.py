@@ -230,7 +230,7 @@ def test_agent_streams_long_answer_live_after_buffer_threshold():
     assert trace.index("yield: tail2") < trace.index("source:4")
 
 
-def test_agent_flushes_buffer_on_newline():
+def test_agent_newline_does_not_release_buffer_before_completion():
     events, trace = _stream_events(
         [
             _chunk("Short line", "m1"),
@@ -241,8 +241,23 @@ def test_agent_flushes_buffer_on_newline():
     )
 
     assert _answer(events) == "Short line\nmore"
-    assert trace.index("yield:Short line") < trace.index("source:2")
-    assert trace.index("yield:more") < trace.index("source:3")
+    assert trace.index("yield:Short line") > trace.index("source:3")
+
+
+def test_agent_newline_preamble_before_tool_call_never_leaks():
+    events, _ = _stream_events(
+        [
+            _chunk("Searching now.", "m1"),
+            _chunk("\n", "m1"),
+            _chunk("", "m1", tool_call=True),
+            _agent_update("m1", tool_calls=True),
+            _chunk("Answer", "m2"),
+            _agent_update("m2", tool_calls=False),
+        ]
+    )
+
+    assert _answer(events) == "Answer"
+    assert [event.get("chunk") for event in events[:-1]] == ["Answer"]
 
 
 def test_agent_short_preamble_before_tool_call_never_leaks():

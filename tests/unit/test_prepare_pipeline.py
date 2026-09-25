@@ -36,12 +36,17 @@ class FakeRepository:
         existing_source: str | None = None,
         *,
         existing_hash: str | None = None,
+        existing_chunk_count: int = 1,
         chunks_replaced: bool = True,
+        chunk_failures: int = 0,
     ) -> None:
         self.existing = (
-            {"source": existing_source, "content_hash": existing_hash} if existing_source is not None else None
+            {"source": existing_source, "content_hash": existing_hash, "chunk_count": existing_chunk_count}
+            if existing_source is not None
+            else None
         )
         self.chunks_replaced = chunks_replaced
+        self.chunk_failures = chunk_failures
         self.calls: list[str] = []
         self.saved_fulltexts: list[dict[str, Any]] = []
 
@@ -56,10 +61,22 @@ class FakeRepository:
     def save_paper_fulltext(self, arxiv_id, **kwargs):
         self.calls.append("save_paper_fulltext")
         self.saved_fulltexts.append(kwargs)
+        chunk_count = self.existing["chunk_count"] if self.existing else 0
+        self.existing = {"source": kwargs["source"], "content_hash": kwargs["content_hash"], "chunk_count": chunk_count}
 
     def save_paper_chunks(self, arxiv_id, chunks):
         self.calls.append("save_paper_chunks")
+        if self.chunk_failures:
+            self.chunk_failures -= 1
+            raise RuntimeError("chunk write failed")
+        if self.existing is not None:
+            self.existing["chunk_count"] = len(chunks)
         return self.chunks_replaced
+
+    def update_paper_fulltext_content_hash(self, arxiv_id, content_hash):
+        self.calls.append("update_paper_fulltext_content_hash")
+        if self.existing is not None:
+            self.existing["content_hash"] = content_hash
 
 
 def _candidate(arxiv_id: str = "2604.00001") -> dict[str, Any]:
@@ -143,8 +160,10 @@ def test_equal_or_higher_ranked_changed_content_is_saved(existing_source, new_so
     assert "skipped_unchanged" not in result
     assert result["saved_fulltext"] == 1
     assert result["saved_chunks"] == 1
-    assert repository.saved_fulltexts[0]["content_hash"] == PARSED_HASH
+    assert repository.saved_fulltexts[0]["content_hash"] is None
+    assert repository.existing["content_hash"] == PARSED_HASH
     assert result["content_hash"] == PARSED_HASH
+    assert repository.calls[-2:] == ["save_paper_chunks", "update_paper_fulltext_content_hash"]
 
 
 def test_unchanged_content_skips_fulltext_and_chunk_replacement():
@@ -160,6 +179,38 @@ def test_unchanged_content_skips_fulltext_and_chunk_replacement():
     assert result["saved_fulltext"] == 0
     assert result["saved_chunks"] == 0
     assert repository.calls == ["save_paper", "get_paper_fulltext_state"]
+
+
+def test_chunk_write_failure_does_not_mark_content_unchanged_on_retry():
+    repository = FakeRepository(chunk_failures=1)
+    parser = FakeParser(source="layout_pdf")
+
+    with pytest.raises(RuntimeError):
+        prepare_papers.prepare_single_paper(_candidate(), parser=parser, paper_repository=repository)
+    assert repository.existing["content_hash"] is None
+
+    retried = prepare_papers.prepare_single_paper(_candidate(), parser=parser, paper_repository=repository)
+
+    assert "skipped_unchanged" not in retried
+    assert retried["saved_chunks"] == 1
+    assert repository.calls.count("save_paper_chunks") == 2
+    assert repository.existing == {"source": "layout_pdf", "content_hash": PARSED_HASH, "chunk_count": 1}
+
+    third = prepare_papers.prepare_single_paper(_candidate(), parser=parser, paper_repository=repository)
+    assert third["skipped_unchanged"] is True
+
+
+def test_matching_hash_without_stored_chunks_is_rewritten():
+    repository = FakeRepository(existing_source="layout_pdf", existing_hash=PARSED_HASH, existing_chunk_count=0)
+
+    result = prepare_papers.prepare_single_paper(
+        _candidate(),
+        parser=FakeParser(source="layout_pdf"),
+        paper_repository=repository,
+    )
+
+    assert "skipped_unchanged" not in result
+    assert result["saved_chunks"] == 1
 
 
 def test_same_hash_from_different_source_is_not_treated_as_unchanged():
@@ -396,6 +447,19 @@ def test_consume_queue_completes_job_only_without_paper_failures(monkeypatch):
     assert result["successes"][0]["paper_failure_count"] == 0
 
 
+def test_consume_queue_counts_job_without_target_date_as_failure(monkeypatch):
+    job_repository = FakeJobRepository([""])
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: pytest.fail("must not run"))
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test")
+
+    assert result["status"] == "failed"
+    assert result["failure_count"] == 1
+    assert result["failures"] == [{"date": "", "job_id": 101, "error": "missing target_date"}]
+    assert job_repository.failed[0]["error"] == "missing target_date"
+
+
 @pytest.mark.parametrize(
     "payload,argument,expected",
     [
@@ -589,3 +653,36 @@ def test_backfill_stops_when_all_papers_of_a_date_failed(monkeypatch):
     assert result["stopped_reason"] == "prepare_failed"
     assert result["next_cursor_date"] == "2026-04-07"
     assert result["failures"][0]["date"] == "2026-04-07"
+
+
+def test_backfill_does_not_advance_cursor_past_partially_failed_date(monkeypatch):
+    raw_store = FakeRawStore()
+    monkeypatch.setattr(prepare_papers, "RawPaperStore", lambda: raw_store)
+    results = {
+        "2026-04-07": _prepare_result("success", 2, 0),
+        "2026-04-06": _prepare_result("partial_failed", 1, 1),
+    }
+    monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: results[kwargs["target_date"]])
+
+    result = prepare_papers.run_backfill_prepare_papers(
+        runtime="test",
+        cursor_date="2026-04-07",
+        oldest_date="2026-04-01",
+        batch_days=3,
+    )
+
+    assert result["status"] == "failed"
+    assert result["stopped_reason"] == "prepare_failed"
+    assert result["next_cursor_date"] == "2026-04-06"
+    assert raw_store.saved_state["cursor_date"] == "2026-04-06"
+    assert raw_store.saved_state["last_processed_dates"] == ["2026-04-07"]
+    assert result["success_count"] == 1
+    assert result["failure_count"] == 1
+    failure = result["failures"][0]
+    assert failure["date"] == "2026-04-06"
+    assert failure["status"] == "partial_failed"
+    assert failure["paper_success_count"] == 1
+    assert failure["paper_failure_count"] == 1
+    assert failure["paper_failures"] == [{"arxiv_id": "bad0", "error": "NameError: boom"}]
+    assert failure["prepared_arxiv_ids"] == ["id0"]
+    assert "1 of 2 paper(s) failed" in failure["error"]

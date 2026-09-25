@@ -317,3 +317,19 @@ def test_requeue_force_sets_payload_flag_and_plain_requeue_clears_it(repository,
     _execute(dsn, "UPDATE prepare_jobs SET status = 'failed' WHERE id = %s", (job_id,))
     repository.requeue_failed_prepare_jobs(mode="auto", dry_run=False)
     assert repository.claim_prepare_job(worker_id="w1")["payload"] == {"note": "x"}
+
+
+def test_collect_enqueue_keeps_requeued_force_until_job_completes(repository, dsn):
+    job_id = repository.enqueue_prepare_job(target_date="2026-04-07", payload={"note": "x"})["job_id"]
+    _execute(dsn, "UPDATE prepare_jobs SET status = 'failed', attempt_count = 3 WHERE id = %s", (job_id,))
+    repository.requeue_failed_prepare_jobs(mode="auto", dry_run=False, force=True)
+
+    repository.enqueue_prepare_job(target_date="2026-04-07", payload={"collected": 2}, raw_revision=1)
+    claimed = repository.claim_prepare_job(worker_id="w1")
+    assert claimed["payload"] == {"note": "x", "force": True, "collected": 2}
+
+    assert repository.complete_prepare_job(
+        job_id=job_id, worker_id="w1", claim_generation=claimed["claim_generation"]
+    )
+    payload = _execute(dsn, "SELECT payload FROM prepare_jobs WHERE id = %s", (job_id,))[0][0]
+    assert payload == {"note": "x", "collected": 2}
