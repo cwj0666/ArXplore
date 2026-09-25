@@ -10,6 +10,7 @@ from .services import (
     MissingApiKeyError,
     PaperNotFoundError,
     answer_agent_chat,
+    prepare_agent_chat,
     stream_agent_chat,
     answer_paper_chat,
     build_auth_payload,
@@ -152,7 +153,7 @@ def favorites_toggle(request: HttpRequest):
     return JsonResponse(payload)
 
 
-@require_GET
+@require_POST
 def paper_analyze(request: HttpRequest, arxiv_id: str):
     try:
         return JsonResponse(
@@ -245,7 +246,7 @@ def paper_agent_chat(request: HttpRequest):
 def paper_agent_stream(request: HttpRequest):
     try:
         body = _json_body(request)
-        gen = stream_agent_chat(
+        prepared = prepare_agent_chat(
             user_message=str(body.get("message", "")),
             chat_history=body.get("history", []),
             user=request.user,
@@ -262,7 +263,7 @@ def paper_agent_stream(request: HttpRequest):
 
     def event_stream():
         try:
-            for chunk in gen:
+            for chunk in stream_agent_chat(prepared):
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"

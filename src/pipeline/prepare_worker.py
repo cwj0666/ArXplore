@@ -5,6 +5,7 @@ import json
 import time
 from typing import Any
 
+from src.integrations.paper_repository import PaperRepository
 from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.pipeline import run_backfill_prepare_papers, run_consume_prepare_queue, run_embed_papers
 
@@ -43,18 +44,6 @@ def _run_embed_after_prepare(
     embed_backlog_max_chunks: int,
 ) -> dict[str, Any]:
     arxiv_ids = _collect_prepared_arxiv_ids(prepare_result)
-    if not arxiv_ids:
-        return {
-            "stage": "embed_after_prepare",
-            "status": "no_op",
-            "target_arxiv_count": 0,
-            "embedded_arxiv_count": 0,
-            "selected_chunk_count": 0,
-            "embedded_chunk_count": 0,
-            "backlog_selected_chunk_count": 0,
-            "backlog_embedded_chunk_count": 0,
-            "failures": [],
-        }
 
     failures: list[dict[str, str]] = []
     per_arxiv: list[dict[str, Any]] = []
@@ -103,37 +92,41 @@ def _run_embed_after_prepare(
             }
         )
 
-    if failures and embedded_arxiv_count == 0:
-        status = "failed"
-    elif failures:
-        status = "partial_failed"
-    elif total_embedded == 0:
-        status = "no_op"
-    else:
-        status = "success"
-
+    backlog_error: str | None = None
     normalized_backlog_max_chunks = max(0, int(embed_backlog_max_chunks))
     if normalized_backlog_max_chunks > 0:
         remaining_backlog_budget = normalized_backlog_max_chunks
-        while remaining_backlog_budget > 0:
-            current_limit = min(embed_max_chunks, remaining_backlog_budget)
-            backlog_result = run_embed_papers(
-                runtime="local",
-                user="local_prepare_worker",
-                max_chunks=current_limit,
-                arxiv_id=None,
-            )
-            backlog_status = str(backlog_result.get("status") or "")
-            backlog_selected = int(backlog_result.get("selected_chunk_count", 0) or 0)
-            backlog_embedded = int(backlog_result.get("embedded_chunk_count", 0) or 0)
-            backlog_selected_total += backlog_selected
-            backlog_embedded_total += backlog_embedded
+        try:
+            while remaining_backlog_budget > 0:
+                current_limit = min(embed_max_chunks, remaining_backlog_budget)
+                backlog_result = run_embed_papers(
+                    runtime="local",
+                    user="local_prepare_worker",
+                    max_chunks=current_limit,
+                    arxiv_id=None,
+                )
+                backlog_status = str(backlog_result.get("status") or "")
+                backlog_selected = int(backlog_result.get("selected_chunk_count", 0) or 0)
+                backlog_embedded = int(backlog_result.get("embedded_chunk_count", 0) or 0)
+                backlog_selected_total += backlog_selected
+                backlog_embedded_total += backlog_embedded
 
-            if backlog_status == "no_op" or backlog_selected <= 0 or backlog_embedded <= 0:
-                break
-            if backlog_selected < current_limit:
-                break
-            remaining_backlog_budget -= backlog_selected
+                if backlog_status == "no_op" or backlog_selected <= 0 or backlog_embedded <= 0:
+                    break
+                if backlog_selected < current_limit:
+                    break
+                remaining_backlog_budget -= backlog_selected
+        except Exception as exc:
+            backlog_error = f"{type(exc).__name__}: {exc}"
+
+    if failures and embedded_arxiv_count == 0:
+        status = "failed"
+    elif failures or backlog_error:
+        status = "partial_failed"
+    elif total_embedded == 0 and backlog_embedded_total == 0:
+        status = "no_op"
+    else:
+        status = "success"
 
     return {
         "stage": "embed_after_prepare",
@@ -144,6 +137,7 @@ def _run_embed_after_prepare(
         "embedded_chunk_count": total_embedded,
         "backlog_selected_chunk_count": backlog_selected_total,
         "backlog_embedded_chunk_count": backlog_embedded_total,
+        "backlog_error": backlog_error,
         "per_arxiv": per_arxiv,
         "failures": failures,
     }
@@ -164,19 +158,27 @@ def _run_once(args: argparse.Namespace) -> dict[str, Any]:
             max_jobs_per_run=max(1, int(args.max_jobs_per_run)),
             max_papers=normalized_max_papers,
         )
-        if args.skip_embed or int(prepare_result.get("success_count", 0) or 0) <= 0:
+        if args.skip_embed:
             prepare_result["embed"] = {
                 "stage": "embed_after_prepare",
-                "status": "skipped" if args.skip_embed else "no_op",
-                "reason": "skip_embed_enabled" if args.skip_embed else "no_prepare_success",
+                "status": "skipped",
+                "reason": "skip_embed_enabled",
             }
             return prepare_result
 
-        embed_result = _run_embed_after_prepare(
-            prepare_result=prepare_result,
-            embed_max_chunks=normalized_embed_max_chunks,
-            embed_backlog_max_chunks=normalized_embed_backlog_max_chunks,
-        )
+        # prepare 성공이 없어도 backlog 임베딩은 예산만큼 진행한다.
+        try:
+            embed_result = _run_embed_after_prepare(
+                prepare_result=prepare_result,
+                embed_max_chunks=normalized_embed_max_chunks,
+                embed_backlog_max_chunks=normalized_embed_backlog_max_chunks,
+            )
+        except Exception as exc:
+            embed_result = {
+                "stage": "embed_after_prepare",
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
         prepare_result["embed"] = embed_result
 
         embed_status = str(embed_result.get("status") or "")
@@ -221,7 +223,7 @@ def main() -> int:
         "--embed-backlog-max-chunks",
         type=int,
         default=0,
-        help="auto 모드에서 신규 논문 처리 뒤 추가로 태울 backlog 임베딩 최대 청크 수. 기본값은 0이다.",
+        help="auto 모드에서 run마다 추가로 태울 backlog 임베딩 최대 청크 수(신규 prepare 성공 여부와 무관). 기본값은 0이다.",
     )
     parser.add_argument(
         "--skip-embed",
@@ -248,7 +250,9 @@ def main() -> int:
         help="auto loop 실행 시 새 작업 알림을 기다릴 최대 시간(초). 기본값은 120초다.",
     )
     args = parser.parse_args()
+    PaperRepository().ensure_schema()
     prepare_job_repository = PrepareJobRepository()
+    prepare_job_repository.ensure_schema()
 
     while True:
         result = _run_once(args)

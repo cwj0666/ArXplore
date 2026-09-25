@@ -37,8 +37,8 @@ class PdfExtractorMixin:
         sections = [{'title': 'Abstract', 'text': cleaned}] if cleaned else []
         return FulltextParseResult(text=cleaned, sections=sections, source='fallback_abstract', quality_metrics=self._build_fulltext_quality_metrics(text=cleaned, sections=sections, source='fallback_abstract'))
 
-    @staticmethod
-    def _extract_pdf_text(content: bytes) -> str:
+    @classmethod
+    def _extract_pdf_text(cls, content: bytes) -> str:
         if PdfReader is None:
             return ''
         try:
@@ -48,10 +48,10 @@ class PdfExtractorMixin:
         pages: list[str] = []
         for page in reader.pages:
             page_text = page.extract_text() or ''
-            cleaned_page = FulltextParser._normalize_extracted_page_text(page_text)
+            cleaned_page = cls._normalize_extracted_page_text(page_text)
             if cleaned_page:
                 pages.append(cleaned_page)
-        return FulltextParser._normalize_text('\n\n'.join(pages))
+        return cls._normalize_text('\n\n'.join(pages))
 
     @staticmethod
     def _build_fulltext_quality_metrics(*, text: str, sections: list[dict[str, Any]], source: str) -> dict[str, Any]:

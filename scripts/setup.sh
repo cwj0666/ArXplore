@@ -6,13 +6,28 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${REPO_ROOT}"
 
+env_value() {
+  local key="$1" default="${2:-}" value=""
+  if [[ -n "${!key:-}" ]]; then
+    printf '%s' "${!key}"
+    return
+  fi
+  if [[ -f .env ]]; then
+    value="$(grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2- || true)"
+    value="${value%$'\r'}"
+    value="${value#\"}"; value="${value%\"}"
+    value="${value#\'}"; value="${value%\'}"
+  fi
+  printf '%s' "${value:-${default}}"
+}
+
 # ── forward 서브커맨드 ──────────────────────────────────────────────────────
 if [[ "${1:-}" == "forward" ]]; then
-  source "${REPO_ROOT}/.env" 2>/dev/null || true
-  SERVER_IP="${TAILSCALE_SERVER_IP:-100.106.29.101}"
-  AIRFLOW_PORT="${SERVER_AIRFLOW_PORT:-18080}"
-  POSTGRES_PORT="${SERVER_POSTGRES_PORT:-15432}"
-  MONGO_PORT="${SERVER_MONGO_PORT:-17017}"
+  SERVER_IP="$(env_value TAILSCALE_SERVER_IP)"
+  : "${SERVER_IP:?Set TAILSCALE_SERVER_IP in .env (server Tailscale IP)}"
+  AIRFLOW_PORT="$(env_value SERVER_AIRFLOW_PORT 18080)"
+  POSTGRES_PORT="$(env_value SERVER_POSTGRES_PORT 15432)"
+  MONGO_PORT="$(env_value SERVER_MONGO_PORT 17017)"
   ACTION="${2:-start}"
 
   get_pids() {
@@ -78,13 +93,13 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-DJANGO_SECRET_VALUE="$(grep -E '^DJANGO_SECRET_KEY=' .env | tail -n 1 | cut -d= -f2- || true)"
+DJANGO_SECRET_VALUE="$(env_value DJANGO_SECRET_KEY)"
 if [[ -z "${DJANGO_SECRET_VALUE}" || "${DJANGO_SECRET_VALUE}" == change-me* ]]; then
   echo "DJANGO_SECRET_KEY가 설정되지 않았습니다. .env에 실제 secret key를 추가하세요."
   exit 1
 fi
 
-PROD_POSTGRES_VALUE="$(grep -E '^PROD_POSTGRES_HOST=' .env | tail -n 1 | cut -d= -f2- || true)"
+PROD_POSTGRES_VALUE="$(env_value PROD_POSTGRES_HOST)"
 if [[ -z "${PROD_POSTGRES_VALUE}" ]]; then
   echo "PROD_POSTGRES_HOST가 설정되지 않았습니다. .env에 메인 서버 PostgreSQL host를 추가하세요."
   exit 1
@@ -98,8 +113,8 @@ docker compose ps
 
 echo
 echo "[arxplore] 접속 정보"
-echo "Web:      http://localhost:${PROD_HTTP_PORT:-80}   (nginx)"
-echo "Vite:     http://localhost:${FRONTEND_PORT:-5173}  (프론트 수정 확인용)"
+echo "Web:      http://localhost:$(env_value PROD_HTTP_PORT 80)   (nginx)"
+echo "Vite:     http://localhost:$(env_value FRONTEND_PORT 5173)  (프론트 수정 확인용)"
 echo
 echo "내리기:              docker compose down"
 echo "parser + worker:    docker compose --profile parser up -d --build"

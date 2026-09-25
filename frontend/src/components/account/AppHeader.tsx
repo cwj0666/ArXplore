@@ -17,10 +17,6 @@ export function AppHeader({ session, onOpenSettings, onLogout }: AppHeaderProps)
   const location = useLocation();
   const isLoginPage = location.pathname === "/login/";
 
-  if (location.pathname === "/" || location.pathname.startsWith("/papers/") || location.pathname === "/login/") {
-    return null;
-  }
-
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname, location.search]);
@@ -39,6 +35,10 @@ export function AppHeader({ session, onOpenSettings, onLogout }: AppHeaderProps)
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menuOpen]);
+
+  if (location.pathname === "/" || location.pathname.startsWith("/papers/") || location.pathname === "/login/") {
+    return null;
+  }
 
   const initial = session.username ? session.username.slice(0, 1).toUpperCase() : "?";
 

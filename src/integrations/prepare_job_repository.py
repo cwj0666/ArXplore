@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date as date_cls
 import select
 from typing import Any
 
@@ -18,7 +18,6 @@ class PrepareJobRepository:
 
     def __init__(self, *, settings: AppSettings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._ensure_schema()
 
     def enqueue_prepare_job(
         self,
@@ -221,6 +220,61 @@ class PrepareJobRepository:
                 (error, mode, target_date),
             )
 
+    def requeue_failed_prepare_jobs(
+        self,
+        *,
+        mode: str,
+        since_date: str | None = None,
+        dry_run: bool = True,
+    ) -> list[dict[str, Any]]:
+        """failed 상태 작업을 조회하고, dry_run이 아니면 pending으로 되돌린다.
+
+        반환값은 대상(또는 실제로 전환된) 작업의 id, target_date, attempt_count 목록이다.
+        """
+        normalized_since = date_cls.fromisoformat(since_date.strip()).isoformat() if since_date else None
+        where_sql = "WHERE mode = %s AND status = 'failed'"
+        params: list[Any] = [mode]
+        if normalized_since:
+            where_sql += " AND target_date >= %s"
+            params.append(normalized_since)
+
+        with self._connection() as connection, connection.cursor() as cursor:
+            if dry_run:
+                cursor.execute(
+                    f"""
+                    SELECT id, target_date, attempt_count
+                    FROM prepare_jobs
+                    {where_sql}
+                    ORDER BY target_date ASC, id ASC
+                    """,
+                    tuple(params),
+                )
+                rows = cursor.fetchall()
+            else:
+                cursor.execute(
+                    f"""
+                    UPDATE prepare_jobs
+                    SET
+                        status = 'pending',
+                        worker_id = NULL,
+                        error = NULL,
+                        claimed_at = NULL,
+                        finished_at = NULL,
+                        updated_at = NOW()
+                    {where_sql}
+                    RETURNING id, target_date, attempt_count
+                    """,
+                    tuple(params),
+                )
+                rows = sorted(cursor.fetchall(), key=lambda row: (str(row[1]), row[0]))
+                for row in rows:
+                    cursor.execute("SELECT pg_notify(%s, %s)", (self.channel_name, f"{mode}:{row[1]}"))
+
+        return [
+            {"id": int(row[0]), "target_date": str(row[1]), "attempt_count": int(row[2] or 0)}
+            for row in rows
+        ]
+
     def wait_for_prepare_job(
         self,
         *,
@@ -254,7 +308,8 @@ class PrepareJobRepository:
         finally:
             connection.close()
 
-    def _ensure_schema(self) -> None:
+    def ensure_schema(self) -> None:
+        """prepare_jobs 테이블·인덱스를 멱등하게 생성한다. 프로세스 시작/마이그레이션 시 1회만 호출한다."""
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """

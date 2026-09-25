@@ -25,8 +25,8 @@ class TextCleanerMixin:
         normalized = re.sub('\\n{3,}', '\n\n', normalized)
         return normalized.strip()
 
-    @staticmethod
-    def _normalize_extracted_page_text(text: str) -> str:
+    @classmethod
+    def _normalize_extracted_page_text(cls, text: str) -> str:
         lines = [line.strip() for line in text.replace('\x00', ' ').splitlines()]
         filtered_lines: list[str] = []
         for line in lines:
@@ -45,11 +45,11 @@ class TextCleanerMixin:
                 continue
             if len(re.findall('/uni\\d{8}', line)) >= 3:
                 continue
-            if FulltextParser._looks_like_running_header_footer(line):
+            if cls._looks_like_running_header_footer(line):
                 continue
-            if FulltextParser._looks_like_toc_line(line):
+            if cls._looks_like_toc_line(line):
                 continue
-            filtered_lines.extend(FulltextParser._split_inline_heading_line(line))
+            filtered_lines.extend(cls._split_inline_heading_line(line))
         stitched_lines: list[str] = []
         for line in filtered_lines:
             if not line:
@@ -58,8 +58,8 @@ class TextCleanerMixin:
                 continue
             if stitched_lines:
                 previous = stitched_lines[-1]
-                if previous and FulltextParser._should_merge_lines(previous, line):
-                    stitched_lines[-1] = FulltextParser._merge_lines(previous, line)
+                if previous and cls._should_merge_lines(previous, line):
+                    stitched_lines[-1] = cls._merge_lines(previous, line)
                     continue
             stitched_lines.append(line)
         return '\n'.join(stitched_lines).strip()
@@ -83,15 +83,26 @@ class TextCleanerMixin:
         return normalized.strip()
 
     @staticmethod
-    def _prettify_section_title(title: str) -> str:
+    def _looks_like_numbered_heading(title: str) -> bool:
+        words = re.findall('[A-Za-z0-9-]+', title)
+        if not words:
+            return False
+        uppercase_like = sum((1 for word in words if word[0].isupper() or word[0].isdigit() or word.isupper()))
+        ratio = uppercase_like / len(words)
+        if len(words) <= 4:
+            return ratio >= 0.5
+        return ratio >= 0.6
+
+    @classmethod
+    def _prettify_section_title(cls, title: str) -> str:
         compact = ' '.join(title.split())
         if compact.isupper():
-            return re.sub('[A-Z]+', lambda match: match.group(0) if match.group(0) in FulltextParser._KNOWN_UPPERCASE_TITLE_TOKENS or len(match.group(0)) == 1 else match.group(0).capitalize(), compact)
+            return re.sub('[A-Z]+', lambda match: match.group(0) if match.group(0) in cls._KNOWN_UPPERCASE_TITLE_TOKENS or len(match.group(0)) == 1 else match.group(0).capitalize(), compact)
         return compact
 
-    @staticmethod
-    def _strip_inline_heading_prefix(text: str) -> str:
-        split = FulltextParser._find_inline_heading_split(text)
+    @classmethod
+    def _strip_inline_heading_prefix(cls, text: str) -> str:
+        split = cls._find_inline_heading_split(text)
         if split is not None:
             (_, rest) = split
             return rest
@@ -110,26 +121,26 @@ class TextCleanerMixin:
         compact = re.sub('^[,;:)\\]\\}]+\\s*', '', compact)
         return compact
 
-    @staticmethod
-    def _split_inline_heading_line(line: str) -> list[str]:
+    @classmethod
+    def _split_inline_heading_line(cls, line: str) -> list[str]:
         line = line.strip()
         if not line:
             return ['']
-        split = FulltextParser._find_inline_heading_split(line)
+        split = cls._find_inline_heading_split(line)
         if split is not None:
             (head, rest) = split
             return [head, rest]
         return [line]
 
-    @staticmethod
-    def _find_inline_heading_split(text: str) -> tuple[str, str] | None:
+    @classmethod
+    def _find_inline_heading_split(cls, text: str) -> tuple[str, str] | None:
         compact = ' '.join(text.split())
-        title_prefix = FulltextParser._find_short_title_prefix(compact)
+        title_prefix = cls._find_short_title_prefix(compact)
         if title_prefix is not None:
             return title_prefix
         if not re.match('^\\d+(?:\\.\\d+)+(?:[.)])?\\s+', compact):
             return None
-        for starter in FulltextParser._INLINE_BODY_STARTERS:
+        for starter in cls._INLINE_BODY_STARTERS:
             marker = f' {starter} '
             index = compact.find(marker)
             if index == -1:
@@ -201,15 +212,15 @@ class TextCleanerMixin:
             return True
         return False
 
-    @staticmethod
-    def _should_merge_lines(previous: str, current: str) -> bool:
+    @classmethod
+    def _should_merge_lines(cls, previous: str, current: str) -> bool:
         if not previous or not current:
             return False
         if previous.endswith('-'):
             return True
         if previous.endswith(('.', '?', '!', ':', ';')):
             return False
-        if FulltextParser._normalize_section_heading(current) is not None:
+        if cls._normalize_section_heading(current) is not None:
             return False
         if current[0].islower() or current[0] in '(["\'':
             return True

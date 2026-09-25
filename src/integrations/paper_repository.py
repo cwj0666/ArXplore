@@ -10,13 +10,24 @@ from psycopg2.extras import Json
 
 from src.shared import AppSettings, build_postgres_connection_params, get_settings
 
+# src/integrations/pdf_parser/section_roles.is_references_section_title의 SQL(~*) 버전.
+# 제목 전체가 참고문헌 제목일 때만 매치하므로 "Reference Model", "Direct Preference Optimization"은 제외된다.
+# PostgreSQL ARE에서 \b는 backspace라 단어 경계로 쓸 수 없어 전체 매치(^...$)로 표현한다.
+REFERENCES_SECTION_TITLE_SQL_REGEX = (
+    r"^\s*(?:(?:\d+(?:\.\d+)*[.)]?|[ivxlc]+[.)]?)\s+)?[\s.:]*"
+    r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?[\s.:]*$"
+)
+
 
 class PaperRepository:
-    """정제 논문과 논문 청크를 PostgreSQL에 저장하고 조회하는 진입점."""
+    """정제 논문과 논문 청크를 PostgreSQL에 저장하고 조회하는 진입점.
+
+    생성자는 DDL을 실행하지 않는다. 스키마 생성은 `ensure_schema()`를 명시적으로 호출하거나
+    `scripts/migrate_schema.py`로 수행한다.
+    """
 
     def __init__(self, *, settings: AppSettings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._ensure_schema()
 
     def save_paper(self, paper: dict[str, Any]) -> str:
         """정제 논문 1건을 저장하고 arxiv_id를 반환한다."""
@@ -35,22 +46,25 @@ class PaperRepository:
                 ) VALUES (
                     %(arxiv_id)s, %(title)s, %(authors)s, %(abstract)s, %(primary_category)s,
                     %(categories)s, %(pdf_url)s, %(published_at)s, %(arxiv_updated_at)s,
-                    %(upvotes)s, %(github_url)s, %(github_stars)s, %(citation_count)s, %(source)s, NOW()
+                    COALESCE(%(upvotes)s::integer, 0), %(github_url)s, %(github_stars)s, %(citation_count)s, %(source)s, NOW()
                 )
                 ON CONFLICT (arxiv_id)
                 DO UPDATE SET
                     title = EXCLUDED.title,
                     authors = EXCLUDED.authors,
                     abstract = EXCLUDED.abstract,
-                    primary_category = EXCLUDED.primary_category,
-                    categories = EXCLUDED.categories,
+                    primary_category = COALESCE(EXCLUDED.primary_category, papers.primary_category),
+                    categories = CASE
+                        WHEN EXCLUDED.categories = '[]'::jsonb THEN papers.categories
+                        ELSE EXCLUDED.categories
+                    END,
                     pdf_url = EXCLUDED.pdf_url,
-                    published_at = EXCLUDED.published_at,
-                    updated_at = EXCLUDED.updated_at,
-                    upvotes = EXCLUDED.upvotes,
-                    github_url = EXCLUDED.github_url,
-                    github_stars = EXCLUDED.github_stars,
-                    citation_count = EXCLUDED.citation_count,
+                    published_at = COALESCE(EXCLUDED.published_at, papers.published_at),
+                    updated_at = COALESCE(EXCLUDED.updated_at, papers.updated_at),
+                    upvotes = COALESCE(%(upvotes)s::integer, papers.upvotes),
+                    github_url = COALESCE(EXCLUDED.github_url, papers.github_url),
+                    github_stars = COALESCE(EXCLUDED.github_stars, papers.github_stars),
+                    citation_count = COALESCE(EXCLUDED.citation_count, papers.citation_count),
                     source = EXCLUDED.source,
                     updated_at_utc = NOW()
                 """,
@@ -64,7 +78,7 @@ class PaperRepository:
                     "pdf_url": sanitized_paper.get("pdf_url"),
                     "published_at": self._to_datetime(sanitized_paper.get("published_at")),
                     "arxiv_updated_at": self._to_datetime(sanitized_paper.get("updated_at")),
-                    "upvotes": int(sanitized_paper.get("upvotes") or 0),
+                    "upvotes": self._to_int_or_none(sanitized_paper.get("upvotes")),
                     "github_url": sanitized_paper.get("github_url"),
                     "github_stars": self._to_int_or_none(sanitized_paper.get("github_stars")),
                     "citation_count": self._to_int_or_none(sanitized_paper.get("citation_count")),
@@ -302,6 +316,16 @@ class PaperRepository:
             "updated_at": row[7].isoformat() if row[7] else None,
         }
 
+    def get_paper_fulltext_source(self, arxiv_id: str) -> str | None:
+        """저장된 fulltext의 source 값만 조회한다. fulltext가 없으면 None."""
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT source FROM paper_fulltexts WHERE arxiv_id = %s",
+                (arxiv_id,),
+            )
+            row = cursor.fetchone()
+        return row[0] if row is not None else None
+
     def list_paper_chunks(self, arxiv_id: str, *, limit: int | None = None) -> list[dict[str, Any]]:
         """단일 논문의 청크 목록을 chunk_index 순으로 조회한다."""
         query = """
@@ -475,7 +499,7 @@ class PaperRepository:
                         END AS section_boost,
                         CASE
                             WHEN c.section_title ILIKE '%%Table of Contents%%' THEN -0.12
-                            WHEN c.section_title ILIKE '%%References%%' THEN -0.08
+                            WHEN c.section_title ~* '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
                             WHEN c.section_title = 'Front Matter' THEN -0.03
                             ELSE 0
                         END AS structural_adjustment
@@ -583,7 +607,8 @@ class PaperRepository:
         finally:
             connection.close()
 
-    def _ensure_schema(self) -> None:
+    def ensure_schema(self) -> None:
+        """테이블·인덱스를 멱등하게 생성한다. 요청 경로가 아닌 마이그레이션/프로세스 시작 시 1회만 호출한다."""
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             cursor.execute(
@@ -722,7 +747,6 @@ class PaperRepository:
                 );
                 """
             )
-            cursor.execute("DROP TABLE IF EXISTS paper_ai_summaries;")
 
     def get_paper_overview(self, arxiv_id: str) -> dict[str, Any] | None:
         with self._connection() as connection, connection.cursor() as cursor:

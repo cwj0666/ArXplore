@@ -21,7 +21,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "${SERVER_POSTGRES_PORT:-15432}:5432"
+      - "${TAILSCALE_SERVER_IP:?Set TAILSCALE_SERVER_IP}:${SERVER_POSTGRES_PORT:-15432}:5432"
     restart: unless-stopped
 
   arxplore-mongo:
@@ -47,7 +47,7 @@ services:
       timeout: 10s
       retries: 10
     ports:
-      - "${SERVER_MONGO_PORT:-17017}:27017"
+      - "${TAILSCALE_SERVER_IP:?Set TAILSCALE_SERVER_IP}:${SERVER_MONGO_PORT:-17017}:27017"
     restart: unless-stopped
 
   arxplore-airflow-init:
@@ -60,10 +60,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "False"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USER:?Set AIRFLOW_ADMIN_USER in .env}:admin
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
       AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
@@ -90,10 +91,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "False"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USER:?Set AIRFLOW_ADMIN_USER in .env}:admin
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
       AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
@@ -108,7 +110,7 @@ services:
       arxplore-airflow-init:
         condition: service_completed_successfully
     ports:
-      - "${SERVER_AIRFLOW_PORT:-18080}:8080"
+      - "${TAILSCALE_SERVER_IP:?Set TAILSCALE_SERVER_IP}:${SERVER_AIRFLOW_PORT:-18080}:8080"
     restart: unless-stopped
 
   arxplore-airflow-scheduler:
@@ -121,10 +123,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "False"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USER:?Set AIRFLOW_ADMIN_USER in .env}:admin
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
       AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
@@ -150,10 +153,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "False"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USER:?Set AIRFLOW_ADMIN_USER in .env}:admin
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
       AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}

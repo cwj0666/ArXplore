@@ -24,12 +24,7 @@ export async function fetchPaperDetail(arxivId: string): Promise<DetailResponse>
 
 
 export async function fetchPaperAnalysis(arxivId: string): Promise<AnalysisResponse> {
-  return fetchJson<AnalysisResponse>(buildPaperPath(arxivId, "analyze/"), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
-  });
+  return fetchJsonWithBody<AnalysisResponse>(buildPaperPath(arxivId, "analyze/"), "POST");
 }
 
 

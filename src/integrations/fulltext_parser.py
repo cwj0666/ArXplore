@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import io
 import re
-from collections import Counter
-from typing import Any
-import requests
 
 from src.integrations.layout_parser_client import LayoutParserClient
 from src.integrations.pdf_parser.types import FulltextParseResult
@@ -13,10 +9,7 @@ from src.integrations.pdf_parser.layout_parser import LayoutIntegrationMixin
 from src.integrations.pdf_parser.chunker import SemanticChunkerMixin
 from src.integrations.pdf_parser.cleaner import TextCleanerMixin
 
-try:
-    from pypdf import PdfReader
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    PdfReader = None  # type: ignore[assignment]
+__all__ = ["FulltextParser", "FulltextParseResult"]
 
 
 class FulltextParser(

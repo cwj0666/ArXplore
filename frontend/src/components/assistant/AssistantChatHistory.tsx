@@ -1,10 +1,10 @@
 import { forwardRef } from "react";
 
 import { renderAssistantContent } from "../../helpers/assistant/renderAssistantContent";
-import type { AssistantChatMessage } from "../../types/assistant";
+import type { AssistantDisplayMessage } from "../../types/assistant";
 
 interface AssistantChatHistoryProps {
-  messages: AssistantChatMessage[];
+  messages: AssistantDisplayMessage[];
   isSending: boolean;
   streamingContent?: string;
 }
@@ -26,6 +26,14 @@ export const AssistantChatHistory = forwardRef<
   return (
     <div className="assistant-chat-history" id="assistant-chat-history" ref={ref} onClick={handleChatLinkClick}>
       {messages.map((message, index) => {
+        if (message.isNotice) {
+          return (
+            <div key={`notice-${index}`} className="assistant-message assistant-message-notice" role="status">
+              <p>{message.content}</p>
+            </div>
+          );
+        }
+
         if (message.role === "assistant") {
           return (
             <div

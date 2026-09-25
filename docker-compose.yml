@@ -17,7 +17,7 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
       DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://localhost,http://127.0.0.1}
       POSTGRES_HOST: ${PROD_POSTGRES_HOST:?Set PROD_POSTGRES_HOST to the main server PostgreSQL host}
-      SERVER_POSTGRES_PORT: "5432"
+      SERVER_POSTGRES_PORT: ${SERVER_POSTGRES_PORT:-15432}
       AIRFLOW_BASE_URL: ${AIRFLOW_BASE_URL:-}
     working_dir: /workspace/backend
     command: >
@@ -79,7 +79,7 @@ services:
       DJANGO_DEBUG: "False"
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env before running}
       POSTGRES_HOST: ${PROD_POSTGRES_HOST:?Set PROD_POSTGRES_HOST to the main server PostgreSQL host}
-      SERVER_POSTGRES_PORT: "5432"
+      SERVER_POSTGRES_PORT: ${SERVER_POSTGRES_PORT:-15432}
     working_dir: /workspace
     command: >
       bash -lc "python3 -m src.pipeline.prepare_worker --mode auto

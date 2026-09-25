@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import requests
 from typing import Any
 from .types import FulltextParseResult
@@ -63,8 +65,8 @@ class LayoutIntegrationMixin:
                 figures.append({'page': int(segment.get('page_number', 0) or 0), 'caption': caption, 'confidence': 1.0 if caption else 0.5})
         return {'tables': tables, 'figures': figures}
 
-    @staticmethod
-    def _find_nearest_caption(segment: dict[str, Any], captions: list[dict[str, Any]]) -> str | None:
+    @classmethod
+    def _find_nearest_caption(cls, segment: dict[str, Any], captions: list[dict[str, Any]]) -> str | None:
         page_number = int(segment.get('page_number', 0) or 0)
         top = float(segment.get('top', 0.0) or 0.0)
         same_page_captions = [caption for caption in captions if int(caption.get('page_number', 0) or 0) == page_number]
@@ -74,5 +76,5 @@ class LayoutIntegrationMixin:
         text = str(nearest.get('text') or '').strip()
         if not text:
             return None
-        return FulltextParser._normalize_layout_heading_like_text(text)
+        return cls._normalize_layout_heading_like_text(text)
 

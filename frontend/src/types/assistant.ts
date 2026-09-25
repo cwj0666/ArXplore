@@ -7,6 +7,10 @@ export interface AssistantChatMessage {
   content: string;
 }
 
+export interface AssistantDisplayMessage extends AssistantChatMessage {
+  isNotice?: boolean;
+}
+
 export interface AssistantChatRequest {
   message: string;
   history: AssistantChatMessage[];

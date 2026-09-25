@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 import re
 from typing import Any
@@ -392,26 +393,45 @@ def answer_agent_chat(
     return result.get("answer") or "답변을 생성할 수 없습니다."
 
 
-def stream_agent_chat(
+@dataclass(frozen=True)
+class PreparedAgentChat:
+    api_key: str
+    message: str
+    history: list[tuple[str, str]]
+    username: str
+
+
+def prepare_agent_chat(
     user_message: str,
-    chat_history: list[dict[str, Any]],
+    chat_history: Any,
     *,
     user: AbstractBaseUser | AnonymousUser,
     session_api_key: str | None,
-):
+) -> PreparedAgentChat:
     _require_authenticated_user(user)
     api_key = _require_personal_api_key(session_api_key)
     cleaned_message = user_message.strip()
     if not cleaned_message:
         raise ValueError("메시지를 입력하세요.")
+    if not isinstance(chat_history, list):
+        raise ValueError("잘못된 요청입니다.")
 
+    return PreparedAgentChat(
+        api_key=api_key,
+        message=cleaned_message,
+        history=_build_history_tuples(chat_history),
+        username=user.get_username(),
+    )
+
+
+def stream_agent_chat(prepared: PreparedAgentChat):
     from src.core.agent.chatbot import stream_agent_search
 
-    with override_openai_runtime(api_key=api_key):
+    with override_openai_runtime(api_key=prepared.api_key):
         yield from stream_agent_search(
-            cleaned_message,
-            chat_history=_build_history_tuples(chat_history),
-            user=user.get_username(),
+            prepared.message,
+            chat_history=prepared.history,
+            user=prepared.username,
         )
 
 
@@ -453,7 +473,8 @@ def _build_history_tuples(chat_history: list[dict[str, Any]]) -> list[tuple[str,
     return [
         (message["role"], message["content"])
         for message in chat_history
-        if message.get("role") in ("user", "assistant") and message.get("content")
+        if isinstance(message, dict)
+        and message.get("role") in ("user", "assistant") and message.get("content")
     ]
 
 

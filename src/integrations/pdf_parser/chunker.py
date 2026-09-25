@@ -3,14 +3,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .section_roles import is_references_section_title
+
 
 class SemanticChunkerMixin:
     """chunker mixin logic."""
 
-    @staticmethod
-    def build_chunks(text: str, *, sections: list[dict[str, Any]] | None=None, max_chars: int=1800, overlap_chars: int=200) -> list[dict[str, Any]]:
+    @classmethod
+    def build_chunks(cls, text: str, *, sections: list[dict[str, Any]] | None=None, max_chars: int=1800, overlap_chars: int=200) -> list[dict[str, Any]]:
         """문장/문단 경계를 우선 고려해 청크를 생성한다."""
-        normalized = FulltextParser._normalize_text(text)
+        normalized = cls._normalize_text(text)
         if not normalized:
             return []
         max_chars = max(300, max_chars)
@@ -20,30 +22,30 @@ class SemanticChunkerMixin:
         normalized_sections = sections or [{'title': 'Full Text', 'text': normalized}]
         for (section_index, section) in enumerate(normalized_sections):
             section_title = str(section.get('title') or 'Full Text').strip() or 'Full Text'
-            section_text = FulltextParser._normalize_text(str(section.get('text') or ''))
+            section_text = cls._normalize_text(str(section.get('text') or ''))
             if not section_text:
                 continue
             start = 0
             section_chunk_index = 0
             while start < len(section_text):
-                end = FulltextParser._adjust_chunk_end(section_text, start, max_chars)
+                end = cls._adjust_chunk_end(section_text, start, max_chars)
                 candidate = section_text[start:end]
-                clean_chunk = FulltextParser._strip_inline_heading_prefix(candidate.strip())
-                clean_chunk = FulltextParser._normalize_chunk_opening(clean_chunk)
+                clean_chunk = cls._strip_inline_heading_prefix(candidate.strip())
+                clean_chunk = cls._normalize_chunk_opening(clean_chunk)
                 if clean_chunk:
-                    metadata = {'section_index': section_index, 'section_chunk_index': section_chunk_index, 'section_char_length': len(section_text), 'char_start': start, 'char_end': end, 'char_length': len(clean_chunk), 'starts_mid_sentence': FulltextParser._starts_mid_sentence(section_text, start), 'ends_mid_sentence': FulltextParser._ends_mid_sentence(section_text, end), 'content_role': FulltextParser._infer_chunk_content_role(section_title, clean_chunk)}
-                    new_chunk = {'chunk_index': chunk_index, 'chunk_text': clean_chunk, 'section_title': section_title, 'token_count': FulltextParser._rough_token_count(clean_chunk), 'metadata': metadata}
-                    if FulltextParser._should_absorb_into_previous(chunks, new_chunk):
-                        FulltextParser._merge_chunk_into_previous(chunks[-1], new_chunk)
+                    metadata = {'section_index': section_index, 'section_chunk_index': section_chunk_index, 'section_char_length': len(section_text), 'char_start': start, 'char_end': end, 'char_length': len(clean_chunk), 'starts_mid_sentence': cls._starts_mid_sentence(section_text, start), 'ends_mid_sentence': cls._ends_mid_sentence(section_text, end), 'content_role': cls._infer_chunk_content_role(section_title, clean_chunk)}
+                    new_chunk = {'chunk_index': chunk_index, 'chunk_text': clean_chunk, 'section_title': section_title, 'token_count': cls._rough_token_count(clean_chunk), 'metadata': metadata}
+                    if cls._should_absorb_into_previous(chunks, new_chunk):
+                        cls._merge_chunk_into_previous(chunks[-1], new_chunk)
                     else:
                         chunks.append(new_chunk)
                         chunk_index += 1
                         section_chunk_index += 1
                 if end >= len(section_text):
                     break
-                start = FulltextParser._adjust_next_chunk_start(section_text, end, overlap_chars)
-        FulltextParser._refine_chunk_content_roles(chunks)
-        FulltextParser._annotate_chunk_links(chunks)
+                start = cls._adjust_next_chunk_start(section_text, end, overlap_chars)
+        cls._refine_chunk_content_roles(chunks)
+        cls._annotate_chunk_links(chunks)
         return chunks
 
     @staticmethod
@@ -65,8 +67,8 @@ class SemanticChunkerMixin:
             return start + last_space + 1
         return tentative_end
 
-    @staticmethod
-    def _adjust_next_chunk_start(text: str, end: int, overlap_chars: int) -> int:
+    @classmethod
+    def _adjust_next_chunk_start(cls, text: str, end: int, overlap_chars: int) -> int:
         start = max(0, end - overlap_chars)
         if start <= 0:
             return 0
@@ -86,7 +88,7 @@ class SemanticChunkerMixin:
         while start < len(text) and text[start].isspace():
             start += 1
         fragment_window = text[start:min(len(text), start + 260)]
-        if FulltextParser._looks_like_fragmentary_chunk_start(fragment_window):
+        if cls._looks_like_fragmentary_chunk_start(fragment_window):
             sentence_break = re.search('(?:\\.\\s+|\\?\\s+|!\\s+|\\n{2,})', fragment_window)
             if sentence_break is not None:
                 start += sentence_break.end()
@@ -116,14 +118,14 @@ class SemanticChunkerMixin:
             return True
         return bool(re.fullmatch('[\\d\\s.,;:()[\\]{}%-]{1,360}', new_text)) or len(new_text.split()) <= 12 or bool(re.match('^[a-z0-9]', new_text))
 
-    @staticmethod
-    def _merge_chunk_into_previous(previous: dict[str, Any], new_chunk: dict[str, Any]) -> None:
+    @classmethod
+    def _merge_chunk_into_previous(cls, previous: dict[str, Any], new_chunk: dict[str, Any]) -> None:
         previous_text = str(previous.get('chunk_text') or '').rstrip()
         new_text = str(new_chunk.get('chunk_text') or '').lstrip()
         separator = '\n' if previous_text and (not previous_text.endswith('\n')) else ''
         merged_text = f'{previous_text}{separator}{new_text}'.strip()
         previous['chunk_text'] = merged_text
-        previous['token_count'] = FulltextParser._rough_token_count(merged_text)
+        previous['token_count'] = cls._rough_token_count(merged_text)
         previous_metadata = previous.setdefault('metadata', {})
         new_metadata = new_chunk.get('metadata') or {}
         previous_metadata['char_end'] = new_metadata.get('char_end', previous_metadata.get('char_end'))
@@ -145,7 +147,7 @@ class SemanticChunkerMixin:
         lowered = section_title.lower()
         if lowered == 'front matter':
             return 'front_matter'
-        if 'reference' in lowered or lowered.startswith('bibliography'):
+        if is_references_section_title(section_title):
             return 'references'
         if 'appendix' in lowered:
             return 'appendix'
@@ -200,13 +202,13 @@ class SemanticChunkerMixin:
             if current_role in {'body', 'front_matter'} and (not body_like) and cls._looks_like_table_like_chunk(chunk_text, compact):
                 metadata['content_role'] = 'table_like'
 
-    @staticmethod
-    def _looks_like_body_chunk(section_title: str, compact: str) -> bool:
+    @classmethod
+    def _looks_like_body_chunk(cls, section_title: str, compact: str) -> bool:
         if not compact:
             return False
         lowered_title = section_title.lower()
         if any((keyword in lowered_title for keyword in ('introduction', 'method', 'approach', 'experiment', 'result', 'discussion', 'conclusion', 'abstract', 'related work'))):
-            if FulltextParser._starts_like_body_paragraph(compact[:180], compact):
+            if cls._starts_like_body_paragraph(compact[:180], compact):
                 return True
         sentence_breaks = compact.count('. ') + compact.count('? ') + compact.count('! ')
         alphabetic_tokens = re.findall('[A-Za-z]{3,}', compact[:260])
@@ -216,12 +218,12 @@ class SemanticChunkerMixin:
                 return True
         return False
 
-    @staticmethod
-    def _looks_like_reference_chunk(compact: str) -> bool:
+    @classmethod
+    def _looks_like_reference_chunk(cls, compact: str) -> bool:
         compact_prefix = compact[:260]
         if not compact_prefix:
             return False
-        if FulltextParser._looks_like_body_chunk('Full Text', compact_prefix):
+        if cls._looks_like_body_chunk('Full Text', compact_prefix):
             return False
         if re.match('^(?:\\[\\d+\\]|\\d+\\.)\\s+[A-Z]', compact_prefix):
             return True
@@ -252,8 +254,8 @@ class SemanticChunkerMixin:
             return False
         return True
 
-    @staticmethod
-    def _looks_like_table_like_chunk(raw_text: str, compact: str) -> bool:
+    @classmethod
+    def _looks_like_table_like_chunk(cls, raw_text: str, compact: str) -> bool:
         if '/uni' in raw_text:
             return True
         if any((token in raw_text.lower() for token in ('<td', '</td', '<tr', '</tr', '<th', '</th'))):
@@ -272,7 +274,7 @@ class SemanticChunkerMixin:
         explicit_tabular_opening = bool(re.match('^[\\d.,;:()%-]', compact) or re.match('^(?:Table|Figure)\\s+\\d+[:.]', compact) or re.match('^\\d+\\.\\s*[A-Z][^.]{0,140}\\([a-z]\\)', compact) or (repeated_matrix_tokens >= 6))
         compact_row_like_block = numeric_cells >= 10 and (symbol_cells >= 2 or percentage_cells >= 2 or short_code_cells >= 3) and (len(re.findall('\\b[A-Z][A-Za-z-]{2,}\\b', compact)) >= 4)
         strong_numeric_block = compact and digits / len(compact) > 0.28 and (line_break_count >= 5) or (re.match('^[\\d.,;:()%-]', compact) and numeric_cells >= 10 and (line_break_count >= 2)) or (re.match('^(?:Table|Figure)\\s+\\d+\\b', compact) and numeric_heavy_lines >= 3 and (line_break_count >= 2)) or (repeated_matrix_tokens >= 6) or (len(lines) >= 8 and numeric_heavy_lines >= max(6, int(len(lines) * 0.7)) and (digits / max(1, len(compact)) > 0.08)) or compact_row_like_block
-        if FulltextParser._starts_like_body_paragraph(first_line, compact) and (not explicit_tabular_opening):
+        if cls._starts_like_body_paragraph(first_line, compact) and (not explicit_tabular_opening):
             return False
         if compact and digits / len(compact) > 0.28 and (line_break_count >= 5):
             return True

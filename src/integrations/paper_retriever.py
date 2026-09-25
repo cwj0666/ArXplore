@@ -4,7 +4,13 @@ import re
 
 from src.integrations.embedding_client import EmbeddingClient
 from src.integrations.paper_repository import PaperRepository
+from src.integrations.pdf_parser.section_roles import is_references_section_title
 from src.integrations.vector_repository import VectorRepository
+
+_REFERENCE_INTENT_PATTERN = re.compile(
+    r"\b(?:references?|bibliography|works\s+cited|cited\s+works)\b",
+    re.IGNORECASE,
+)
 
 
 class PaperRetriever:
@@ -160,7 +166,7 @@ class PaperRetriever:
         query_lowered = query.lower()
         appendix_requested = any(keyword in query_lowered for keyword in ("appendix", "supplement", "additional analysis"))
         conclusion_requested = any(keyword in query_lowered for keyword in ("conclusion", "limitation", "discussion"))
-        reference_requested = any(keyword in query_lowered for keyword in ("reference", "bibliography", "citation"))
+        reference_requested = self._reference_intent_requested(query) or bool(re.search(r"\bcitations?\b", query_lowered))
         section_intent_bonus = self._section_intent_bonus(query)
 
         reranked: list[dict] = []
@@ -180,7 +186,7 @@ class PaperRetriever:
                 rerank_adjustment -= 0.08
             if not conclusion_requested and any(keyword in section_lowered for keyword in ("conclusion", "discussion", "limitations")):
                 rerank_adjustment -= 0.03
-            if not reference_requested and any(keyword in section_lowered for keyword in ("reference", "bibliography", "acknowledg")):
+            if not reference_requested and (is_references_section_title(section_title) or "acknowledg" in section_lowered):
                 rerank_adjustment -= 0.18
             if content_role in {"front_matter", "table_like"}:
                 rerank_adjustment -= 0.02
@@ -245,7 +251,7 @@ class PaperRetriever:
                 continue
             if content_role == "front_matter":
                 continue
-            if any(keyword in section_title.lower() for keyword in ("reference", "bibliography", "works cited")):
+            if is_references_section_title(section_title):
                 continue
             if "front matter" in section_title.lower():
                 continue
@@ -574,17 +580,7 @@ class PaperRetriever:
     @staticmethod
     def _reference_intent_requested(query: str) -> bool:
         """사용자가 bibliography/reference 자체를 찾는 질의인지만 판별한다."""
-        lowered = query.lower()
-        return any(
-            keyword in lowered
-            for keyword in (
-                "reference",
-                "references",
-                "bibliography",
-                "works cited",
-                "cited works",
-            )
-        )
+        return bool(_REFERENCE_INTENT_PATTERN.search(query))
 
     @staticmethod
     def _looks_outline_like_text(text: str) -> bool:

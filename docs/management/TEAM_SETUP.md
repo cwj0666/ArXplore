@@ -38,7 +38,7 @@ docker compose version
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --auth-key=tskey-auth-x2N3j4V6jDqyX0T3dG4J75X1-z1QzFzS5J
+sudo tailscale up --auth-key=<TAILSCALE_AUTH_KEY>
 tailscale status
 ```
 
@@ -52,10 +52,12 @@ sudo tailscale up --auth-key=<전달받은 Auth Key>
 ### 연결 확인
 
 ```bash
-tailscale ping 100.106.29.101
+tailscale ping <TAILSCALE_SERVER_IP>
 ```
 
 `pong`이 오면 서버 연결이 정상이다.
+
+Auth Key와 서버 Tailscale IP는 저장소에 기록하지 않고 팀 내부 채널로 전달받는다. 서버 IP는 `.env`의 `TAILSCALE_SERVER_IP`에 넣는다.
 
 ## 5. 저장소 가져오기
 
@@ -80,8 +82,9 @@ docker compose up -d --force-recreate django nginx
 - `POSTGRES_DB=arxplore_meta`
 - `APP_POSTGRES_DB=arxplore_app`
 - `SERVER_MONGO_PORT`
-- `SERVER_POSTGRES_PORT`
+- `SERVER_POSTGRES_PORT` (서버 compose가 publish하는 호스트 포트, 기본 `15432`)
 - `LAYOUT_PARSER_BASE_URL`
+- `TAILSCALE_SERVER_IP` (`scripts/setup.sh forward`, 서버 compose 포트 바인딩에 사용)
 
 접속 값은 아래 규칙을 유지한다.
 
@@ -168,6 +171,16 @@ docker compose --profile parser exec prepare-worker \
 bash scripts/setup-server.sh
 docker compose -f docker-compose.server.yml ps
 ```
+
+서버 `.env`에는 아래 값이 반드시 있어야 한다. 비어 있으면 `docker compose`가 실행을 거부한다.
+
+| 항목 | 설명 |
+|------|------|
+| `TAILSCALE_SERVER_IP` | PostgreSQL(15432), MongoDB(17017), Airflow(18080)를 이 IP에만 바인딩한다. 로컬 worker가 Tailscale로 접속하므로 `127.0.0.1`로 바꾸지 않는다 |
+| `AIRFLOW_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`로 생성 |
+| `AIRFLOW_ADMIN_USER` | Airflow SimpleAuthManager의 admin 사용자 이름 |
+
+Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성한다. `docker logs arxplore-airflow-web`에서 확인하거나 컨테이너 안의 `simple_auth_manager_passwords.json.generated`를 확인한다.
 
 핵심 컨테이너:
 
@@ -258,9 +271,9 @@ bash scripts/setup.sh forward restart
 
 | 서비스 | 주소 |
 |--------|------|
-| PostgreSQL | `100.106.29.101:15432` |
-| MongoDB | `100.106.29.101:17017` |
-| Airflow API | `http://100.106.29.101:18080` |
+| PostgreSQL | `<TAILSCALE_SERVER_IP>:15432` |
+| MongoDB | `<TAILSCALE_SERVER_IP>:17017` |
+| Airflow API | `http://<TAILSCALE_SERVER_IP>:18080` |
 | Layout Parser | `http://172.17.0.1:5060` 또는 로컬 parser 주소 |
 
 ### Windows 브라우저 / DB 클라이언트 기준

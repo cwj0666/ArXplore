@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { postLogin, postSignup } from "../../helpers/accountApi";
+import { sanitizeNextPath } from "../../helpers/safeRedirect";
 import "./login-page.css";
 
 
@@ -20,7 +21,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const next = new URLSearchParams(location.search).get("next") || "/";
+  const next = sanitizeNextPath(new URLSearchParams(location.search).get("next"));
 
   const handleSubmit = async () => {
     setErrorMessage("");
@@ -60,7 +61,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     <>
     <div className="login-topbar">
       <div className="login-topbar-left">
-        <a href={next !== "/" ? next : "/"} className="back-btn">
+        <a href={next} className="back-btn">
           뒤로가기
         </a>
       </div>

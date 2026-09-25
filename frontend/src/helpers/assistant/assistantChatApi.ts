@@ -16,6 +16,29 @@ export async function postAssistantChat({
   return fetchJsonWithBody<AssistantChatResponse>(endpoint, "POST", { message, history });
 }
 
+export class AssistantRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AssistantRequestError";
+    this.status = status;
+  }
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as { error?: unknown };
+    if (payload && typeof payload.error === "string" && payload.error) {
+      return payload.error;
+    }
+  } catch {
+    // Non-JSON error bodies (e.g. proxy HTML pages) fall through to the status text.
+  }
+  const statusLabel = response.statusText ? `${response.status} ${response.statusText}` : `${response.status}`;
+  return `요청이 실패했습니다. (HTTP ${statusLabel})`;
+}
+
 export interface StreamAssistantChatParams extends AssistantChatRequest {
   endpoint: string;
   signal: AbortSignal;
@@ -40,6 +63,10 @@ export async function streamAssistantChat({
     body: JSON.stringify({ message, history }),
     signal,
   });
+
+  if (!response.ok) {
+    throw new AssistantRequestError(await readErrorMessage(response), response.status);
+  }
 
   if (!response.body) {
     throw new Error("스트리밍을 지원하지 않습니다.");

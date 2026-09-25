@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date as date_cls, timedelta
+import logging
 from typing import Any, Optional
 
 from src.integrations.fulltext_parser import FulltextParser
@@ -10,7 +11,13 @@ from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.integrations.raw_store import RawPaperStore
 from .tracing import build_pipeline_trace_config
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_ALLOWED_CATEGORIES = {"cs.AI", "cs.CL", "cs.CV", "cs.LG", "cs.RO", "stat.ML"}
+FALLBACK_ABSTRACT_SOURCE = "fallback_abstract"
+PDF_FULLTEXT_SOURCES = frozenset({"layout_pdf", "pdf"})
+MAX_RECORDED_FAILURES = 50
+MAX_FAILURE_ERROR_CHARS = 500
 
 
 def _sum_result_values(results: list[dict[str, Any]], key: str) -> int:
@@ -309,20 +316,33 @@ def prepare_single_paper(
         **fulltext.quality_metrics,
         **parser.summarize_chunks(chunks),
     }
-    if fulltext.text:
-        paper_repository.save_paper_fulltext(
-            arxiv_id,
-            text=fulltext.text,
-            sections=fulltext.sections,
-            source=fulltext.source,
-            quality_metrics=fulltext_quality_metrics,
-            artifacts=fulltext.artifacts,
-            parser_metadata=fulltext.parser_metadata,
-        )
-    if chunks:
-        paper_repository.save_paper_chunks(arxiv_id, chunks)
 
-    return {
+    # 일시적인 PDF 실패로 생긴 초록 폴백이 기존 PDF 본문을 덮어쓰면 청크 DELETE가 임베딩까지 CASCADE 삭제한다.
+    existing_source: str | None = None
+    skipped_fallback_overwrite = False
+    if fulltext.source == FALLBACK_ABSTRACT_SOURCE:
+        existing_source = paper_repository.get_paper_fulltext_source(arxiv_id)
+        skipped_fallback_overwrite = existing_source in PDF_FULLTEXT_SOURCES
+
+    saved_fulltext = 0
+    saved_chunks = 0
+    if not skipped_fallback_overwrite:
+        if fulltext.text:
+            paper_repository.save_paper_fulltext(
+                arxiv_id,
+                text=fulltext.text,
+                sections=fulltext.sections,
+                source=fulltext.source,
+                quality_metrics=fulltext_quality_metrics,
+                artifacts=fulltext.artifacts,
+                parser_metadata=fulltext.parser_metadata,
+            )
+            saved_fulltext = 1
+        if chunks:
+            paper_repository.save_paper_chunks(arxiv_id, chunks)
+            saved_chunks = len(chunks)
+
+    result = {
         "arxiv_id": arxiv_id,
         "title": prepared.get("title", ""),
         "primary_category": prepared.get("primary_category"),
@@ -332,12 +352,46 @@ def prepare_single_paper(
         "section_count": fulltext_quality_metrics.get("section_count", 0),
         "text_length": fulltext_quality_metrics.get("text_length", 0),
         "saved_paper": 1,
-        "saved_fulltext": 1 if fulltext.text else 0,
-        "saved_chunks": len(chunks),
+        "saved_fulltext": saved_fulltext,
+        "saved_chunks": saved_chunks,
         "artifacts": fulltext.artifacts,
         "parser_metadata": fulltext.parser_metadata,
         "quality_metrics": fulltext_quality_metrics,
     }
+    if skipped_fallback_overwrite:
+        result["skipped_fallback_overwrite"] = True
+        result["existing_fulltext_source"] = existing_source
+    return result
+
+
+def _format_failure_error(exc: Exception) -> str:
+    message = f"{type(exc).__name__}: {exc}"
+    return message[:MAX_FAILURE_ERROR_CHARS]
+
+
+def prepare_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    parser: FulltextParser,
+    paper_repository: PaperRepository,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """후보를 1건씩 처리하고, 한 논문의 예외가 나머지 처리를 막지 않도록 실패를 수집한다."""
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    for candidate in candidates:
+        try:
+            results.append(
+                prepare_single_paper(
+                    candidate,
+                    parser=parser,
+                    paper_repository=paper_repository,
+                )
+            )
+        except Exception as exc:
+            arxiv_id = str(candidate.get("arxiv_id") or "").strip() if isinstance(candidate, dict) else ""
+            logger.exception("prepare_single_paper failed: arxiv_id=%s", arxiv_id)
+            failures.append({"arxiv_id": arxiv_id, "error": _format_failure_error(exc)})
+    return results, failures
 
 
 def aggregate_prepare_results(
@@ -351,8 +405,22 @@ def aggregate_prepare_results(
     skipped_by_category: int,
     runtime: str,
     user: Optional[str],
+    failures: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """prepare_single_paper 결과를 현재 파이프라인 반환 구조로 집계한다."""
+    """prepare_single_paper 결과를 현재 파이프라인 반환 구조로 집계한다.
+
+    status는 실패가 있고 성공이 0건이면 failed, 일부 실패면 partial_failed, 그 외 success다.
+    """
+    failures = failures or []
+    success_count = len(results)
+    failure_count = len(failures)
+    if failure_count and not success_count:
+        status = "failed"
+    elif failure_count:
+        status = "partial_failed"
+    else:
+        status = "success"
+    skipped_fallback_overwrites = sum(1 for result in results if result.get("skipped_fallback_overwrite"))
     fallback_fulltexts = sum(1 for result in results if result.get("fallback_used"))
     saved_papers = _sum_result_values(results, "saved_paper")
     saved_fulltexts = _sum_result_values(results, "saved_fulltext")
@@ -361,7 +429,7 @@ def aggregate_prepare_results(
 
     return {
         "stage": "prepare_papers",
-        "status": "success",
+        "status": status,
         "target_date": normalized_date,
         "raw_payload_count": raw_count,
         "arxiv_candidate_count": len(deduplicated_ids),
@@ -373,6 +441,10 @@ def aggregate_prepare_results(
         "prepared_arxiv_ids": prepared_arxiv_ids,
         "skipped_by_category": skipped_by_category,
         "fallback_fulltexts": fallback_fulltexts,
+        "skipped_fallback_overwrites": skipped_fallback_overwrites,
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "failures": failures[:MAX_RECORDED_FAILURES],
         "sample_prepared": _build_sample_prepared(results),
         "trace_config": build_pipeline_trace_config(
             stage="prepare_papers",
@@ -386,6 +458,8 @@ def aggregate_prepare_results(
                 "saved_chunks": saved_chunks,
                 "fallback_fulltexts": fallback_fulltexts,
                 "prepared_arxiv_count": len(prepared_arxiv_ids),
+                "success_count": success_count,
+                "failure_count": failure_count,
             },
         ),
     }
@@ -409,17 +483,15 @@ def run_prepare_papers(
     paper_repository = PaperRepository()
     parser = FulltextParser()
 
-    results = [
-        prepare_single_paper(
-            candidate,
-            parser=parser,
-            paper_repository=paper_repository,
-        )
-        for candidate in prepare_context["candidates"]
-    ]
+    results, failures = prepare_candidates(
+        prepare_context["candidates"],
+        parser=parser,
+        paper_repository=paper_repository,
+    )
 
     return aggregate_prepare_results(
         results,
+        failures=failures,
         normalized_date=prepare_context["normalized_date"],
         raw_count=prepare_context["raw_count"],
         deduplicated_ids=prepare_context["deduplicated_ids"],
@@ -469,6 +541,13 @@ def _resolve_prepare_cursor_date(
     if existing_state and existing_state.get("cursor_date"):
         return date_cls.fromisoformat(str(existing_state["cursor_date"]))
     return today - timedelta(days=1)
+
+
+def _summarize_paper_failures(result: dict[str, Any]) -> str:
+    failures = result.get("failures") or []
+    failure_count = int(result.get("failure_count", len(failures)) or 0)
+    first_error = str(failures[0].get("error") or "") if failures else ""
+    return f"all {failure_count} paper(s) failed; first error: {first_error}"[:MAX_FAILURE_ERROR_CHARS]
 
 
 def run_backfill_prepare_papers(
@@ -574,6 +653,12 @@ def run_backfill_prepare_papers(
             next_cursor_date = target_str
             break
 
+        if result.get("status") == "failed":
+            failures.append({"date": target_str, "error": _summarize_paper_failures(result)})
+            stopped_reason = "prepare_failed"
+            next_cursor_date = target_str
+            break
+
         successes.append(
             {
                 "date": target_str,
@@ -672,17 +757,27 @@ def run_consume_prepare_queue(
                 max_papers=max_papers,
                 allowed_categories=allowed_categories,
             )
+            job_result = {
+                "saved_papers": int(result.get("saved_papers", 0) or 0),
+                "saved_fulltexts": int(result.get("saved_fulltexts", 0) or 0),
+                "saved_chunks": int(result.get("saved_chunks", 0) or 0),
+                "fallback_fulltexts": int(result.get("fallback_fulltexts", 0) or 0),
+                "skipped_fallback_overwrites": int(result.get("skipped_fallback_overwrites", 0) or 0),
+                "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
+                "prepared_arxiv_count": len([str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()]),
+                "success_count": int(result.get("success_count", 0) or 0),
+                "failure_count": int(result.get("failure_count", 0) or 0),
+                "failures": list(result.get("failures") or []),
+            }
+            if result.get("status") == "failed":
+                error_summary = _summarize_paper_failures(result)
+                prepare_job_repository.fail_prepare_job(mode=mode, target_date=target_date, error=error_summary)
+                failures.append({"date": target_date, "error": error_summary})
+                continue
             prepare_job_repository.complete_prepare_job(
                 mode=mode,
                 target_date=target_date,
-                result={
-                    "saved_papers": int(result.get("saved_papers", 0) or 0),
-                    "saved_fulltexts": int(result.get("saved_fulltexts", 0) or 0),
-                    "saved_chunks": int(result.get("saved_chunks", 0) or 0),
-                    "fallback_fulltexts": int(result.get("fallback_fulltexts", 0) or 0),
-                    "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
-                    "prepared_arxiv_count": len([str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()]),
-                },
+                result=job_result,
             )
         except Exception as exc:
             prepare_job_repository.fail_prepare_job(mode=mode, target_date=target_date, error=str(exc))
@@ -698,6 +793,9 @@ def run_consume_prepare_queue(
                 "fallback_fulltexts": int(result.get("fallback_fulltexts", 0) or 0),
                 "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
                 "prepared_arxiv_ids": [str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()],
+                "paper_success_count": job_result["success_count"],
+                "paper_failure_count": job_result["failure_count"],
+                "paper_failures": job_result["failures"],
             }
         )
 

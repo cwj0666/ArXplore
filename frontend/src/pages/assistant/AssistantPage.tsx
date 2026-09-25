@@ -4,14 +4,15 @@ import { AssistantChatHistory } from "../../components/assistant/AssistantChatHi
 import { AssistantComposer } from "../../components/assistant/AssistantComposer";
 import { AssistantHero } from "../../components/assistant/AssistantHero";
 import { AssistantNotice } from "../../components/assistant/AssistantNotice";
-import { streamAssistantChat } from "../../helpers/assistant/assistantChatApi";
-import type { AssistantChatMessage } from "../../types/assistant";
+import { AssistantRequestError, streamAssistantChat } from "../../helpers/assistant/assistantChatApi";
+import type { AssistantChatMessage, AssistantDisplayMessage } from "../../types/assistant";
 import type { BootstrapPayload } from "../../types/app";
 import "./assistant-page.css";
 
 const INITIAL_ASSISTANT_MESSAGE =
   "찾고 싶은 연구 주제나 기술 키워드를 질문해 주세요.";
 const STREAM_ENDPOINT = "/papers/assistant/stream/";
+const MAX_HISTORY_MESSAGES = 20;
 
 export interface AssistantPageProps {
   session: BootstrapPayload;
@@ -28,7 +29,7 @@ export function AssistantPage({
   onRequireLogin,
   onOpenSettings,
 }: AssistantPageProps) {
-  const [messages, setMessages] = useState<AssistantChatMessage[]>([
+  const [messages, setMessages] = useState<AssistantDisplayMessage[]>([
     { role: "assistant", content: INITIAL_ASSISTANT_MESSAGE },
   ]);
   const [chatHistory, setChatHistory] = useState<AssistantChatMessage[]>([]);
@@ -39,6 +40,7 @@ export function AssistantPage({
   const inputRef = useRef<HTMLInputElement>(null);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(false);
   const canUseAssistant = session.is_authenticated && session.has_personal_api_key;
 
   const scrollToBottom = () => {
@@ -50,6 +52,17 @@ export function AssistantPage({
     scrollToBottom();
   }, [messages, isSending, streamingContent]);
 
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Deferred so StrictMode's synchronous unmount/remount does not cancel the initial query.
+      window.setTimeout(() => {
+        if (!isMountedRef.current) abortControllerRef.current?.abort();
+      }, 0);
+    };
+  }, []);
+
   const stopGeneration = () => {
     abortControllerRef.current?.abort();
   };
@@ -60,7 +73,7 @@ export function AssistantPage({
     const message = (prefilledMessage || inputValue).trim();
     if (!message) return;
 
-    const requestHistory = chatHistory;
+    const requestHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
     const userMessage: AssistantChatMessage = { role: "user", content: message };
 
     setInputValue("");
@@ -72,6 +85,7 @@ export function AssistantPage({
     const controller = new AbortController();
     abortControllerRef.current = controller;
     let accumulated = "";
+    let notice = "";
 
     try {
       await streamAssistantChat({
@@ -84,19 +98,26 @@ export function AssistantPage({
           setStreamingContent(accumulated);
         },
       });
+      if (!accumulated) notice = "답변을 생성할 수 없습니다.";
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        if (!accumulated) accumulated = "사용자의 요청으로 답변이 중단되었습니다.";
+        if (!accumulated) notice = "사용자의 요청으로 답변이 중단되었습니다.";
       } else {
-        accumulated = accumulated || "답변을 불러오는 중 오류가 발생했습니다.";
+        notice = error instanceof AssistantRequestError && error.message
+          ? error.message
+          : "답변을 불러오는 중 오류가 발생했습니다.";
       }
     } finally {
-      const assistantMessage: AssistantChatMessage = {
-        role: "assistant",
-        content: accumulated || "답변을 생성할 수 없습니다.",
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setChatHistory((prev) => [...prev, assistantMessage]);
+      const newDisplayMessages: AssistantDisplayMessage[] = [];
+      if (accumulated) {
+        const assistantMessage: AssistantChatMessage = { role: "assistant", content: accumulated };
+        newDisplayMessages.push(assistantMessage);
+        setChatHistory((prev) => [...prev, assistantMessage]);
+      }
+      if (notice) {
+        newDisplayMessages.push({ role: "assistant", content: notice, isNotice: true });
+      }
+      setMessages((prev) => [...prev, ...newDisplayMessages]);
       setStreamingContent("");
       setIsSending(false);
       abortControllerRef.current = null;

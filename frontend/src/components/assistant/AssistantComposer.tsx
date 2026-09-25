@@ -1,5 +1,7 @@
 import type { KeyboardEvent, RefObject } from "react";
 
+import { isImeComposing } from "../../helpers/keyboard";
+
 interface AssistantComposerProps {
   value: string;
   disabled: boolean;
@@ -20,7 +22,7 @@ export function AssistantComposer({
   onStop,
 }: AssistantComposerProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter" || isImeComposing(event)) return;
     event.preventDefault();
     if (isSending) {
       onStop?.();

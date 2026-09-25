@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "backend"]
+DJANGO_SETTINGS_MODULE = "arxplore_web.test_settings"
+django_find_project = false
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv", "frontend", "dags"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

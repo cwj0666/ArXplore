@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 
+import { isImeComposing } from "../../helpers/keyboard";
 import { postPaperChat } from "../../pages/detail/detail-api";
 import type { ChatMessage } from "../../pages/detail/detail-types";
 
@@ -341,7 +342,7 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
             placeholder="질문하기..."
             onChange={(event) => setInputText(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              if (event.key === "Enter" && !isImeComposing(event)) {
                 void sendMessage();
               }
             }}
