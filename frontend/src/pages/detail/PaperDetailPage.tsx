@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 
 import { toggleFavorite } from "../../helpers/accountApi";
+import { ApiError, getErrorMessage } from "../../helpers/http";
 import { AnalyzeOverlay } from "../../components/detail/AnalyzeOverlay";
 import {
   AbstractCard,
@@ -37,6 +38,14 @@ const ANALYZE_OVERLAY_TEXT = "AI가 실시간으로 논문을 분석하고 있�
 const SUMMARY_OVERLAY_TEXT = "AI가 상세 요약을 생성하고 있습니다...";
 
 
+function describeRequestError(error: unknown, prefix: string): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  return `${prefix}: ${getErrorMessage(error, "알 수 없는 오류")}`;
+}
+
+
 export function PaperDetailPage({
   session,
   onRequireLogin,
@@ -65,6 +74,7 @@ export function PaperDetailPage({
 
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [overlayMessage, setOverlayMessage] = useState(ANALYZE_OVERLAY_TEXT);
+  const summaryRequestIdRef = useRef(0);
 
   useEffect(() => {
     setSelectedSummaryModel(session.preferred_summary_model);
@@ -118,7 +128,7 @@ export function PaperDetailPage({
         if (!active) {
           return;
         }
-        setPageError(`데이터 로드 실패: ${String(error)}`);
+        setPageError(describeRequestError(error, "데이터 로드 실패"));
         setPageLoading(false);
       }
     }
@@ -127,6 +137,7 @@ export function PaperDetailPage({
 
     return () => {
       active = false;
+      summaryRequestIdRef.current += 1;
     };
   }, [arxivId, session.is_authenticated]);
 
@@ -170,7 +181,7 @@ export function PaperDetailPage({
         }
         setOverlayVisible(false);
         setAnalysisLoading(false);
-        setOverviewError(`분석 요청 실패: ${String(error)}`);
+        setOverviewError(describeRequestError(error, "분석 요청 실패"));
       }
     }
 
@@ -213,6 +224,9 @@ export function PaperDetailPage({
       return;
     }
 
+    const requestId = ++summaryRequestIdRef.current;
+    const isStale = () => requestId !== summaryRequestIdRef.current;
+
     setSummaryModelPickerOpen(false);
     setSummaryError("");
     setSummaryLoading(true);
@@ -221,6 +235,9 @@ export function PaperDetailPage({
 
     try {
       const data = await fetchPaperSummary(paper.arxiv_id, selectedSummaryModel);
+      if (isStale()) {
+        return;
+      }
       setOverlayVisible(false);
       setSummaryLoading(false);
 
@@ -231,9 +248,12 @@ export function PaperDetailPage({
 
       setSummaryBlocks(formatSummaryBlocks(data.summary ?? ""));
     } catch (error) {
+      if (isStale()) {
+        return;
+      }
       setOverlayVisible(false);
       setSummaryLoading(false);
-      setSummaryError(`요약 생성 실패: ${String(error)}`);
+      setSummaryError(describeRequestError(error, "요약 생성 실패"));
     }
   };
 

@@ -11,11 +11,12 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from contextlib import contextmanager
 import sys
+from collections import Counter
+from collections.abc import Callable, Iterable
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

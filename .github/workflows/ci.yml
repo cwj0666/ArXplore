@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev, "develop/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "24"
+  RUFF_VERSION: "0.16.9"
+  GITLEAKS_VERSION: "8.30.1"
+
+jobs:
+  python:
+    name: Python (ruff, pytest, Django checks)
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: arxplore_web.test_settings
+      DJANGO_SECRET_KEY: ci-only-secret-key
+      POSTGRES_HOST: localhost
+      POSTGRES_DB: arxplore_ci
+      POSTGRES_USER: arxplore_ci
+      POSTGRES_PASSWORD: arxplore_ci
+      OPENAI_API_KEY: sk-ci-dummy
+      LANGSMITH_TRACING: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-django "ruff==${RUFF_VERSION}"
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+      - name: Unit tests
+        run: pytest tests/unit -q
+
+      - name: Django system check
+        run: python backend/manage.py check
+
+      - name: Missing migrations
+        run: python backend/manage.py makemigrations --check --dry-run
+
+  integration:
+    name: Integration tests (PostgreSQL + pgvector)
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: arxplore
+          POSTGRES_PASSWORD: arxplore
+          POSTGRES_DB: arxplore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arxplore -d arxplore_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://arxplore:arxplore@localhost:5432/arxplore_test
+      DJANGO_SETTINGS_MODULE: arxplore_web.test_settings
+      OPENAI_API_KEY: sk-ci-dummy
+      LANGSMITH_TRACING: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-django
+
+      - name: Integration tests
+        run: |
+          if [ ! -d tests/integration ]; then
+            echo "tests/integration does not exist; skipping."
+            exit 0
+          fi
+          set +e
+          pytest tests/integration -q -m integration
+          status=$?
+          set -e
+          # Exit code 5 means no tests were collected.
+          if [ "$status" -eq 5 ]; then
+            echo "No integration tests collected; treating as success."
+            exit 0
+          fi
+          exit "$status"
+
+  frontend:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  infra:
+    name: Infra (compose config, hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write dummy .env
+        run: |
+          cat > .env <<'DOTENV'
+          DJANGO_SECRET_KEY=ci-only-secret-key
+          PROD_POSTGRES_HOST=db:5432
+          POSTGRES_USER=arxplore
+          POSTGRES_PASSWORD=arxplore
+          POSTGRES_DB=arxplore
+          TAILSCALE_SERVER_IP=127.0.0.1
+          AIRFLOW_FERNET_KEY=ci-dummy-fernet-key
+          AIRFLOW_ADMIN_USER=admin
+          AIRFLOW_API_SECRET_KEY=ci-dummy
+          AIRFLOW_API_AUTH_JWT_SECRET=ci-dummy
+          MONGO_INITDB_ROOT_USERNAME=arxplore
+          MONGO_INITDB_ROOT_PASSWORD=arxplore
+          OPENAI_API_KEY=sk-ci-dummy
+          DOTENV
+
+      - name: docker-compose.yml
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: docker-compose.server.yml
+        run: docker compose -f docker-compose.server.yml config -q
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: Dockerfile
+          recursive: true
+          failure-threshold: warning
+          # Pinning apt package versions breaks on every Debian point release.
+          ignore: DL3008
+
+  security:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # gitleaks-action requires a paid license for organization-owned repositories, so the CLI is used directly.
+      - name: Install gitleaks
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "$base/$archive"
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --check --ignore-missing "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "$archive" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Scan git history
+        run: gitleaks git --redact --verbose --exit-code 1 .

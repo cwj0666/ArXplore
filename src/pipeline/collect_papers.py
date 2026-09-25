@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import date as date_cls, timedelta
-from typing import Any, Optional
+from datetime import date as date_cls
+from datetime import timedelta
+from typing import Any
 
-from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.integrations.paper_search import PaperSearchClient
+from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.integrations.raw_store import RawPaperStore
 
 from .tracing import build_pipeline_trace_config
@@ -13,7 +14,7 @@ from .tracing import build_pipeline_trace_config
 def run_collect_papers(
     *,
     runtime: str = "airflow",
-    user: Optional[str] = None,
+    user: str | None = None,
     target_date: str | None = None,
     enqueue_prepare: bool = True,
 ) -> dict[str, Any]:
@@ -25,13 +26,24 @@ def run_collect_papers(
 
     search_client = PaperSearchClient()
     raw_store = RawPaperStore()
-    prepare_job_repository = PrepareJobRepository()
+    prepare_job_repository: PrepareJobRepository | None = None
+    if enqueue_prepare:
+        prepare_job_repository = PrepareJobRepository()
+        prepare_job_repository.ensure_schema()
 
     payload = search_client.fetch_daily_papers(normalized_date)
-    record_id = raw_store.save_daily_papers_response(date=normalized_date, payload=payload)
+    saved = raw_store.save_daily_papers_response(date=normalized_date, payload=payload)
+    record_id = saved["record_id"]
+    raw_revision = saved["revision"]
+    raw_payload_changed = bool(saved.get("changed", True))
     queue_result = (
-        prepare_job_repository.enqueue_prepare_job(target_date=normalized_date, mode="auto", source="collect")
-        if enqueue_prepare
+        prepare_job_repository.enqueue_prepare_job(
+            target_date=normalized_date,
+            mode="auto",
+            source="collect",
+            raw_revision=raw_revision,
+        )
+        if prepare_job_repository is not None
         else {"enqueued": False, "job_id": None}
     )
 
@@ -49,6 +61,8 @@ def run_collect_papers(
             "target_date": normalized_date,
             "fetched_count": len(payload),
             "stored_record_id": record_id,
+            "raw_revision": raw_revision,
+            "raw_payload_changed": raw_payload_changed,
             "prepare_job_enqueued": bool(queue_result.get("enqueued")),
             "prepare_queue_enqueued": bool(queue_result.get("enqueued")),
         },
@@ -60,9 +74,12 @@ def run_collect_papers(
         "target_date": normalized_date,
         "fetched_count": len(payload),
         "stored_record_id": record_id,
+        "raw_revision": raw_revision,
+        "raw_payload_changed": raw_payload_changed,
         "prepare_job_enqueued": bool(queue_result.get("enqueued")),
         "prepare_queue_enqueued": bool(queue_result.get("enqueued")),
         "prepare_job_id": queue_result.get("job_id"),
+        "prepare_job_status": queue_result.get("status"),
         "sample_arxiv_ids": sample_arxiv_ids,
         "trace_config": trace_config,
     }
@@ -71,7 +88,7 @@ def run_collect_papers(
 def run_backfill_collect_papers(
     *,
     runtime: str = "airflow",
-    user: Optional[str] = None,
+    user: str | None = None,
     cursor_date: str | None = None,
     oldest_date: str | None = None,
     batch_days: int = 30,
@@ -279,7 +296,7 @@ def _build_backfill_result(
     failures: list[dict[str, str]],
     stopped_reason: str,
     runtime: str,
-    user: Optional[str],
+    user: str | None,
 ) -> dict[str, Any]:
     trace_config = build_pipeline_trace_config(
         stage="backfill_collect_papers",

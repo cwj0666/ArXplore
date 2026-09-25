@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from langsmith import Client
 
@@ -27,7 +28,7 @@ def run_cleanup_langsmith(
 
     resolved_project_name = project_name or settings.langsmith_project
     client = Client(api_key=settings.langsmith_api_key)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
 
     matched_runs = list(
         _iter_target_runs(
@@ -42,7 +43,7 @@ def run_cleanup_langsmith(
     deleted_run_ids: list[str] = []
     matched_run_summaries = [
         {
-            "run_id": str(getattr(run, "id")),
+            "run_id": str(run.id),
             "start_time": getattr(run, "start_time", None).isoformat()
             if getattr(run, "start_time", None)
             else None,
@@ -53,7 +54,7 @@ def run_cleanup_langsmith(
 
     if not dry_run:
         for run in matched_runs:
-            run_id = str(getattr(run, "id"))
+            run_id = str(run.id)
             response = client.request_with_retries("DELETE", f"/runs/{run_id}")
             response.raise_for_status()
             deleted_run_ids.append(run_id)
@@ -92,7 +93,7 @@ def _iter_target_runs(
         if not isinstance(started_at, datetime):
             continue
         if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
+            started_at = started_at.replace(tzinfo=UTC)
         if started_at >= cutoff:
             continue
 

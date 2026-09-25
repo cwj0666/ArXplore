@@ -207,7 +207,7 @@ class SemanticChunkerMixin:
         if not compact:
             return False
         lowered_title = section_title.lower()
-        if any((keyword in lowered_title for keyword in ('introduction', 'method', 'approach', 'experiment', 'result', 'discussion', 'conclusion', 'abstract', 'related work'))):
+        if any(keyword in lowered_title for keyword in ('introduction', 'method', 'approach', 'experiment', 'result', 'discussion', 'conclusion', 'abstract', 'related work')):
             if cls._starts_like_body_paragraph(compact[:180], compact):
                 return True
         sentence_breaks = compact.count('. ') + compact.count('? ') + compact.count('! ')
@@ -258,9 +258,9 @@ class SemanticChunkerMixin:
     def _looks_like_table_like_chunk(cls, raw_text: str, compact: str) -> bool:
         if '/uni' in raw_text:
             return True
-        if any((token in raw_text.lower() for token in ('<td', '</td', '<tr', '</tr', '<th', '</th'))):
+        if any(token in raw_text.lower() for token in ('<td', '</td', '<tr', '</tr', '<th', '</th')):
             return True
-        digits = sum((character.isdigit() for character in compact))
+        digits = sum(character.isdigit() for character in compact)
         numeric_cells = len(re.findall('\\b\\d+(?:\\.\\d+)?\\b', compact))
         symbol_cells = len(re.findall('[✓✔✗✘]', compact))
         percentage_cells = len(re.findall('\\b\\d+(?:\\.\\d+)?%', compact))
@@ -268,12 +268,10 @@ class SemanticChunkerMixin:
         line_break_count = raw_text.count('\n')
         lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
         first_line = lines[0] if lines else compact[:160]
-        numeric_heavy_lines = sum((1 for line in lines if len(re.findall('\\b\\d+(?:\\.\\d+)?\\b', line)) >= 2 or bool(re.fullmatch('[\\d\\s.,:;()%+\\-=/]+', line))))
+        numeric_heavy_lines = sum(1 for line in lines if len(re.findall('\\b\\d+(?:\\.\\d+)?\\b', line)) >= 2 or bool(re.fullmatch('[\\d\\s.,:;()%+\\-=/]+', line)))
         repeated_matrix_tokens = len(re.findall('\\b[a-z]+-\\d+-(?:combined|pre|post)\\b', compact, re.IGNORECASE))
-        first_line_numeric_cells = len(re.findall('\\b\\d+(?:\\.\\d+)?\\b', first_line))
         explicit_tabular_opening = bool(re.match('^[\\d.,;:()%-]', compact) or re.match('^(?:Table|Figure)\\s+\\d+[:.]', compact) or re.match('^\\d+\\.\\s*[A-Z][^.]{0,140}\\([a-z]\\)', compact) or (repeated_matrix_tokens >= 6))
         compact_row_like_block = numeric_cells >= 10 and (symbol_cells >= 2 or percentage_cells >= 2 or short_code_cells >= 3) and (len(re.findall('\\b[A-Z][A-Za-z-]{2,}\\b', compact)) >= 4)
-        strong_numeric_block = compact and digits / len(compact) > 0.28 and (line_break_count >= 5) or (re.match('^[\\d.,;:()%-]', compact) and numeric_cells >= 10 and (line_break_count >= 2)) or (re.match('^(?:Table|Figure)\\s+\\d+\\b', compact) and numeric_heavy_lines >= 3 and (line_break_count >= 2)) or (repeated_matrix_tokens >= 6) or (len(lines) >= 8 and numeric_heavy_lines >= max(6, int(len(lines) * 0.7)) and (digits / max(1, len(compact)) > 0.08)) or compact_row_like_block
         if cls._starts_like_body_paragraph(first_line, compact) and (not explicit_tabular_opening):
             return False
         if compact and digits / len(compact) > 0.28 and (line_break_count >= 5):
@@ -313,7 +311,7 @@ class SemanticChunkerMixin:
                 suspicious_start_count += 1
                 if (chunk.get('metadata') or {}).get('content_role') == 'body':
                     body_suspicious_start_count += 1
-        return {'chunk_count': len(chunks), 'body_chunk_count': sum((1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') == 'body')), 'avg_chunk_chars': round(sum(char_lengths) / len(char_lengths), 2), 'max_chunk_chars': max(char_lengths), 'avg_chunk_tokens': round(sum(token_counts) / len(token_counts), 2), 'max_chunk_tokens': max(token_counts), 'suspicious_start_count': suspicious_start_count, 'body_suspicious_start_count': body_suspicious_start_count, 'mid_sentence_start_count': sum((1 for chunk in chunks if bool((chunk.get('metadata') or {}).get('starts_mid_sentence')))), 'mid_sentence_end_count': sum((1 for chunk in chunks if bool((chunk.get('metadata') or {}).get('ends_mid_sentence')))), 'front_matter_chunk_count': sum((1 for chunk in chunks if chunk.get('section_title') == 'Front Matter')), 'non_body_chunk_count': sum((1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') != 'body')), 'reference_chunk_count': sum((1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') == 'references')), 'table_like_chunk_count': sum((1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') == 'table_like')), 'tiny_chunk_count': sum((1 for chunk in chunks if len(str(chunk.get('chunk_text') or '')) < 160))}
+        return {'chunk_count': len(chunks), 'body_chunk_count': sum(1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') == 'body'), 'avg_chunk_chars': round(sum(char_lengths) / len(char_lengths), 2), 'max_chunk_chars': max(char_lengths), 'avg_chunk_tokens': round(sum(token_counts) / len(token_counts), 2), 'max_chunk_tokens': max(token_counts), 'suspicious_start_count': suspicious_start_count, 'body_suspicious_start_count': body_suspicious_start_count, 'mid_sentence_start_count': sum(1 for chunk in chunks if bool((chunk.get('metadata') or {}).get('starts_mid_sentence'))), 'mid_sentence_end_count': sum(1 for chunk in chunks if bool((chunk.get('metadata') or {}).get('ends_mid_sentence'))), 'front_matter_chunk_count': sum(1 for chunk in chunks if chunk.get('section_title') == 'Front Matter'), 'non_body_chunk_count': sum(1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') != 'body'), 'reference_chunk_count': sum(1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') == 'references'), 'table_like_chunk_count': sum(1 for chunk in chunks if (chunk.get('metadata') or {}).get('content_role') == 'table_like'), 'tiny_chunk_count': sum(1 for chunk in chunks if len(str(chunk.get('chunk_text') or '')) < 160)}
 
     @staticmethod
     def _starts_mid_sentence(text: str, start: int) -> bool:

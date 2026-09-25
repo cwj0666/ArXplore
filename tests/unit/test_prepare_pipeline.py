@@ -196,21 +196,37 @@ def test_run_prepare_papers_empty_date_is_success(monkeypatch):
 
 
 class FakeJobRepository:
-    def __init__(self, dates: list[str]) -> None:
+    def __init__(self, dates: list[str], *, claim_valid: bool = True, heartbeat_alive: bool = True) -> None:
         self.dates = list(dates)
+        self.claim_valid = claim_valid
+        self.heartbeat_alive = heartbeat_alive
+        self.generation = 0
         self.completed: list[dict[str, Any]] = []
         self.failed: list[dict[str, Any]] = []
+        self.heartbeats: list[dict[str, Any]] = []
 
     def claim_prepare_job(self, *, mode, worker_id):
         if not self.dates:
             return None
-        return {"date": self.dates.pop(0)}
+        self.generation += 1
+        return {
+            "job_id": 100 + self.generation,
+            "worker_id": worker_id,
+            "claim_generation": self.generation,
+            "date": self.dates.pop(0),
+        }
 
-    def complete_prepare_job(self, *, mode, target_date, result=None):
-        self.completed.append({"date": target_date, "result": result})
+    def heartbeat_prepare_job(self, *, job_id, worker_id, claim_generation):
+        self.heartbeats.append({"job_id": job_id, "worker_id": worker_id, "claim_generation": claim_generation})
+        return self.heartbeat_alive
 
-    def fail_prepare_job(self, *, mode, target_date, error):
-        self.failed.append({"date": target_date, "error": error})
+    def complete_prepare_job(self, *, job_id, worker_id, claim_generation, result=None):
+        self.completed.append({"job_id": job_id, "claim_generation": claim_generation, "result": result})
+        return self.claim_valid
+
+    def fail_prepare_job(self, *, job_id, worker_id, claim_generation, error):
+        self.failed.append({"job_id": job_id, "claim_generation": claim_generation, "error": error})
+        return self.claim_valid
 
 
 def _prepare_result(status: str, success_count: int, failure_count: int) -> dict[str, Any]:
@@ -236,6 +252,8 @@ def test_consume_queue_completes_job_on_partial_failure(monkeypatch):
     assert result["status"] == "success"
     assert job_repository.failed == []
     assert len(job_repository.completed) == 1
+    assert job_repository.completed[0]["job_id"] == 101
+    assert job_repository.completed[0]["claim_generation"] == 1
     job_result = job_repository.completed[0]["result"]
     assert job_result["success_count"] == 2
     assert job_result["failure_count"] == 1
@@ -252,7 +270,8 @@ def test_consume_queue_fails_job_when_no_paper_succeeded(monkeypatch):
 
     assert result["status"] == "failed"
     assert job_repository.completed == []
-    assert job_repository.failed[0]["date"] == "2026-04-07"
+    assert result["failures"][0]["date"] == "2026-04-07"
+    assert job_repository.failed[0]["job_id"] == 101
     assert "all 3 paper(s) failed" in job_repository.failed[0]["error"]
 
 
@@ -268,7 +287,114 @@ def test_consume_queue_still_fails_job_on_date_level_exception(monkeypatch):
     result = prepare_papers.run_consume_prepare_queue(runtime="test")
 
     assert result["status"] == "failed"
-    assert job_repository.failed == [{"date": "2026-04-07", "error": "mongo down"}]
+    assert job_repository.failed == [{"job_id": 101, "claim_generation": 1, "error": "mongo down"}]
+    assert result["failures"] == [{"date": "2026-04-07", "error": "mongo down"}]
+
+
+def test_consume_queue_lost_claim_on_complete_is_recorded_not_raised(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07"], claim_valid=False)
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: _prepare_result("success", 2, 0))
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test", worker_id="w1")
+
+    assert result["status"] == "claim_lost"
+    assert result["successes"] == []
+    assert result["lost_claim_count"] == 1
+    assert result["lost_claims"] == [{"date": "2026-04-07", "job_id": 101, "claim_generation": 1, "stage": "complete"}]
+
+
+def test_consume_queue_lost_claim_on_fail_still_reports_failure(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07"], claim_valid=False)
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: _prepare_result("failed", 0, 1))
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test")
+
+    assert result["status"] == "failed"
+    assert result["lost_claims"][0]["stage"] == "fail"
+
+
+def test_consume_queue_lost_claim_with_other_success_is_partial(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07", "2026-04-08"])
+    outcomes = iter([False, True])
+    original_complete = job_repository.complete_prepare_job
+
+    def complete(**kwargs):
+        original_complete(**kwargs)
+        return next(outcomes)
+
+    job_repository.complete_prepare_job = complete  # type: ignore[method-assign]
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    monkeypatch.setattr(prepare_papers, "run_prepare_papers", lambda **kwargs: _prepare_result("success", 1, 0))
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test", max_jobs_per_run=2)
+
+    assert result["status"] == "partial_failed"
+    assert [item["date"] for item in result["successes"]] == ["2026-04-08"]
+    assert [item["date"] for item in result["lost_claims"]] == ["2026-04-07"]
+
+
+def test_consume_queue_heartbeats_each_paper_with_claim_token(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07"])
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    candidates = [_candidate("a"), _candidate("b"), _candidate("c")]
+    _patch_prepare_run(monkeypatch, candidates, failing_ids=set())
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test", worker_id="w1")
+
+    assert result["status"] == "success"
+    assert job_repository.heartbeats == [{"job_id": 101, "worker_id": "w1", "claim_generation": 1}] * 3
+    assert len(job_repository.completed) == 1
+
+
+def test_consume_queue_stops_processing_when_heartbeat_reports_lost_claim(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07"], heartbeat_alive=False)
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    processed: list[str] = []
+    candidates = [_candidate("a"), _candidate("b")]
+    _patch_prepare_run(monkeypatch, candidates, failing_ids=set())
+    original = prepare_papers.prepare_single_paper
+
+    def tracking_prepare(candidate, **kwargs):
+        processed.append(candidate["arxiv_id"])
+        return original(candidate, **kwargs)
+
+    monkeypatch.setattr(prepare_papers, "prepare_single_paper", tracking_prepare)
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test")
+
+    assert processed == []
+    assert job_repository.completed == []
+    assert job_repository.failed == []
+    assert result["status"] == "claim_lost"
+    assert result["lost_claims"][0]["stage"] == "heartbeat"
+
+
+def test_consume_queue_tolerates_heartbeat_errors(monkeypatch):
+    job_repository = FakeJobRepository(["2026-04-07"])
+
+    def broken_heartbeat(**kwargs):
+        raise ConnectionError("db blip")
+
+    job_repository.heartbeat_prepare_job = broken_heartbeat  # type: ignore[method-assign]
+    monkeypatch.setattr(prepare_papers, "PrepareJobRepository", lambda: job_repository)
+    _patch_prepare_run(monkeypatch, [_candidate("a")], failing_ids=set())
+
+    result = prepare_papers.run_consume_prepare_queue(runtime="test")
+
+    assert result["status"] == "success"
+    assert len(job_repository.completed) == 1
+
+
+def test_prepare_candidates_without_heartbeat_is_unchanged():
+    results, failures = prepare_papers.prepare_candidates(
+        [_candidate("a")],
+        parser=FakeParser(source="layout_pdf"),
+        paper_repository=FakeRepository(),
+    )
+    assert [result["arxiv_id"] for result in results] == ["a"]
+    assert failures == []
 
 
 class FakeRawStore:

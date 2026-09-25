@@ -1,8 +1,10 @@
 # ArXplore 개발 및 운영 워크플로우
 
+> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../README.md)와 [ARCHITECTURE](../architecture/ARCHITECTURE.md)를 따릅니다.
+
 ## 1. 문서 목적
 
-이 문서는 ArXplore를 현재 코드 기준으로 어떻게 개발하고 운영할지 정리한 실행 문서다. 환경 준비 자체는 [TEAM_SETUP.md](./TEAM_SETUP.md)를 기준으로 하고, 본 문서는 "무엇이 이미 준비되어 있으며, 어떤 순서와 handoff로 작업해야 하는가"를 설명한다. 제품 목표와 도메인 범위는 [README.md](../../README.md)의 `Goals & Scope` 섹션을 따른다.
+이 문서는 ArXplore를 현재 코드 기준으로 어떻게 개발하고 운영할지 정리한 실행 문서다. 환경 준비 자체는 [TEAM_SETUP.md](./TEAM_SETUP.md)를 기준으로 하고, 본 문서는 "무엇이 이미 준비되어 있으며, 어떤 순서와 handoff로 작업해야 하는가"를 설명한다. 제품 기능과 현재 한계는 [README.md](../../README.md)를 따른다.
 
 현재 기준에서 중요한 점은 다음과 같다.
 
@@ -13,7 +15,7 @@
 
 ## 2. 기본 원칙
 
-- 제품 기준은 [README.md](../../README.md)의 `Goals & Scope` 섹션을 따른다
+- 제품 기준은 [README.md](../../README.md)를 따른다
 - 계층과 런타임 구조는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)를 따른다
 - 역할 경계는 [ROLES.md](./ROLES.md)를 따른다
 - AI 작업 규칙은 [AGENTS.md](../architecture/AGENTS.md)를 따른다
@@ -36,7 +38,7 @@
 
 ```bash
 docker compose ps
-docker compose -f docker-compose.server.yml ps
+docker compose -p arxplore_server -f docker-compose.server.yml ps
 ```
 
 `parser` 프로필 서비스(layout-parser, prepare-worker)는 위 첫 명령에 함께 표시된다.
@@ -52,11 +54,19 @@ bash scripts/setup.sh
 docker compose ps django vite
 ```
 
+새 DB를 쓰거나 스키마가 바뀐 뒤에는 스키마를 한 번 만든다. 리포지토리 생성자는 DDL을 실행하지 않는다.
+
+```bash
+docker compose exec django python /workspace/scripts/migrate_schema.py
+```
+
+원격 서버 없이 웹만 띄울 때는 `docker compose --profile local-db up -d`로 로컬 PostgreSQL을 함께 올린다(README Quick Start 참고).
+
 이 모드에서 수행하는 작업:
 
 - Python 코드 작성
 - retrieval, prompt, chain 검증
-- notebook 실험
+- 단위 테스트(`pytest tests/unit`)
 - Django API 실행
 - React 프론트엔드 실행
 - 간단한 데이터 점검
@@ -76,7 +86,7 @@ docker logs -f arxplore-layout-parser
 
 ```bash
 bash scripts/setup-server.sh
-docker compose -f docker-compose.server.yml ps
+docker compose -p arxplore_server -f docker-compose.server.yml ps
 ```
 
 ## 5. 현재 운영 흐름
@@ -89,6 +99,7 @@ docker compose -f docker-compose.server.yml ps
 4. job을 claim하면 `prepare -> embed`를 수행한다
 5. 결과는 PostgreSQL 정제층에 저장된다
 6. `arxplore_maintenance`는 별도로 과거 raw 백필과 metadata enrichment를 수행한다
+7. `arxplore_langsmith_maintenance`는 매일 03:00에 오래된 LangSmith trace를 정리한다
 
 ## 6. 현재 단계의 구현 순서
 
@@ -177,7 +188,8 @@ docker compose -f docker-compose.server.yml ps
 
 - `docker compose --profile parser up -d` (상시 worker)
 - `docker compose --profile parser exec prepare-worker python3 -m src.pipeline.prepare_worker --mode auto --max-jobs-per-run 1` (1회 실행 점검)
-- `notebooks/retrieval_inspection.ipynb`
+- `python scripts/requeue_failed_prepare_jobs.py --since YYYY-MM-DD` (failed 잡 확인, 기본 dry-run. `--apply`로 재등록)
+- PostgreSQL 직접 조회 (예: `SELECT status, count(*) FROM prepare_jobs GROUP BY status;`)
 
 ## 9. LangSmith 운영 방식
 
@@ -192,7 +204,6 @@ LangSmith는 공용 프로젝트 기준으로 trace를 축적한다. 현재 주�
 - `analyze_paper_detail`
 - `paper_overview`
 - `paper_key_findings`
-- `translation`
 - `summary`
 - `rag_answer`
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
@@ -185,7 +185,7 @@ def build_paper_overview(
     paper: dict[str, Any],
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
     quality_score: float | None = None,
 ) -> str:
     normalized = _normalize_paper_detail_input(paper)
@@ -211,7 +211,7 @@ def build_paper_key_findings(
     paper: dict[str, Any],
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
     quality_score: float | None = None,
 ) -> list[str]:
     normalized = _normalize_paper_detail_input(paper)
@@ -237,9 +237,9 @@ def build_paper_key_findings(
 def analyze_paper_detail(
     paper: dict[str, Any],
     *,
-    generated_at: Optional[datetime] = None,
+    generated_at: datetime | None = None,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
 ) -> PaperDetailDocument:
     normalized = _normalize_paper_detail_input(paper)
     return PaperDetailDocument(
@@ -247,5 +247,5 @@ def analyze_paper_detail(
         title=str(normalized.get("title") or "제목 없음"),
         overview=build_paper_overview(normalized, runtime=runtime, user=user),
         key_findings=build_paper_key_findings(normalized, runtime=runtime, user=user),
-        generated_at=generated_at or datetime.now(timezone.utc),
+        generated_at=generated_at or datetime.now(UTC),
     )

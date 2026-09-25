@@ -1,0 +1,2 @@
+# Revoked Tailscale auth key committed in c7b2c34 and removed in the phase 0 fix commit.
+c7b2c3407c8170d370b4417811d8003a78238994:docs/management/TEAM_SETUP.md:tailscale-auth-key:41

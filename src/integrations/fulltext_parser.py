@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 
 from src.integrations.layout_parser_client import LayoutParserClient
-from src.integrations.pdf_parser.types import FulltextParseResult
-from src.integrations.pdf_parser.extractor import PdfExtractorMixin
-from src.integrations.pdf_parser.layout_parser import LayoutIntegrationMixin
 from src.integrations.pdf_parser.chunker import SemanticChunkerMixin
 from src.integrations.pdf_parser.cleaner import TextCleanerMixin
+from src.integrations.pdf_parser.extractor import PdfExtractorMixin
+from src.integrations.pdf_parser.layout_parser import LayoutIntegrationMixin
+from src.integrations.pdf_parser.types import FulltextParseResult
 
 __all__ = ["FulltextParser", "FulltextParseResult"]
 

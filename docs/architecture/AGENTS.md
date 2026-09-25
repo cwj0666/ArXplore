@@ -6,7 +6,7 @@
 
 작업을 시작하기 전에 아래 문서를 먼저 읽는다.
 
-1. `README.md` (`Goals & Scope` 섹션 — 제품 목표와 도메인 범위)
+1. `README.md` (주요 기능, 검색 계층 현황, 알려진 한계)
 2. `docs/architecture/ARCHITECTURE.md`
 3. `docs/management/ROLES.md`
 4. `docs/management/WORKFLOW.md`
@@ -19,16 +19,20 @@
 
 AI는 아래 운영 사실을 현재 기준선으로 사용한다.
 
-- 서버 자동화 DAG는 2개다
-  - `arxplore_daily_collect`
-  - `arxplore_maintenance`
+- 서버 자동화 DAG는 3개다
+  - `arxplore_daily_collect` (매일 18:00 KST)
+  - `arxplore_maintenance` (3시간마다)
+  - `arxplore_langsmith_maintenance` (매일 03:00 KST, LangSmith trace 정리)
 - 최신 수집분은 `daily_collect`가 수행한다
 - 과거 raw 백필과 arXiv 메타데이터 후속 보강은 `maintenance`가 수행한다
 - `prepare`와 `embed`는 서버 Airflow가 아니라 로컬 runtime에서 수행한다
 - 로컬 실행 진입점은 `docker-compose.yml`의 `prepare-worker` 서비스(profile: parser)와 `src/pipeline/prepare_worker.py`다
 - prepare queue는 Mongo polling이 아니라 PostgreSQL `prepare_jobs` 테이블과 `prepare_job_repository.py`를 사용한다
 - parser runtime은 같은 `docker-compose.yml`의 `layout-parser` 서비스(profile: parser, HURIDOCS 컨테이너)다
-- PDF 파싱 경로는 `layout -> pypdf -> abstract fallback` 순서다
+- PDF 파싱 경로는 `layout -> pypdf -> abstract fallback` 순서다. GPU는 layout parser에만 쓰고, 임베딩은 OpenAI API로 만든다
+- 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다. 리포지토리 생성자나 요청 경로에 DDL을 넣지 않는다
+- 제품에서 쓰는 검색 경로는 lexical 하나다. 에이전트 도구 `search_paper_chunks_tool`은 `PaperRetriever.search_paper_contexts`(PostgreSQL 전문 검색)를 호출하고, vector / hybrid는 구현만 되어 있고 연결되지 않았다
+- 상세 페이지 챗은 retrieval 없이 논문의 앞 20개 청크를 넣는 비스트리밍 응답이다
 
 ## 3. 절대 임의 변경하면 안 되는 것
 
@@ -50,7 +54,12 @@ retrieval 구현은 바꿀 수 있지만, 결과 shape는 쉽게 바꾸지 않�
 
 ### answer payload shape
 
-RAG 응답 계층이 UI에 넘기는 answer payload 역시 공용 계약이다. 답변 텍스트, citation 목록, 근거 chunk, 상태 필드를 역할 2 내부 구현 편의만으로 바꾸지 않는다.
+응답 계층이 UI에 넘기는 payload도 공용 계약이다. 현재 형태는 다음과 같다.
+
+- 에이전트 SSE(`/papers/assistant/stream/`): `data: {"chunk": "..."}` 반복, 오류 시 `data: {"error": "..."}`, 끝에 `data: [DONE]`
+- 상세 챗(`/papers/<arxiv_id>/chat/`): `{"answer": "..."}` 또는 `{"error": "..."}`
+
+구조화된 citation 목록이나 근거 chunk 필드는 아직 없다. 답변 속 인용은 시스템 프롬프트가 요구하는 마크다운 링크(`[제목](URL)`)뿐이다. citation 필드를 추가하려면 아래 절차로 계약 변경을 제안한다.
 
 계약 변경이 필요하면 아래 순서를 따른다.
 
@@ -73,7 +82,7 @@ RAG 응답 계층이 UI에 넘기는 answer payload 역시 공용 계약이다. 
 아래 변경은 구조 원칙에 어긋난다.
 
 - DAG 파일에 무거운 비즈니스 로직을 직접 넣는 것
-- 외부 연동 코드를 `src/core/`나 `app/`에 넣는 것
+- 외부 연동 코드를 `src/core/`나 `backend/`에 넣는 것
 - UI 편의를 위해 도메인 계약을 바꾸는 것
 - 저장 편의를 위해 공용 모델을 바꾸는 것
 

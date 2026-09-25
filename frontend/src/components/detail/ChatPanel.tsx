@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 
+import { ApiError } from "../../helpers/http";
 import { isImeComposing } from "../../helpers/keyboard";
 import { postPaperChat } from "../../pages/detail/detail-api";
 import type { ChatMessage } from "../../pages/detail/detail-types";
@@ -44,6 +45,7 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [opacityPercent, setOpacityPercent] = useState(100);
@@ -54,6 +56,13 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
   const [messages, setMessages] = useState<UiMessage[]>([
     createMessage("assistant", WELCOME_MESSAGE),
   ]);
+
+  useEffect(() => {
+    return () => {
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
+    };
+  }, [arxivId]);
 
   useEffect(() => {
     setIsOpen(false);
@@ -87,6 +96,9 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
   }
 
   const clearChat = () => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+    setIsSending(false);
     setHistory([]);
     setMessages([createMessage("assistant", WELCOME_MESSAGE)]);
   };
@@ -129,8 +141,14 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
     setMessages((prev) => [...prev, userMessage, loadingMessage]);
     setHistory(nextHistory);
 
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+
     try {
-      const data = await postPaperChat(arxivId, message, nextHistory);
+      const data = await postPaperChat(arxivId, message, nextHistory, controller.signal);
+      if (controller.signal.aborted) {
+        return;
+      }
       const assistantReply = data.error
         ? `오류: ${data.error}`
         : data.answer ?? "응답이 비어 있습니다.";
@@ -143,14 +161,24 @@ export function ChatPanel({ arxivId }: ChatPanelProps) {
       if (!data.error) {
         setHistory((prev) => [...prev, { role: "assistant", content: assistantReply }]);
       }
-    } catch {
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      const errorReply =
+        error instanceof ApiError ? `오류: ${error.message}` : "네트워크 오류가 발생했습니다.";
       setMessages((prev) => [
         ...prev.filter((msg) => msg.id !== loadingMessage.id),
-        createMessage("assistant", "네트워크 오류가 발생했습니다."),
+        createMessage("assistant", errorReply),
       ]);
     } finally {
-      setIsSending(false);
-      inputRef.current?.focus();
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+      }
+      if (!controller.signal.aborted) {
+        setIsSending(false);
+        inputRef.current?.focus();
+      }
     }
   };
 

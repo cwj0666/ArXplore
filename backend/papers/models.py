@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.db import models
 
-
 DEFAULT_SUMMARY_MODEL = "gpt-5-mini"
 
 

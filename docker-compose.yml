@@ -119,6 +119,28 @@ services:
       retries: 5
     restart: unless-stopped
 
+  postgres-local:
+    image: pgvector/pgvector:pg16
+    container_name: arxplore-postgres-local
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      APP_POSTGRES_DB: ${APP_POSTGRES_DB:-}
+    ports:
+      - "127.0.0.1:${SERVER_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres_local_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   django_static:
   vite_node_modules:
+  postgres_local_data:

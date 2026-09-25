@@ -1,20 +1,23 @@
-from typing import Any, Optional
-from langchain_openai import ChatOpenAI
+from typing import Any
+
 from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from src.shared import get_runtime_openai_api_key, get_runtime_openai_model
+
 from src.core.prompts.answer import ANSWER_QUESTION_PROMPT
 from src.core.tracing import build_rag_answer_trace_config
+from src.shared import get_runtime_openai_api_key, get_runtime_openai_model
 
-from .tools import search_paper_chunks_tool, get_trending_papers_tool, _format_context_papers
+from .tools import _format_context_papers, get_trending_papers_tool, search_paper_chunks_tool
+
 
 def answer_question(
     question: str,
     *,
     context_papers: list[dict[str, Any]],
-    chat_history: Optional[list] = None,
+    chat_history: list | None = None,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
 ) -> dict[str, Any]:
     model = get_runtime_openai_model()
     api_key = get_runtime_openai_api_key()
@@ -46,9 +49,9 @@ def stream_answer_question(
     question: str,
     *,
     context_papers: list[dict[str, Any]],
-    chat_history: Optional[list] = None,
+    chat_history: list | None = None,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
 ):
     model = get_runtime_openai_model()
     api_key = get_runtime_openai_api_key()
@@ -72,9 +75,9 @@ def stream_answer_question(
 def agent_search(
     question: str, 
     *, 
-    chat_history: Optional[list] = None, 
+    chat_history: list | None = None, 
     runtime: str = "dev", 
-    user: Optional[str] = None
+    user: str | None = None
 ) -> dict[str, Any]:
     model = get_runtime_openai_model()
     api_key = get_runtime_openai_api_key()
@@ -109,9 +112,9 @@ def agent_search(
 def stream_agent_search(
     question: str, 
     *, 
-    chat_history: Optional[list] = None, 
+    chat_history: list | None = None, 
     runtime: str = "dev", 
-    user: Optional[str] = None
+    user: str | None = None
 ):
     model = get_runtime_openai_model()
     api_key = get_runtime_openai_api_key()

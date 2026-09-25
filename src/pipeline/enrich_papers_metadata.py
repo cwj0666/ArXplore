@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -33,7 +33,7 @@ def _build_soft_fail_result(
     *,
     status: str,
     runtime: str,
-    user: Optional[str],
+    user: str | None,
     candidates: list[dict[str, Any]],
     normalized_limit: int,
     error_message: str,
@@ -69,14 +69,16 @@ def _build_soft_fail_result(
 def run_enrich_papers_metadata(
     *,
     runtime: str = "airflow",
-    user: Optional[str] = None,
+    user: str | None = None,
     max_papers: int | str | None = 30,
     paper_repository: PaperRepository | None = None,
     search_client: PaperSearchClient | None = None,
 ) -> dict[str, Any]:
     """primary_category, categories, canonical pdf_url 등 arXiv 메타데이터를 후속 보강한다."""
     normalized_limit = 30 if max_papers in (None, "") else max(1, int(str(max_papers)))
-    paper_repository = paper_repository or PaperRepository()
+    if paper_repository is None:
+        paper_repository = PaperRepository()
+        paper_repository.ensure_schema()
     search_client = search_client or PaperSearchClient()
 
     candidates = paper_repository.list_papers_missing_arxiv_metadata(limit=normalized_limit)

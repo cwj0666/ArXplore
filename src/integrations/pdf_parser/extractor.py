@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import io
-import requests
 from typing import Any
+
+import requests
+
 from .types import FulltextParseResult
+
 try:
     from pypdf import PdfReader
 except ModuleNotFoundError:

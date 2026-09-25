@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
-import re
 from typing import Any
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
@@ -13,7 +13,6 @@ from django.http import HttpRequest
 from src.shared import override_openai_runtime
 
 from .models import DEFAULT_SUMMARY_MODEL, FavoritePaper, UserSettings
-
 
 MAX_RECENT_PAPERS = 1500
 PAPERS_PER_PAGE = 21

@@ -87,7 +87,7 @@ class TextCleanerMixin:
         words = re.findall('[A-Za-z0-9-]+', title)
         if not words:
             return False
-        uppercase_like = sum((1 for word in words if word[0].isupper() or word[0].isdigit() or word.isupper()))
+        uppercase_like = sum(1 for word in words if word[0].isupper() or word[0].isdigit() or word.isupper())
         ratio = uppercase_like / len(words)
         if len(words) <= 4:
             return ratio >= 0.5
@@ -166,7 +166,7 @@ class TextCleanerMixin:
             return None
         if head.startswith(('This ', 'These ', 'We ', 'Our ', 'In ', 'To ', 'As ', 'However ')):
             return None
-        if any((len(word) > 20 for word in head_words)):
+        if any(len(word) > 20 for word in head_words):
             return None
         return (head, rest)
 
@@ -242,14 +242,14 @@ class TextCleanerMixin:
         if cls._infer_content_role(title) == 'toc':
             return True
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if lines and len(lines) <= 12 and all((cls._looks_like_toc_line(line) for line in lines)):
+        if lines and len(lines) <= 12 and all(cls._looks_like_toc_line(line) for line in lines):
             return True
         return False
 
     @classmethod
     def _strip_trailing_reference_like_tail(cls, title: str, text: str) -> str:
         lowered_title = title.lower()
-        if not any((keyword in lowered_title for keyword in ('conclusion', 'discussion', 'appendix', 'additional analysis', 'supplementary', 'limitations', 'experimental details', 'implementation details'))):
+        if not any(keyword in lowered_title for keyword in ('conclusion', 'discussion', 'appendix', 'additional analysis', 'supplementary', 'limitations', 'experimental details', 'implementation details')):
             return text
         paragraphs = [paragraph.strip() for paragraph in re.split('\\n{2,}', text) if paragraph.strip()]
         if not paragraphs:
@@ -323,7 +323,7 @@ class TextCleanerMixin:
         title_words = title.split()
         if len(title_words) > 9:
             return None
-        if any((len(word) > 24 for word in title_words)):
+        if any(len(word) > 24 for word in title_words):
             return None
         if ',' in title and len(title_words) > 6:
             return None
@@ -407,5 +407,5 @@ class TextCleanerMixin:
         match = re.match('^(?P<prefix>\\d+(?:\\.\\d+)*)\\b', title.strip())
         if match is None:
             return None
-        return tuple((int(part) for part in match.group('prefix').split('.')))
+        return tuple(int(part) for part in match.group('prefix').split('.'))
 

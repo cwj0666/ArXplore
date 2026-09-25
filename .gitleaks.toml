@@ -1,0 +1,16 @@
+title = "ArXplore gitleaks config"
+
+[extend]
+useDefault = true
+
+# The default ruleset has no Tailscale rule, so a pasted auth key goes unnoticed.
+[[rules]]
+id = "tailscale-auth-key"
+description = "Tailscale auth key"
+regex = '''\btskey-(?:auth|client|api|scim|webhook)-[A-Za-z0-9]{6,}-[A-Za-z0-9]{6,}'''
+keywords = ["tskey-"]
+
+# Revoked key from c7b2c34 (see .gitleaksignore); matched by key ID so the entry survives history rewrites.
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''^tskey-auth-x2N3j4V6jDqyX0T3dG4J75X1-''']

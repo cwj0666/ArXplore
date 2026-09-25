@@ -1,5 +1,7 @@
 # ArXplore 개발 환경 설정 가이드
 
+> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../README.md)와 [ARCHITECTURE](../architecture/ARCHITECTURE.md)를 따릅니다.
+
 ## 1. 문서 목적
 
 이 문서는 ArXplore 프로젝트 구성원이 로컬 개발 환경과 서버 연결 환경을 준비할 때 따라야 하는 절차를 정리한다. 현재 운영 구조는 `서버 DB + 서버 Airflow + 로컬 dev 컨테이너 + 로컬 parser + 로컬 prepare-worker`를 기준으로 한다. 즉, 서버는 수집 자동화와 저장소를 담당하고, 무거운 파싱과 임베딩은 팀원 각자의 개발용 PC에서 수행한다.
@@ -11,7 +13,7 @@
 2. Tailscale 연결
 3. 저장소 clone
 4. .env 배치
-5. 기본 컨테이너 실행 (django + nginx + vite)
+5. 기본 컨테이너 실행 (django + nginx + vite) 후 스키마 생성 (migrate_schema.py)
 6. parser 프로필 실행 (layout-parser + prepare-worker가 함께 올라옴)
 7. 필요 시 서버 Airflow와 DB 접근을 위한 포트 포워딩
 ```
@@ -20,7 +22,7 @@
 
 - Git
 - Docker Desktop 또는 Docker Engine
-- 전달받은 `.env`
+- 전달받은 `.env` (변수 목록과 필수/선택 구분은 루트 `.env.example` 참고)
 - 전달받은 Tailscale Auth Key
 
 설치 확인:
@@ -68,7 +70,7 @@ cd ArXplore
 
 ## 6. `.env` 배치
 
-전달받은 `.env`를 프로젝트 루트에 둔다. 현재 `.env`에는 MongoDB, PostgreSQL, LangSmith, parser, worker가 사용할 접속 정보가 포함된다.
+전달받은 `.env`를 프로젝트 루트에 둔다. 현재 `.env`에는 MongoDB, PostgreSQL, LangSmith, parser, worker가 사용할 접속 정보가 포함된다. 새로 만들 때는 `cp .env.example .env`에서 시작한다.
 
 환경 변수 변경을 반영해야 할 때는 컨테이너를 재생성하는 편이 안전하다.
 
@@ -83,13 +85,15 @@ docker compose up -d --force-recreate django nginx
 - `APP_POSTGRES_DB=arxplore_app`
 - `SERVER_MONGO_PORT`
 - `SERVER_POSTGRES_PORT` (서버 compose가 publish하는 호스트 포트, 기본 `15432`)
-- `LAYOUT_PARSER_BASE_URL`
+- `PROD_POSTGRES_HOST` (django·prepare-worker 컨테이너가 접속할 서버 PostgreSQL. 보통 `<TAILSCALE_SERVER_IP>`)
+- `LAYOUT_PARSER_BASE_URL` (기본값·자동 감지 없음. prepare-worker와 같은 compose 네트워크이므로 `http://layout-parser:5060`)
 - `TAILSCALE_SERVER_IP` (`scripts/setup.sh forward`, 서버 compose 포트 바인딩에 사용)
 
 접속 값은 아래 규칙을 유지한다.
 
-- `MONGO_HOST`, `POSTGRES_HOST`에는 호스트만 넣는다
-- 포트는 `SERVER_MONGO_PORT`, `SERVER_POSTGRES_PORT`에서 따로 관리한다
+- `MONGO_HOST`, `POSTGRES_HOST`, `PROD_POSTGRES_HOST`는 `host` 또는 `host:port` 형식이다
+- 포트를 생략하면 `SERVER_MONGO_PORT`, `SERVER_POSTGRES_PORT`(서버가 공개하는 포트)를 쓴다
+- 서버 compose 안의 Airflow처럼 같은 네트워크에서 컨테이너 이름으로 붙을 때는 `arxplore-postgres:5432`, `arxplore-mongo:27017`처럼 내부 포트를 적는다
 
 개인별로 바꿔야 하는 값은 최소한 아래다.
 
@@ -114,6 +118,12 @@ docker compose ps
 
 - Web: `http://127.0.0.1`
 - Vite (프론트엔드 수정 실시간 확인): `http://127.0.0.1:5173`
+
+새 DB를 쓰거나 스키마가 바뀐 뒤에는 스키마를 1회 만든다. 리포지토리 생성자는 DDL을 실행하지 않으며, prepare-worker는 시작할 때 스스로 스키마를 확인한다.
+
+```bash
+docker compose exec django python /workspace/scripts/migrate_schema.py
+```
 
 `arxplore-vite`는 단일 `docker-compose.yml`의 기본 서비스로 묶여 있어 `setup.sh` 한 번에 함께 올라온다. 프론트엔드 수정만 하는 경우에도 별도 명령은 필요 없다.
 
@@ -169,7 +179,7 @@ docker compose --profile parser exec prepare-worker \
 
 ```bash
 bash scripts/setup-server.sh
-docker compose -f docker-compose.server.yml ps
+docker compose -p arxplore_server -f docker-compose.server.yml ps
 ```
 
 서버 `.env`에는 아래 값이 반드시 있어야 한다. 비어 있으면 `docker compose`가 실행을 거부한다.
@@ -191,10 +201,11 @@ Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성�
 - `arxplore-airflow-scheduler`
 - `arxplore-airflow-dag-processor`
 
-현재 Airflow에서 중요하게 보는 DAG는 2개다.
+현재 Airflow DAG는 3개다.
 
-- `arxplore_daily_collect`
-- `arxplore_maintenance`
+- `arxplore_daily_collect` (매일 18:00 KST)
+- `arxplore_maintenance` (3시간마다)
+- `arxplore_langsmith_maintenance` (매일 03:00 KST, LangSmith trace 정리)
 
 ## 10. Airflow 운영 기준
 
@@ -206,6 +217,8 @@ Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성�
 - `arxplore_maintenance`
   - backfill
   - metadata enrichment
+- `arxplore_langsmith_maintenance`
+  - 오래된 LangSmith trace 정리
 - 로컬 `prepare-worker`
   - prepare
   - embed
@@ -214,16 +227,17 @@ Airflow 로그인 비밀번호는 SimpleAuthManager가 최초 기동 시 생성�
 
 ## 11. 적재 상태 점검
 
-적재 상태와 retrieval 결과는 아래 notebook으로 확인한다.
+적재 상태는 PostgreSQL에 직접 조회해 확인한다.
 
-- `notebooks/retrieval_inspection.ipynb`
+```sql
+SELECT status, count(*) FROM prepare_jobs GROUP BY status;
+SELECT source, count(*) FROM paper_fulltexts GROUP BY source;
+SELECT count(*) FROM paper_chunks c
+LEFT JOIN paper_embeddings e ON e.chunk_id = c.id
+WHERE e.chunk_id IS NULL;
+```
 
-이 notebook에서는 다음을 점검할 수 있다.
-
-- 적재된 `papers`, `paper_fulltexts`, `paper_chunks`, `paper_embeddings` 수
-- `prepare_jobs` 최근 상태
-- 최근 적재 논문 목록
-- lexical / vector retrieval 결과
+failed 잡은 `python scripts/requeue_failed_prepare_jobs.py --since YYYY-MM-DD`로 확인하고(기본 dry-run), `--apply`로 재등록한다.
 
 운영상 가장 먼저 확인할 것은 아래 네 가지다.
 
@@ -274,7 +288,7 @@ bash scripts/setup.sh forward restart
 | PostgreSQL | `<TAILSCALE_SERVER_IP>:15432` |
 | MongoDB | `<TAILSCALE_SERVER_IP>:17017` |
 | Airflow API | `http://<TAILSCALE_SERVER_IP>:18080` |
-| Layout Parser | `http://172.17.0.1:5060` 또는 로컬 parser 주소 |
+| Layout Parser | `http://layout-parser:5060` (prepare-worker와 같은 compose 네트워크) |
 
 ### Windows 브라우저 / DB 클라이언트 기준
 

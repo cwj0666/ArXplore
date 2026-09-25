@@ -11,7 +11,6 @@ configure_environment()
 
 from src.shared import build_django_postgres_database_config, get_settings
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"

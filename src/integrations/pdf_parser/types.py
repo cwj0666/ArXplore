@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+
 @dataclass
 class FulltextParseResult:
     """PDF 파싱 결과."""

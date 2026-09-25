@@ -1,58 +1,39 @@
 # ArXplore
 
-<img width="1900" height="915" alt="스크린샷 2026-04-30 110304" src="https://github.com/user-attachments/assets/97fee07e-b0ea-407a-b3cc-37d751cb42f0" />
-<img width="1901" height="939" alt="스크린샷 2026-04-30 110346" src="https://github.com/user-attachments/assets/e484d29b-379b-4efb-9b8e-0c9f397b7c16" />
-ArXplore는 Hugging Face Daily Papers와 arXiv를 기반으로 최신 AI 논문을 수집하고, 이를 구조화된 논문 상세 문서와 LangGraph 기반 Agentic RAG로 재구성해 탐색할 수 있게 만드는 AI 논문 탐색 플랫폼입니다. 현재 시스템은 `서버 수집 자동화 + 로컬 prepare/embedding worker + PostgreSQL/pgvector 검색 계층 + LangGraph React Agent` 위에서 운영됩니다.
+[![CI](https://github.com/SKNETWORKS-FAMILY-AICAMP/ArXplore/actions/workflows/ci.yml/badge.svg)](https://github.com/SKNETWORKS-FAMILY-AICAMP/ArXplore/actions/workflows/ci.yml)
 
-## Goals & Scope
+Hugging Face Daily Papers에 올라오는 AI 논문을 매일 수집하고, PDF를 파싱·청킹해 PostgreSQL에 적재한 뒤, 논문 목록 탐색 · 한국어 개요와 상세 요약 · LangGraph 에이전트 채팅으로 읽을 수 있게 만든 논문 탐색 서비스입니다.
 
-ArXplore는 최신 AI 논문을 수집하고, 구조화된 논문 상세 문서와 RAG 기반 질의응답으로 재구성해 사용자가 더 빠르게 이해할 수 있도록 돕는 플랫폼입니다. `검색`, `논문 상세 탐색`, `한국어 요약`, `근거 기반 응답`을 한 제품 흐름으로 묶는 것을 목표로 합니다.
+<img width="1900" height="915" alt="논문 목록 화면. 상단에 키워드 검색과 AI 어시스턴트 탭이 있는 검색창, 아래에 논문 카드 그리드(제목, 초록 미리보기, 게시일, 추천수, 즐겨찾기 버튼)와 최신순 정렬 선택이 있다." src="https://github.com/user-attachments/assets/97fee07e-b0ea-407a-b3cc-37d751cb42f0" />
 
-다루는 문제 영역:
+<img width="1901" height="939" alt="논문 상세 화면. 왼쪽에 PDF 분할 보기, 오른쪽에 제목·저자·게시일과 AI가 생성한 한국어 개요 카드가 있고, 상단에 상세요약 생성 버튼, 오른쪽 아래에 논문 챗 버튼이 있다." src="https://github.com/user-attachments/assets/e484d29b-379b-4efb-9b8e-0c9f397b7c16" />
 
-- 최신 AI 논문이 빠르게 쏟아져 직접 골라 읽고 맥락을 연결하기 어려운 상황
-- abstract만으로는 연구 흐름과 기여 차이를 충분히 파악하기 어려운 상황
-- 영어 논문을 한국어로 빠르게 이해하고 다시 질문할 수 있는 도구가 부족한 상황
-- 검색과 문서형 탐색이 분리돼 있어 사용 흐름이 끊기는 상황
+## 프로젝트 성격과 담당 범위
 
-서비스가 제공하는 두 가지 경험:
+- **SK네트웍스 AI 캠프 팀 프로젝트**입니다(2026년 3~4월). 역할 분담 문서는 5인 팀 기준으로 작성되어 있습니다([ROLES.md](./docs/management/ROLES.md)).
+- **본인 담당**: 검색 데이터 계층(수집 → PDF 파싱 → 청킹 → 임베딩 → 검색)을 맡아 시작했고, 이후 범위를 넓혀 프로젝트 전체를 주도했습니다. Streamlit 화면을 Django + React로 옮긴 작업(c64a957)과 그 이후 기능(에이전트 스트리밍 채팅과 중지, 관련 논문 카드, compose 통합 등)은 본인 작업입니다.
+- **팀원 기여(git 기록 기준)**: 논문 상세 문서 기반(`yeseung-Yang`), 한국어 번역·요약 프롬프트(`lucky`).
+- **저장소 기록**: 팀 프로젝트 종료 시점(143cc72) 커밋 41개. git 작성자 이름별로 `cwj0666` 33, `최원준` 3(두 이름 모두 본인), `lucky` 2, `yeseung-Yang` 2, `SKNETWORKS-AICAMP-ADMIN` 1입니다. 작성자 수는 팀원 수와 같지 않고, 커밋으로 남지 않은 기여는 이 숫자에 드러나지 않습니다.
+- 2026년 9월 이후 커밋은 본인이 포트폴리오 정리를 위해 진행한 코드 점검과 수정입니다. AI 코딩 도구를 함께 사용했고 커밋 트레일러에 표기했습니다.
 
-1. 사용자가 질문을 입력하면 관련 논문 청크를 검색해 근거 기반으로 답변하는 검색 중심 경험
-2. 사용자가 질문 없이도 논문 목록과 상세 문서를 따라 최신 AI 연구 흐름을 읽는 탐색 중심 경험
+## 주요 기능
 
-### 도메인 범위
+현재 코드가 실제로 하는 일만 적었습니다.
 
-초기 범위는 최신 AI 연구 카테고리에 한정합니다.
+- **수집(서버 Airflow)**: `arxplore_daily_collect`가 매일 18:00(KST) HF Daily Papers를 MongoDB에 raw로 저장하고 날짜 단위 prepare 작업을 등록합니다. `arxplore_maintenance`는 3시간마다 과거 raw를 backfill하고 arXiv 메타데이터를 보강합니다. `arxplore_langsmith_maintenance`는 매일 03:00에 오래된 LangSmith trace를 정리합니다.
+- **Prepare(로컬 worker)**: PDF를 3단계 폴백(HURIDOCS → pypdf → 초록)으로 파싱하고, 섹션과 `content_role`을 붙여 글자 수 기준(1,800자, 겹침 200자)으로 청킹한 뒤 OpenAI API로 임베딩합니다.
+- **논문 목록**: 최신순·추천순 정렬, 제목·초록 부분 문자열 검색(최근 1,500편 대상), 페이지네이션, 즐겨찾기.
+- **논문 상세**(로그인 필요, AI 기능은 개인 OpenAI 키 필요)
+  - PDF 분할 보기
+  - 개요와 핵심 포인트: gpt-5-mini로 생성하고 논문 단위로 캐시합니다.
+  - 상세 요약: 사용자가 gpt-5-mini / gpt-5 중에서 고르고, LangGraph 요약 그래프가 섹션을 배경·방법·실험·한계로 묶어 요약합니다. 논문×모델 단위로 캐시합니다.
+  - 관련 논문: 로컬 DB 후보를 카테고리·키워드 겹침으로 점수화하고, 부족하면 arXiv 검색으로 채웁니다.
+  - 논문 챗: 질의 검색 없이 논문의 앞 20개 청크를 컨텍스트로 넣어 **비스트리밍**으로 답합니다.
+- **AI 어시스턴트**: LangGraph ReAct 에이전트가 SSE로 응답을 스트리밍하고, 사용자는 중지 버튼으로 끊을 수 있습니다. 도구는 `search_paper_chunks_tool`(PostgreSQL 전문 검색)과 `get_trending_papers_tool`(최근 논문 추천수 순) 두 개입니다.
+- **계정**: 회원가입·로그인, 개인 OpenAI API 키를 세션에 저장해 AI 기능에 사용합니다.
+- **미구현**: 근거 청크 번역 UI(`translate_chunk` 체인만 있고 엔드포인트 없음), 구조화된 citation(에이전트 답변은 마크다운 링크가 들어간 평문).
 
-- `cs.AI`
-- `cs.CL`
-- `cs.CV`
-- `cs.LG`
-- `cs.RO`
-- 필요 시 `stat.ML`
-
-범위 제한은 논문 상세 구성, retrieval, prompt, UI 전반의 품질을 안정화하기 위한 전략입니다.
-
-### 핵심 사용자 경험
-
-- **검색 중심 경험** — 메인 화면 상단의 자연어 질문 입력창에 질문을 넣으면 시스템이 관련 논문 청크를 검색한 뒤 근거 기반 답변을 생성하고, 답변과 함께 citation과 관련 논문을 표시합니다.
-- **논문 목록 탐색 경험** — 질문 없이 메인 화면에 진입해도 HF-style 논문 목록만으로 현재 어떤 AI 연구가 올라오는지 파악할 수 있습니다.
-- **논문 상세 경험** — 논문 상세 페이지는 overview(논문 개요), key findings(핵심 포인트), detailed summary(상세 요약 — 메인 본문), translation(근거 chunk 번역)을 최소 단위로 포함하는 구조화된 문서입니다.
-
-## Features
-
-- HF Daily Papers 기반 최신 논문 수집과 과거 raw backfill, arXiv 메타데이터 enrichment
-- PostgreSQL `prepare_jobs` 기반 prepare queue와 `LISTEN/NOTIFY` 로컬 `prepare-worker`
-- HURIDOCS Layout Parser 우선, `pypdf` → abstract fallback 기반 PDF 파싱
-- PostgreSQL + pgvector 기반 fulltext, chunk, embedding 적재
-- lexical / vector / hybrid retrieval 및 rerank 파이프라인
-- 논문 overview / key findings / detailed summary / translation 생성 chain
-- 논문 분석/요약 결과를 PostgreSQL `paper_ai_overviews`, `paper_ai_detailed_summaries`에 캐싱해 재방문 시 재생성 비용 제거
-- 논문 상세 페이지의 관련 논문 카드 (로컬 DB 검색 + arXiv 외부 검색 결합)
-- LangGraph React Agent 기반 Agentic RAG 챗봇 (도구 호출, SSE 기반 스트리밍 응답, 사용자측 중지 버튼)
-- React 기반 검색, 카드 그리드, 상세 문서, 에이전트 채팅 UI
-
-## System Architecture
+## 아키텍처
 
 ```mermaid
 flowchart TD
@@ -68,183 +49,162 @@ flowchart TD
     I --> J[(PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings)]
     D --> J
     J --> K[Retrieval<br/>lexical / vector / hybrid + rerank]
-    J --> L[Paper Detail Chains<br/>overview / key findings / summary / translation]
+    J --> L[Paper Detail Chains<br/>overview / key findings / summary]
     K --> M[LangGraph React Agent<br/>Agentic RAG]
     L --> N[React UI]
     M --> N
 ```
 
-서버 Airflow는 수집 자동화와 큐 등록만 담당하고, 무거운 파싱과 임베딩은 로컬 worker가 처리합니다. raw payload는 MongoDB가 source of truth, 정제 데이터와 vector index는 PostgreSQL + pgvector가 담당해 retrieval, 상세 문서 생성, Agentic RAG의 공용 데이터 계층을 구성합니다. 자세한 내용은 [Architecture](./docs/architecture/ARCHITECTURE.md) 문서를 참고하세요.
+- **서버 스택**(`docker-compose.server.yml`): PostgreSQL(pgvector), MongoDB, Airflow. 항상 켜 두는 수집·저장 계층입니다.
+- **로컬 스택**(`docker-compose.yml`): Django(gunicorn) + nginx(React 빌드) + Vite. `parser` 프로필을 켜면 HURIDOCS 파서와 prepare-worker가 함께 올라옵니다.
+- **GPU는 HURIDOCS 파서에만 씁니다.** 임베딩은 OpenAI API(`text-embedding-3-large`를 `dimensions=1536`으로 줄여 요청)로 만듭니다.
+- **도메인 범위**: HF Daily Papers 큐레이션 피드 전체입니다. arXiv 카테고리로 따로 거르지 않습니다.
+- **기술 스택**: Python 3.12, Django 5, React 18 + TypeScript + Vite, LangChain / LangGraph / LangSmith, PostgreSQL 16 + pgvector, MongoDB, Airflow 3.
 
-## Tech Stack
+세부 구조와 테이블 스키마는 [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)에 있습니다.
 
-- **Language** Python
-- **Storage** MongoDB (raw), PostgreSQL + pgvector (정제 / queue / vector)
-- **Orchestration** Airflow
-- **Parser** HURIDOCS PDF Document Layout Analysis, pypdf
-- **LLM / RAG** LangChain, LangGraph (React Agent), LangSmith
-- **UI** React + Django
-- **Runtime** Demo: nginx + gunicorn, Frontend edit: Vite
+## 검색 계층
 
-## Data Collection & Preprocessing
+`src/integrations/paper_retriever.py`에 세 가지 경로가 있지만, 제품에서 쓰는 것은 lexical 하나입니다.
 
-수집과 전처리는 `서버 수집 → raw 보존 → 로컬 prepare/embedding` 흐름으로 분리되어 있습니다.
-
-- **수집 소스** HF Daily Papers API (최신 논문 + 메타데이터), arXiv API (제목/초록/저자 보강)
-- **Raw 저장** MongoDB에 날짜별 원본 payload와 backfill 상태를 그대로 저장 (재처리 가능)
-- **PDF 파싱** HURIDOCS Layout Parser → `pypdf` → abstract fallback 순으로 시도하여 항상 본문을 확보
-- **Section 정리** 파서 출력에서 헤더/본문/참고문헌을 분리하고 `content_role`과 `section_title`을 부여
-- **Chunking** section 경계를 보존한 토큰 기반 분할, quality metrics와 parser metadata 동시 기록
-- **Embedding** 청크 단위 임베딩 생성 후 `paper_embeddings`에 적재 (pgvector index)
-- **Job Queue** PostgreSQL `prepare_jobs`로 `enqueue → claim → retry → done` 상태를 관리, 로컬 worker는 `LISTEN/NOTIFY`로 새 작업을 즉시 소비
-
-자세한 데이터 흐름과 저장 구조는 [Architecture](./docs/architecture/ARCHITECTURE.md)의 "데이터 흐름"과 "저장 구조" 절에 정리되어 있습니다.
-
-## Software: RAG with LLM × Vector DB
-
-LLM과 벡터 데이터베이스를 연결하는 RAG 구현 코드는 다음 위치에 있습니다.
-
-- [src/integrations/vector_repository.py](src/integrations/vector_repository.py) — pgvector 적재 및 vector retrieval
-- [src/integrations/paper_repository.py](src/integrations/paper_repository.py) — `papers / paper_fulltexts / paper_chunks` 적재와 lexical retrieval
-- [src/integrations/paper_retriever.py](src/integrations/paper_retriever.py) — lexical / vector / hybrid retrieval 인터페이스
-- [src/integrations/embedding_client.py](src/integrations/embedding_client.py) — 임베딩 생성 클라이언트
-- [src/integrations/fulltext_parser.py](src/integrations/fulltext_parser.py) — layout / pypdf / fallback 파싱과 chunk 보정
-- [src/integrations/paper_search.py](src/integrations/paper_search.py) — HF Daily Papers 및 arXiv 메타데이터 조회, 관련 논문 외부 검색
-- [src/pipeline/embed_papers.py](src/pipeline/embed_papers.py) — 청크 임베딩 파이프라인
-- [src/pipeline/prepare_worker.py](src/pipeline/prepare_worker.py) — prepare queue 소비 worker
-- [src/core/rag.py](src/core/rag.py) — retrieval 결과를 answer로 합성하는 RAG 응답 계층
-- [src/core/paper_chains.py](src/core/paper_chains.py) — 논문 overview / key findings 생성 체인
-- [src/core/translation_chains.py](src/core/translation_chains.py) — detailed summary / translation 체인
-- [src/core/prompts/](src/core/prompts/) — overview / key findings / summary / translation 프롬프트
-- [backend/papers/services.py](backend/papers/services.py) — LLM 체인 호출, AI 요약 캐싱, 로컬 + 외부 검색을 결합한 관련 논문 합성
-
-### Agentic RAG (LangGraph React Agent)
-
-단순 프롬프트 기반 QA를 넘어, LangGraph React Agent로 도구 호출 기반의 다단계 추론을 수행합니다.
-
-- **Agent Node** 사용자 메시지와 대화 컨텍스트를 보고 호출할 도구를 결정
-- **Tools Node**
-  - `search_paper_chunks_tool` — 키워드 기반 본문 청크 근거 검색
-  - `get_trending_papers_tool` — 최신/인기 논문 통계 조회
-- **Conditional Edges** 도구 호출이 필요할 때마다 agent ↔ tools 사이를 반복 (React 패턴)
-- **Streaming** `stream_mode="messages"`로 실시간 타이핑 응답을 React UI에 전달
-
-## Test Plan & Results
-
-테스트 및 점검은 단위 검증, 데이터 적재 확인, retrieval 품질 점검, end-to-end UI 검증을 함께 운영합니다.
-
-### Test Plan
-
-| 영역 | 대상 | 방법 |
+| 경로 | 상태 | 내용 |
 | --- | --- | --- |
-| 수집 | `arxplore_daily_collect`, `arxplore_maintenance` | Airflow DAG 수동 trigger 후 MongoDB raw 적재 확인 |
-| Prepare Queue | `prepare_jobs` enqueue / claim / retry | `LISTEN/NOTIFY` 트리거 및 stale reset 시나리오 검증 |
-| PDF 파싱 | HURIDOCS / pypdf / abstract fallback | 파서 실패 케이스 강제 주입 후 fallback 경로 점검 |
-| 적재 | `papers / paper_fulltexts / paper_chunks / paper_embeddings` | [notebooks/retrieval_inspection.ipynb](notebooks/retrieval_inspection.ipynb) 로 적재 상태 확인 |
-| Retrieval | lexical / vector / hybrid + rerank | 동일 질의에 대한 채널별 결과 비교, section/role rerank 효과 확인 |
-| 생성 | overview / key findings / summary / translation | 샘플 논문에 대해 chain 출력 품질을 LangSmith trace로 검증 |
-| Agentic RAG | LangGraph React Agent | 다중 도구 호출 시나리오와 스트리밍 응답 동작 검증 |
-| UI | React pages | 논문 리스트 / 상세 / 에이전트 채팅 페이지 수동 회귀 |
+| lexical | **제품 경로** (에이전트 검색 도구) | 제목(A)·초록(B)·청크(C) 가중 tsvector에 `websearch_to_tsquery` + `plainto_tsquery`로 `ts_rank_cd` 점수를 매기고, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌처럼 보이는 텍스트 필터, 논문 다양성 보정, 인접 청크 병합을 거칩니다. |
+| vector | 구현됨, 미연결 | `paper_embeddings`와 코사인 거리(`<=>`). 벡터 인덱스는 아직 없어 순차 스캔입니다. |
+| hybrid | 구현됨, 미연결 | lexical과 vector 결과를 RRF(k=60)와 방법별 가중치로 합칩니다. 평가를 마친 뒤 제품 경로에 연결할 예정입니다. |
 
-### LangSmith Trace Stages
+알려진 제약: FTS 설정이 `english`라서 한국어 질의는 lexical에서 거의 맞지 않습니다. GIN 인덱스는 `to_tsvector('english', chunk_text)`에만 있고, 실제 쿼리는 제목·초록·청크를 합친 식이라 이 인덱스를 타지 않습니다.
 
-운영 중 추적되는 핵심 stage는 다음과 같습니다.
+## 데이터 파이프라인
 
-`collect_papers`, `backfill_collect_papers`, `prepare_papers`, `consume_prepare_queue`, `embed_papers`, `enrich_papers_metadata`, `analyze_paper_detail`, `paper_overview`, `paper_key_findings`, `translation`, `summary`, `rag_answer`
+```text
+HF Daily Papers → MongoDB raw → prepare_jobs(PostgreSQL) → prepare-worker → papers / paper_fulltexts / paper_chunks → paper_embeddings
+```
 
-### Results
+**작업 큐** (`src/integrations/prepare_job_repository.py`)
 
-- HF Daily Papers 일일 수집 → prepare → embed 파이프라인이 자동화 상태로 운영되며, 신규 논문이 동일 일자 내에 검색/상세 문서/Agent 응답에 반영됨
-- HURIDOCS 우선 + fallback 구조로 파싱 실패 시에도 본문 또는 abstract 기반 chunk가 항상 확보되어 retrieval 누락 없음
-- lexical / vector / hybrid 결과를 동일 쿼리에서 비교하여 hybrid + rerank 조합이 grounding 품질에서 우위를 보임을 확인
-- LangGraph React Agent가 도구 호출과 스트리밍 응답을 안정적으로 수행, React UI에서 실시간 타이핑으로 노출됨
+- 큐는 PostgreSQL 테이블 하나(`prepare_jobs`, `(mode, target_date)` 유일)입니다. 등록할 때 `pg_notify`를 보내고, worker는 `LISTEN`으로 기다리다가 타임아웃이 나면 다시 확인합니다.
+- claim은 `FOR UPDATE SKIP LOCKED`로 대기 중인 잡 1건을 잡고 `(job_id, worker_id, claim_generation)` 토큰을 발급합니다. 완료·실패 기록은 이 토큰이 맞을 때만 반영되므로, 다른 worker가 다시 가져간 잡을 이전 worker가 덮어쓰지 못합니다.
+- stale 판정을 따로 돌리는 감시 프로세스는 없습니다. worker가 claim할 때 마지막 heartbeat(없으면 claim 시각)가 `PREPARE_JOB_STALE_SECONDS`(기본 900초)보다 오래된 `processing` 잡을 되돌립니다. heartbeat는 논문 한 편을 처리하기 전마다 갱신합니다.
+- 실패한 잡은 `PREPARE_JOB_MAX_ATTEMPTS`(기본 3회)까지 지수 backoff(60초부터 두 배씩, 최대 1시간) 뒤에 다시 시도하고, 횟수를 다 쓰면 `failed`로 닫습니다. 같은 날짜를 다시 수집해 raw revision이 올라가면 완료된 잡도 다시 처리합니다.
 
-상세한 점검 절차와 노트북은 [notebooks/](notebooks/) 와 [docs/management/WORKFLOW.md](docs/management/WORKFLOW.md) 를 참고하세요.
+**2026-09 점검(Phase 0)에서 추가한 보호 장치**
+
+- 논문 단위 격리: 한 논문의 예외는 기록만 하고 나머지 논문을 계속 처리합니다. 날짜 잡은 모든 논문이 실패했을 때만 실패로 봅니다.
+- 폴백 보호: 새 결과가 초록 폴백(`fallback_abstract`)이고 기존 본문이 PDF(`layout_pdf`, `pdf`)면 본문·청크·임베딩을 교체하지 않습니다. 일시적인 다운로드 실패가 기존 임베딩을 CASCADE로 지우던 문제를 막습니다.
+- 임베딩 backlog: prepare 성공 여부와 상관없이 매 루프에서 누락된 임베딩을 `EMBED_BACKLOG_MAX_CHUNKS`(기본 400)까지 채우고, backlog 오류가 worker를 멈추지 않습니다.
+- 참고문헌 판정: 섹션 제목이 참고문헌 제목과 정확히 맞을 때만 `references`로 분류합니다. "Direct Preference Optimization" 같은 본문 섹션이 검색에서 빠지던 문제를 고쳤습니다.
+- 운영 스크립트는 모두 dry-run이 기본입니다: `scripts/requeue_failed_prepare_jobs.py --since YYYY-MM-DD [--apply]`, `scripts/backfill_content_roles.py [--apply]`.
 
 ## Quick Start
 
-### 실행
+### (a) 로컬 단독 실행
+
+원격 서버 없이 로컬 PostgreSQL 하나로 웹 앱을 띄웁니다. 수집(Airflow + MongoDB)은 돌지 않으므로 **논문 목록은 빈 상태로 시작합니다.**
 
 ```bash
-bash scripts/setup.sh
+cp .env.example .env
+# DJANGO_SECRET_KEY, POSTGRES_PASSWORD 등 change-me로 시작하는 값을 실제 값으로 바꾼다
+
+docker compose --profile local-db up -d postgres-local   # pgvector/pgvector:pg16, 127.0.0.1:15432
+
+python scripts/migrate_schema.py   # 호스트 Python 3.12 + requirements.txt 필요
+# 호스트에 Python 환경이 없으면: docker compose run --rm django python /workspace/scripts/migrate_schema.py
+
+docker compose --profile local-db up -d --build
 ```
 
-| 서비스 | URL | 설명 |
-|--------|-----|------|
-| Web | `http://localhost:80` | nginx → gunicorn Django + React 빌드 |
-| Vite | `http://localhost:5173` | 프론트엔드 수정 실시간 확인 |
+- 웹: `http://localhost` (nginx), Vite 개발 서버: `http://localhost:5173`
+- 회원가입 → 설정에서 개인 OpenAI API 키를 등록하면 AI 기능이 열립니다.
+- 접속 주소: `postgres-local`은 django·worker와 같은 compose 기본 네트워크에 있으므로 컨테이너는 `PROD_POSTGRES_HOST=postgres-local:5432`로 접속합니다(`host.docker.internal`이나 `extra_hosts`가 필요 없습니다). 호스트에서 돌리는 스크립트는 `POSTGRES_HOST=localhost`와 `SERVER_POSTGRES_PORT=15432`를 씁니다. `.env.example`의 기본값이 이 구성입니다.
+- `PROD_POSTGRES_HOST`와 `POSTGRES_HOST`는 `host` 또는 `host:port` 형식입니다. 포트를 생략하면 `SERVER_POSTGRES_PORT`(`.env.example` 값 15432)를 씁니다.
+
+### (b) 원격 서버 모드
+
+서버(PostgreSQL · MongoDB · Airflow)를 Tailscale로 공유하고, 로컬에서 웹과 GPU 파서·prepare-worker를 돌리는 원래 팀 구성입니다. 절차는 [TEAM_SETUP.md](./docs/management/TEAM_SETUP.md)를 따릅니다.
 
 ```bash
-# 내리기
-docker compose down
+bash scripts/setup-server.sh                  # 서버: PostgreSQL / MongoDB / Airflow
+bash scripts/setup.sh                         # 로컬: django + nginx + vite
+docker compose --profile parser up -d --build # 로컬 GPU: layout-parser + prepare-worker
 ```
 
-### Parser + Prepare Worker (GPU 필요)
-
-PDF 파싱과 임베딩 처리가 필요할 때 `parser` 프로필로 추가 실행합니다.
+## 테스트와 CI
 
 ```bash
-docker compose --profile parser up -d --build
+pip install -r requirements.txt pytest pytest-django
+pytest tests/unit                  # DB·API 키 없이 도는 단위 테스트
+
+# 큐 통합 테스트: 일회용 PostgreSQL(pgvector) 필요
+TEST_DATABASE_URL=postgresql://arxplore:arxplore@localhost:5432/arxplore_test \
+  pytest tests/integration -m integration
+
+cd frontend && npm ci
+npm run typecheck
+npm run build
 ```
 
-- `arxplore-layout-parser` — HURIDOCS GPU 파서 (`:5060`)
-- `arxplore-prepare-worker` — prepare queue 소비 worker (LISTEN/NOTIFY 루프)
+GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 
-### 서버 포트 포워딩
+| 잡 | 내용 |
+| --- | --- |
+| python | ruff, `pytest tests/unit`, `manage.py check`, `makemigrations --check` |
+| integration | pgvector 서비스 컨테이너로 `pytest tests/integration` |
+| frontend | `npm run typecheck`, `npm run build` |
+| infra | 더미 `.env`로 두 compose 파일 `docker compose config`, hadolint |
+| security | gitleaks로 git 히스토리 시크릿 스캔 |
 
-메인 서버(PostgreSQL · MongoDB · Airflow)로 SSH 터널이 필요할 때 사용합니다.
+## Evaluation
 
-```bash
-bash scripts/setup.sh forward            # 시작
-bash scripts/setup.sh forward stop       # 중지
-bash scripts/setup.sh forward status     # 상태 확인
-bash scripts/setup.sh forward restart    # 재시작
-```
+검색 품질은 아직 측정하지 않았습니다. 아래 표는 측정할 항목의 자리입니다.
 
-### Server Stack
+| 검색 방식 | hit@5 | MRR |
+| --- | --- | --- |
+| lexical | 측정 예정 | 측정 예정 |
+| vector | 측정 예정 | 측정 예정 |
+| hybrid | 측정 예정 | 측정 예정 |
 
-메인 서버 컴퓨터에서만 실행합니다.
+계획: 한국어·영어 질의 30~50개(알려진 논문을 찾는 질의 + LLM 합성 질의)로 세 경로를 비교합니다. 파서·`content_role` 수정과 기존 데이터 백필(`scripts/backfill_content_roles.py`)을 마친 뒤 측정합니다.
 
-```bash
-bash scripts/setup-server.sh
-docker compose -p arxplore_server -f docker-compose.server.yml ps
-```
+## 기술적 결정과 트레이드오프
 
-- Airflow: `http://127.0.0.1:18080`
-- MongoDB: `localhost:17017`
-- PostgreSQL: `localhost:15432`
+- **PostgreSQL 단일화**: 정제 데이터, 벡터, 작업 큐, AI 결과 캐시, Django 테이블을 한 DB에 둡니다. 별도 메시지 브로커 없이 `SKIP LOCKED`와 `LISTEN/NOTIFY`로 큐를 만들 수 있고 운영할 대상이 줄어듭니다. 대신 벡터 인덱스와 FTS 튜닝을 직접 챙겨야 하고, 규모가 커지면 분리를 검토해야 합니다.
+- **서버/로컬 worker 분리**: 서버는 항상 켜진 수집·저장만 맡고, GPU가 필요한 파싱은 로컬 worker가 서버 DB에 직접 적재합니다. 서버에 GPU가 없어도 되지만, 로컬 worker가 꺼져 있으면 수집분이 처리되지 않고 Tailscale 연결에 의존합니다.
+- **3단 파서 폴백**: HURIDOCS 레이아웃 분석이 섹션 구조를 가장 잘 살리지만 GPU 컨테이너와 긴 처리 시간이 필요합니다. 실패하면 pypdf, 그것도 실패하면 초록으로 내려가 최소한의 청크는 남깁니다. 폴백 결과가 기존 PDF 본문을 덮지 않도록 막아 두었습니다.
+- **AI 결과 캐시 키**: 개요는 `arxiv_id` 단독 기본키(모델은 기록용), 상세 요약은 `(arxiv_id, model)` 유일 제약입니다. 모든 사용자가 캐시를 공유하므로 같은 논문을 다시 열 때 LLM을 부르지 않습니다. 대신 프롬프트를 바꿔도 기존 캐시를 무효화할 버전 정보가 없고, 한 사용자가 만든 결과를 모두가 봅니다.
 
-운영 중인 Airflow DAG:
+## 알려진 한계와 로드맵
 
-- `arxplore_daily_collect` — KST 18:00, HF Daily Papers 수집 후 `prepare_jobs` enqueue
-- `arxplore_maintenance` — 3시간마다 raw backfill → arXiv 메타데이터 enrichment
+- **hybrid 연결과 평가**: 위 Evaluation 표를 채운 뒤 에이전트 검색 도구를 hybrid로 옮깁니다. 한국어 질의가 lexical에서 거의 맞지 않는 문제가 가장 큰 이유입니다.
+- **상세 챗 질의 검색**: 앞 20개 청크 고정 대신 질문으로 해당 논문 안을 검색하고, 응답도 스트리밍으로 바꿉니다.
+- **ASGI 전환**: 지금은 gunicorn gthread(워커 4 × 스레드 8)라 SSE 스트림 하나가 스레드 하나를 오래 점유합니다.
+- **인덱스**: 벡터 HNSW 인덱스, 제목·초록·청크를 합친 tsvector 생성 컬럼과 GIN 인덱스. 도입 전후를 `EXPLAIN ANALYZE`로 기록할 계획입니다.
+- **데모 모드**: 지금은 상세 페이지에 로그인이 필요하고 캐시된 개요도 개인 키가 있어야 보입니다. 키 없이 캐시 결과를 보여 주는 읽기 전용 모드를 만들 계획입니다.
+- **배포**: nginx가 HTTP만 제공합니다. 외부에 공개하기 전에 TLS나 Tailscale 전용 접근이 필요합니다.
 
-시연 실행 전 `.env`에는 `DJANGO_SECRET_KEY`와 `PROD_POSTGRES_HOST`를 실제 값으로 설정해야 합니다. 80번 포트가 이미 사용 중이면 `PROD_HTTP_PORT=18000`처럼 포트를 바꿔 실행합니다.
-
-## Project Structure
+## 프로젝트 구조
 
 ```text
-dags/                   Airflow DAG 정의 (daily_collect, maintenance)
-docker/                 Docker 이미지 및 런타임 설정
-docs/                   아키텍처, 워크플로우, 역할, 운영 문서
-frontend/               React 프론트엔드 (Vite + TypeScript)
-notebooks/              점검 및 실험용 노트북
-scripts/                개발 및 운영 보조 스크립트
-src/core/               도메인 모델, 프롬프트, chains, RAG, agent
-src/integrations/       외부 연동, 저장소, parser, retrieval 구현
-src/pipeline/           파이프라인 진입점과 prepare-worker
-src/shared/             공통 설정과 tracing
-backend/                Django API + React shell
+backend/            Django 프로젝트 (arxplore_web 설정, papers 앱 API)
+frontend/           React + TypeScript + Vite
+src/core/           모델, 프롬프트, 요약 그래프, LangGraph 에이전트
+src/integrations/   PostgreSQL·MongoDB 저장소, PDF 파서, 임베딩, 검색
+src/pipeline/       수집·prepare·임베딩 진입점과 prepare-worker
+src/shared/         설정(Pydantic AppSettings)과 LangSmith 트레이싱
+dags/               Airflow DAG 3개
+docker/             이미지와 런타임 설정
+scripts/            실행 스크립트, 스키마 마이그레이션, 운영 스크립트
+tests/              단위 테스트(unit), PostgreSQL 통합 테스트(integration)
+docs/               아키텍처와 팀 운영 문서
 ```
 
-## Documents
+## 문서
 
-- [Architecture](./docs/architecture/ARCHITECTURE.md)
-- [AI Rules](./docs/architecture/AGENTS.md)
-- [Workflow](./docs/management/WORKFLOW.md)
-- [Roles](./docs/management/ROLES.md)
-- [Team Setup](./docs/management/TEAM_SETUP.md)
+- [Architecture](./docs/architecture/ARCHITECTURE.md): 런타임 구성, 모듈 경계, 테이블 스키마, 큐 동작
+- [AI Rules](./docs/architecture/AGENTS.md): AI 도구 작업 규칙과 공용 계약
+- [Workflow](./docs/management/WORKFLOW.md), [Roles](./docs/management/ROLES.md), [Team Setup](./docs/management/TEAM_SETUP.md): 팀 프로젝트 당시 운영 문서
+- [`.env.example`](./.env.example): 전체 환경 변수와 필수·선택 구분
 
 ## License
 
-Internal project
+팀 프로젝트라서 라이선스는 팀원 동의를 받은 뒤 정합니다. 제안안은 MIT입니다. LICENSE 파일이 추가되기 전까지 저작권은 각 기여자에게 있습니다.

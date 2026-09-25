@@ -22,13 +22,9 @@ export function AssistantComposer({
   onStop,
 }: AssistantComposerProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter" || isImeComposing(event)) return;
+    if (event.key !== "Enter" || event.shiftKey || isImeComposing(event)) return;
     event.preventDefault();
-    if (isSending) {
-      onStop?.();
-    } else {
-      onSend();
-    }
+    if (!isSending) onSend();
   };
 
   return (

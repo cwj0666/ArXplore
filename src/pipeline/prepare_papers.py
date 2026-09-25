@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from datetime import date as date_cls, timedelta
 import logging
-from typing import Any, Optional
+from collections.abc import Callable
+from datetime import date as date_cls
+from datetime import timedelta
+from typing import Any
 
 from src.integrations.fulltext_parser import FulltextParser
 from src.integrations.paper_repository import PaperRepository
 from src.integrations.paper_search import PaperSearchClient
 from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.integrations.raw_store import RawPaperStore
+
 from .tracing import build_pipeline_trace_config
 
 logger = logging.getLogger(__name__)
@@ -18,6 +21,10 @@ FALLBACK_ABSTRACT_SOURCE = "fallback_abstract"
 PDF_FULLTEXT_SOURCES = frozenset({"layout_pdf", "pdf"})
 MAX_RECORDED_FAILURES = 50
 MAX_FAILURE_ERROR_CHARS = 500
+
+
+class PrepareClaimLostError(RuntimeError):
+    """처리 중 prepare job claim을 잃었을 때(재선점·stale reset) 남은 논문 처리를 중단하기 위해 사용한다."""
 
 
 def _sum_result_values(results: list[dict[str, Any]], key: str) -> int:
@@ -374,11 +381,17 @@ def prepare_candidates(
     *,
     parser: FulltextParser,
     paper_repository: PaperRepository,
+    heartbeat: Callable[[], None] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """후보를 1건씩 처리하고, 한 논문의 예외가 나머지 처리를 막지 않도록 실패를 수집한다."""
+    """후보를 1건씩 처리하고, 한 논문의 예외가 나머지 처리를 막지 않도록 실패를 수집한다.
+
+    heartbeat는 논문마다 처리 전에 호출되며, 여기서 발생한 예외(PrepareClaimLostError 등)는 격리하지 않고 전파한다.
+    """
     results: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
     for candidate in candidates:
+        if heartbeat is not None:
+            heartbeat()
         try:
             results.append(
                 prepare_single_paper(
@@ -404,7 +417,7 @@ def aggregate_prepare_results(
     enriched_count: int,
     skipped_by_category: int,
     runtime: str,
-    user: Optional[str],
+    user: str | None,
     failures: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """prepare_single_paper 결과를 현재 파이프라인 반환 구조로 집계한다.
@@ -468,10 +481,11 @@ def aggregate_prepare_results(
 def run_prepare_papers(
     *,
     runtime: str = "airflow",
-    user: Optional[str] = None,
+    user: str | None = None,
     target_date: str | None = None,
     allowed_categories: set[str] | None = None,
     max_papers: int | str | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """원본 payload를 읽어 arXiv 보강/본문 파싱/청크 생성/적재를 수행한다."""
     prepare_context = load_prepare_candidates(
@@ -487,6 +501,7 @@ def run_prepare_papers(
         prepare_context["candidates"],
         parser=parser,
         paper_repository=paper_repository,
+        heartbeat=heartbeat,
     )
 
     return aggregate_prepare_results(
@@ -553,7 +568,7 @@ def _summarize_paper_failures(result: dict[str, Any]) -> str:
 def run_backfill_prepare_papers(
     *,
     runtime: str = "local",
-    user: Optional[str] = None,
+    user: str | None = None,
     cursor_date: str | None = None,
     oldest_date: str | None = None,
     batch_days: int = 7,
@@ -723,21 +738,66 @@ def run_backfill_prepare_papers(
     }
 
 
+def _build_job_heartbeat(
+    prepare_job_repository: PrepareJobRepository,
+    claim_token: dict[str, Any],
+) -> Callable[[], None]:
+    def heartbeat() -> None:
+        try:
+            alive = prepare_job_repository.heartbeat_prepare_job(**claim_token)
+        except Exception:
+            logger.warning("prepare job heartbeat failed: job_id=%s", claim_token["job_id"], exc_info=True)
+            return
+        if not alive:
+            raise PrepareClaimLostError(f"prepare job claim lost: job_id={claim_token['job_id']}")
+
+    return heartbeat
+
+
+def _record_lost_claim(
+    lost_claims: list[dict[str, Any]],
+    *,
+    target_date: str,
+    claim_token: dict[str, Any],
+    stage: str,
+) -> None:
+    logger.warning(
+        "prepare job claim lost at %s: job_id=%s date=%s generation=%s",
+        stage,
+        claim_token["job_id"],
+        target_date,
+        claim_token["claim_generation"],
+    )
+    lost_claims.append(
+        {
+            "date": target_date,
+            "job_id": claim_token["job_id"],
+            "claim_generation": claim_token["claim_generation"],
+            "stage": stage,
+        }
+    )
+
+
 def run_consume_prepare_queue(
     *,
     runtime: str = "local",
-    user: Optional[str] = None,
+    user: str | None = None,
     mode: str = "auto",
     worker_id: str = "local_prepare_worker",
     max_jobs_per_run: int = 1,
     max_papers: int | str | None = None,
     allowed_categories: set[str] | None = None,
 ) -> dict[str, Any]:
-    """prepare 큐를 소비해 날짜별 파싱/청킹 적재를 수행한다."""
+    """prepare 큐를 소비해 날짜별 파싱/청킹 적재를 수행한다.
+
+    complete/fail은 claim 토큰(job_id, worker_id, claim_generation)으로 fencing되며, claim을 잃은 작업은
+    예외 없이 lost_claims에 기록된다.
+    """
     prepare_job_repository = PrepareJobRepository()
     normalized_max_jobs = max(1, int(max_jobs_per_run or 1))
     successes: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
+    lost_claims: list[dict[str, Any]] = []
     claimed_dates: list[str] = []
 
     for _ in range(normalized_max_jobs):
@@ -745,8 +805,14 @@ def run_consume_prepare_queue(
         if not job:
             break
 
+        claim_token = {
+            "job_id": job["job_id"],
+            "worker_id": job.get("worker_id") or worker_id,
+            "claim_generation": int(job.get("claim_generation") or 0),
+        }
         target_date = str(job.get("date") or "").strip()
         if not target_date:
+            prepare_job_repository.fail_prepare_job(**claim_token, error="missing target_date")
             continue
         claimed_dates.append(target_date)
         try:
@@ -756,6 +822,7 @@ def run_consume_prepare_queue(
                 target_date=target_date,
                 max_papers=max_papers,
                 allowed_categories=allowed_categories,
+                heartbeat=_build_job_heartbeat(prepare_job_repository, claim_token),
             )
             job_result = {
                 "saved_papers": int(result.get("saved_papers", 0) or 0),
@@ -771,16 +838,19 @@ def run_consume_prepare_queue(
             }
             if result.get("status") == "failed":
                 error_summary = _summarize_paper_failures(result)
-                prepare_job_repository.fail_prepare_job(mode=mode, target_date=target_date, error=error_summary)
+                if not prepare_job_repository.fail_prepare_job(**claim_token, error=error_summary):
+                    _record_lost_claim(lost_claims, target_date=target_date, claim_token=claim_token, stage="fail")
                 failures.append({"date": target_date, "error": error_summary})
                 continue
-            prepare_job_repository.complete_prepare_job(
-                mode=mode,
-                target_date=target_date,
-                result=job_result,
-            )
+            if not prepare_job_repository.complete_prepare_job(**claim_token, result=job_result):
+                _record_lost_claim(lost_claims, target_date=target_date, claim_token=claim_token, stage="complete")
+                continue
+        except PrepareClaimLostError:
+            _record_lost_claim(lost_claims, target_date=target_date, claim_token=claim_token, stage="heartbeat")
+            continue
         except Exception as exc:
-            prepare_job_repository.fail_prepare_job(mode=mode, target_date=target_date, error=str(exc))
+            if not prepare_job_repository.fail_prepare_job(**claim_token, error=str(exc)):
+                _record_lost_claim(lost_claims, target_date=target_date, claim_token=claim_token, stage="fail")
             failures.append({"date": target_date, "error": str(exc)})
             continue
 
@@ -803,8 +873,10 @@ def run_consume_prepare_queue(
         status = "no_op"
     elif failures and not successes:
         status = "failed"
-    elif failures:
+    elif failures or (lost_claims and successes):
         status = "partial_failed"
+    elif lost_claims:
+        status = "claim_lost"
     else:
         status = "success"
 
@@ -818,6 +890,7 @@ def run_consume_prepare_queue(
             "claimed_dates": claimed_dates,
             "success_count": len(successes),
             "failure_count": len(failures),
+            "lost_claim_count": len(lost_claims),
         },
     )
 
@@ -830,7 +903,9 @@ def run_consume_prepare_queue(
         "claimed_count": len(claimed_dates),
         "success_count": len(successes),
         "failure_count": len(failures),
+        "lost_claim_count": len(lost_claims),
         "successes": successes,
         "failures": failures,
+        "lost_claims": lost_claims,
         "trace_config": trace_config,
     }

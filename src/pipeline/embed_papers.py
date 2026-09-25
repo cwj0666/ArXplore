@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.integrations import EmbeddingClient, VectorRepository
 
@@ -15,12 +15,12 @@ def _normalize_chunk_limit(max_chunks: int | str | None) -> int:
 def run_embed_papers(
     *,
     runtime: str = "airflow",
-    user: Optional[str] = None,
+    user: str | None = None,
     max_chunks: int | str | None = 200,
     arxiv_id: str | None = None,
     embedding_client: EmbeddingClient | None = None,
     vector_repository: VectorRepository | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """아직 임베딩이 없는 논문 청크를 선택해 pgvector에 저장한다."""
     normalized_limit = _normalize_chunk_limit(max_chunks)
     embedding_client = embedding_client or EmbeddingClient()

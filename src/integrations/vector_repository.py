@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from collections.abc import Sequence
+from contextlib import contextmanager
 from typing import Any
 
 import psycopg2

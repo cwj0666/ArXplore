@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
@@ -25,8 +25,8 @@ class SummaryGraphState(TypedDict, total=False):
     selected_sections: list[dict[str, Any]]
     grouped_sections: dict[str, list[dict[str, Any]]]
     runtime: str
-    user: Optional[str]
-    quality_score: Optional[float]
+    user: str | None
+    quality_score: float | None
     background_summary: str
     method_summary: str
     experiments_summary: str
@@ -155,7 +155,7 @@ def _summarize_bucket(
     bucket: str,
     sections: list[dict[str, Any]],
     runtime: str,
-    user: Optional[str],
+    user: str | None,
     quality_score: float | None,
 ) -> str:
     if not sections:
@@ -291,7 +291,7 @@ def _merge_section_summaries_node(state: SummaryGraphState) -> dict[str, str]:
             continue
         evidence = _build_bucket_evidence(grouped_sections.get(bucket, []))
         if evidence:
-            parts.append(f"[{label} 해���]\n{text}\n\n[{label} 원문 근거]\n{evidence}")
+            parts.append(f"[{label} 해설]\n{text}\n\n[{label} 원문 근거]\n{evidence}")
         else:
             parts.append(f"[{label} 해설]\n{text}")
 
@@ -357,7 +357,7 @@ def generate_summary_via_graph(
     text: str,
     sections: list[dict[str, Any]] | None,
     runtime: str,
-    user: Optional[str],
+    user: str | None,
     quality_score: float | None,
 ) -> str:
     graph = _build_graph()

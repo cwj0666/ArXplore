@@ -7,15 +7,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 
 from src.shared import get_runtime_openai_api_key, get_runtime_openai_model
 
-from .summary_graph import generate_summary_via_graph
 from .prompts import TRANSLATION_PROMPT
+from .summary_graph import generate_summary_via_graph
 from .tracing import build_translation_trace_config
 
 _CHUNK_TEXT_MAX_CHARS = 2000
@@ -70,7 +70,7 @@ def translate_chunk(
     chunk_text: str,
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
     quality_score: float | None = None,
 ) -> str:
     """RAG 근거 chunk를 한국어로 번역한다."""
@@ -94,7 +94,7 @@ def build_summary(
     text: str,
     sections: list[dict[str, Any]] | None = None,
     runtime: str = "dev",
-    user: Optional[str] = None,
+    user: str | None = None,
     quality_score: float | None = None,
 ) -> str:
     """논문 전체 본문을 입력받아 LangGraph 기반 한국어 구조화 요약을 생성한다."""

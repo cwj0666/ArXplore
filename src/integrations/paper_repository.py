@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
-import re
 
 import psycopg2
 from psycopg2.extras import Json

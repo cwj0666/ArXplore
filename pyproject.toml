@@ -8,7 +8,17 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+src = [".", "backend"]
 extend-exclude = [".venv", "frontend", "dags"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# Long prompt strings, regexes and SQL literals; line wrapping is left to `ruff format`.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Django settings must bootstrap the environment before importing src.shared.
+"backend/arxplore_web/settings.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "arxplore_web", "papers"]

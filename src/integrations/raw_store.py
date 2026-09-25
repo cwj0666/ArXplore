@@ -1,15 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hashlib
+import json
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote_plus
 
 from src.shared import AppSettings, get_settings, resolve_host_and_port
 
 try:
-    from pymongo import MongoClient
+    from pymongo import MongoClient, ReturnDocument
 except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
     MongoClient = None  # type: ignore[assignment]
+
+    class ReturnDocument:  # type: ignore[no-redef]
+        AFTER = True
+
+
+def compute_payload_hash(payload: Any) -> str:
+    """키 순서와 무관한 payload sha256 해시."""
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 class RawPaperStore:
@@ -36,25 +47,45 @@ class RawPaperStore:
         *,
         date: str,
         payload: list[dict[str, Any]] | dict[str, Any],
-    ) -> str:
-        """원본 응답과 수집 날짜를 저장하고 저장 식별자를 반환한다."""
+    ) -> dict[str, Any]:
+        """원본 응답을 날짜당 1건으로 저장한다.
+
+        payload_hash가 저장된 값과 다를 때만 revision을 1 올린다(첫 저장은 1). 같은 payload면 collected_at만 갱신한다.
+        반환값은 record_id, revision, changed(이번 저장으로 payload가 바뀌었는지)다.
+        """
         collection = self._collection()
-        document = {
-            "source": "hf_daily_papers",
-            "date": date,
-            "payload": payload,
-            "fetched_count": len(payload) if isinstance(payload, list) else 1,
-            "collected_at": datetime.now(timezone.utc),
-        }
-        collection.replace_one(
-            {"source": "hf_daily_papers", "date": date},
-            document,
-            upsert=True,
+        document_filter = {"source": "hf_daily_papers", "date": date}
+        payload_hash = compute_payload_hash(payload)
+        collected_at = datetime.now(UTC)
+        projection = {"_id": 1, "revision": 1}
+
+        stored = collection.find_one_and_update(
+            {**document_filter, "payload_hash": payload_hash},
+            {"$set": {"collected_at": collected_at}},
+            projection=projection,
+            return_document=ReturnDocument.AFTER,
         )
-        stored = collection.find_one({"source": "hf_daily_papers", "date": date}, {"_id": 1})
+        changed = stored is None
+        if changed:
+            stored = collection.find_one_and_update(
+                document_filter,
+                {
+                    "$set": {
+                        **document_filter,
+                        "payload": payload,
+                        "payload_hash": payload_hash,
+                        "fetched_count": len(payload) if isinstance(payload, list) else 1,
+                        "collected_at": collected_at,
+                    },
+                    "$inc": {"revision": 1},
+                },
+                projection=projection,
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
         if stored is None:
             raise RuntimeError("MongoDB에 저장한 raw 문서를 다시 조회하지 못했습니다.")
-        return str(stored["_id"])
+        return {"record_id": str(stored["_id"]), "revision": int(stored.get("revision") or 0), "changed": changed}
 
     def load_daily_papers_response(self, *, date: str) -> list[dict[str, Any]]:
         """수집 날짜 기준 최신 원본 payload를 조회한다."""
@@ -123,7 +154,7 @@ class RawPaperStore:
             "pipeline": pipeline,
             "name": name,
             **state,
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(UTC),
         }
         collection.replace_one(
             {"pipeline": pipeline, "name": name},

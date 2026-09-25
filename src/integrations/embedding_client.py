@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Optional
 
 from openai import OpenAI
 
@@ -17,7 +16,7 @@ class EmbeddingClient:
         settings: AppSettings | None = None,
         client: OpenAI | None = None,
         model_name: str | None = None,
-        dimensions: Optional[int] = None,
+        dimensions: int | None = None,
         batch_size: int | None = None,
     ) -> None:
         self.settings = settings or get_settings()

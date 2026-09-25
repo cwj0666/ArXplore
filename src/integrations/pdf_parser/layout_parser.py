@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import Any
 
 import requests
-from typing import Any
-from .types import FulltextParseResult
+
 from src.integrations.layout_parser_client import LayoutParserClient
+
+from .types import FulltextParseResult
 
 
 class LayoutIntegrationMixin:
@@ -24,8 +26,8 @@ class LayoutIntegrationMixin:
             return None
         sections = self._extract_sections(layout_text)
         artifacts = self._extract_layout_artifacts(segments)
-        quality_metrics = {**self._build_fulltext_quality_metrics(text=layout_text, sections=sections or [{'title': 'Full Text', 'text': layout_text}], source='layout_pdf'), 'layout_provider': 'huridocs', 'layout_parse_success': True, 'artifact_count': sum((len(values) for values in artifacts.values()))}
-        parser_metadata = {'provider': 'huridocs', 'segment_count': len(segments), 'segment_type_counts': dict(Counter((str(segment.get('type') or '') for segment in segments)))}
+        quality_metrics = {**self._build_fulltext_quality_metrics(text=layout_text, sections=sections or [{'title': 'Full Text', 'text': layout_text}], source='layout_pdf'), 'layout_provider': 'huridocs', 'layout_parse_success': True, 'artifact_count': sum(len(values) for values in artifacts.values())}
+        parser_metadata = {'provider': 'huridocs', 'segment_count': len(segments), 'segment_type_counts': dict(Counter(str(segment.get('type') or '') for segment in segments))}
         return FulltextParseResult(text=layout_text, sections=sections or [{'title': 'Full Text', 'text': layout_text}], source='layout_pdf', quality_metrics=quality_metrics, artifacts=artifacts, parser_metadata=parser_metadata)
 
     @classmethod

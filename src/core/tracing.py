@@ -1,15 +1,17 @@
-from typing import Any, Dict, Optional
+from typing import Any
+
 from src.shared import build_langsmith_trace_context
+
 
 def build_analysis_trace_config(
     *,
     stage: str = "analyze_paper_detail",
     runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-    eval_tags: Optional[list[str]] = None,
-    extra_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    user: str | None = None,
+    quality_score: float | None = None,
+    eval_tags: list[str] | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """논문 분석 체인의 LangSmith trace 설정을 생성합니다.
 
     Args:
@@ -84,9 +86,9 @@ def build_analysis_trace_config(
 def build_paper_overview_trace_config(
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
+    user: str | None = None,
+    quality_score: float | None = None,
+) -> dict[str, Any]:
     return build_analysis_trace_config(
         stage="paper_overview",
         runtime=runtime,
@@ -98,9 +100,9 @@ def build_paper_overview_trace_config(
 def build_paper_key_findings_trace_config(
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
+    user: str | None = None,
+    quality_score: float | None = None,
+) -> dict[str, Any]:
     return build_analysis_trace_config(
         stage="paper_key_findings",
         runtime=runtime,
@@ -112,9 +114,9 @@ def build_paper_key_findings_trace_config(
 def build_translation_trace_config(
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
+    user: str | None = None,
+    quality_score: float | None = None,
+) -> dict[str, Any]:
     return build_analysis_trace_config(
         stage="translation",
         runtime=runtime,
@@ -126,9 +128,9 @@ def build_translation_trace_config(
 def build_summary_trace_config(
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
+    user: str | None = None,
+    quality_score: float | None = None,
+) -> dict[str, Any]:
     return build_analysis_trace_config(
         stage="summary",
         runtime=runtime,
@@ -140,9 +142,9 @@ def build_summary_trace_config(
 def build_rag_answer_trace_config(
     *,
     runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
+    user: str | None = None,
+    quality_score: float | None = None,
+) -> dict[str, Any]:
     return build_analysis_trace_config(
         stage="rag_answer",
         runtime=runtime,

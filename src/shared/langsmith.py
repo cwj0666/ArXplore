@@ -1,7 +1,8 @@
 import getpass
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from .settings import AppSettings, get_settings
 
@@ -11,9 +12,9 @@ class LangSmithTraceContext:
     project: str
     enabled: bool
     tags: list[str]
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
-    def as_langchain_config(self) -> Dict[str, Any]:
+    def as_langchain_config(self) -> dict[str, Any]:
         return {
             "run_name": self.metadata.get("stage", "llm-task"),
             "tags": self.tags,
@@ -21,12 +22,12 @@ class LangSmithTraceContext:
         }
 
 
-def is_langsmith_enabled(settings: Optional[AppSettings] = None) -> bool:
+def is_langsmith_enabled(settings: AppSettings | None = None) -> bool:
     active_settings = settings or get_settings()
     return bool(active_settings.langsmith_tracing and active_settings.langsmith_api_key)
 
 
-def apply_langsmith_environment(settings: Optional[AppSettings] = None) -> bool:
+def apply_langsmith_environment(settings: AppSettings | None = None) -> bool:
     active_settings = settings or get_settings()
     enabled = is_langsmith_enabled(active_settings)
 
@@ -47,10 +48,10 @@ def build_langsmith_trace_context(
     stage: str,
     runtime: str,
     *,
-    user: Optional[str] = None,
-    extra_tags: Optional[Iterable[str]] = None,
-    extra_metadata: Optional[Dict[str, Any]] = None,
-    settings: Optional[AppSettings] = None,
+    user: str | None = None,
+    extra_tags: Iterable[str] | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+    settings: AppSettings | None = None,
 ) -> LangSmithTraceContext:
     active_settings = settings or get_settings()
     trace_user = user or active_settings.langsmith_trace_user or getpass.getuser()
@@ -65,7 +66,7 @@ def build_langsmith_trace_context(
     if extra_tags:
         tags.extend(extra_tags)
 
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "project": active_settings.langsmith_project,
         "stage": stage,
         "runtime": runtime,
