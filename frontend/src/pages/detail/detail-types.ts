@@ -56,7 +56,6 @@ export interface ChatResponse {
 
 export type AiAccessReason = "login" | "api_key";
 
-/** 개요·상세 요약 카드가 공유하는 요청 상태 */
 export type AiSectionState =
   | { status: "idle" }
   | { status: "loading" }

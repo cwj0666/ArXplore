@@ -49,7 +49,7 @@ class TestSecretBox:
 
     def test_tampered_token_is_rejected(self):
         token = secret_box.encrypt_secret("sk-proj-abc123")
-        body = bytearray(token[len(secret_box.TOKEN_PREFIX):].encode())
+        body = bytearray(token[len(secret_box.TOKEN_PREFIX) :].encode())
         body[30] = ord("A") if body[30] != ord("A") else ord("B")
 
         with pytest.raises(secret_box.InvalidToken):
@@ -244,8 +244,11 @@ class TestRateLimitedViews:
     def _analyze(self, user, ip="198.51.100.1"):
         request = RequestFactory().post("/papers/2401.00001/analyze/", HTTP_X_REAL_IP=ip)
         request.user = user
-        with patch.object(api_views, "get_session_api_key", return_value="sk"), patch.object(
-            api_views, "get_paper_analysis", return_value={"overview": "o", "key_findings": [], "cached": True}
+        with (
+            patch.object(api_views, "get_session_api_key", return_value="sk"),
+            patch.object(
+                api_views, "get_paper_analysis", return_value={"overview": "o", "key_findings": [], "cached": True}
+            ),
         ):
             return api_views.paper_analyze(request, "2401.00001")
 
@@ -259,7 +262,9 @@ class TestRateLimitedViews:
         for _ in range(30):
             self._analyze(_User())
         request = RequestFactory().post(
-            "/papers/assistant/stream/", data=json.dumps({"message": "q", "history": []}), content_type="application/json"
+            "/papers/assistant/stream/",
+            data=json.dumps({"message": "q", "history": []}),
+            content_type="application/json",
         )
         request.user = _User()
 
@@ -339,7 +344,9 @@ class TestRateLimitedViews:
 class TestSignupPasswordValidation:
     def _signup(self, username: str, password: str):
         request = RequestFactory().post(
-            "/auth/signup/", data=json.dumps({"username": username, "password": password}), content_type="application/json"
+            "/auth/signup/",
+            data=json.dumps({"username": username, "password": password}),
+            content_type="application/json",
         )
         request.user = AnonymousUser()
         return api_views.auth_signup(request)
@@ -475,7 +482,11 @@ def _import_settings_module(settings_module: str, secret_key: str, **extra_env: 
         "PYTHONPATH": f"{REPO_ROOT}{os.pathsep}{REPO_ROOT / 'backend'}",
     }
     return subprocess.run(
-        [sys.executable, "-c", "import django; django.setup(); from django.conf import settings; print(settings.SECRET_KEY)"],
+        [
+            sys.executable,
+            "-c",
+            "import django; django.setup(); from django.conf import settings; print(settings.SECRET_KEY)",
+        ],
         cwd=REPO_ROOT / "backend",
         env=env,
         capture_output=True,

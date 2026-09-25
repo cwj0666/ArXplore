@@ -38,7 +38,6 @@ export function readListParams(searchParams: URLSearchParams): ListParams {
 }
 
 
-/** 기본값(최신순, 키워드 검색, 1페이지)은 URL에서 생략한다. */
 export function buildListSearchParams(params: ListParams): URLSearchParams {
   const next = new URLSearchParams();
   if (params.q) {

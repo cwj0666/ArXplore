@@ -35,8 +35,6 @@ function renderLink(label: string, escapedUrl: string): string {
   return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
 }
 
-// Operates on already-escaped text, so captured groups can never contain raw markup.
-// Links are swapped for placeholders first so emphasis rules cannot touch their hrefs.
 function renderInlineText(escaped: string): string {
   const links: string[] = [];
   const withPlaceholders = escaped.replace(/\u0000/g, "").replace(
@@ -68,10 +66,6 @@ const HEADING_PATTERN = /^(#{1,3})\s+(.*)$/;
 const BULLET_PATTERN = /^[-*+]\s+(.*)$/;
 const ORDERED_PATTERN = /^(\d{1,9})[.)]\s+(.*)$/;
 
-/**
- * 채팅 답변용 최소 마크다운 렌더러.
- * 모든 텍스트는 치환 전에 이스케이프되며 링크는 http(s)만 허용한다.
- */
 export function renderAssistantContent(text: string): string {
   const lines = String(text || "").split(/\r\n|\r|\n/);
   const parts: string[] = [];

@@ -110,9 +110,7 @@ def test_ensure_schema_upgrades_legacy_table_idempotently(dsn):
 
     columns = {
         row[0]
-        for row in _execute(
-            dsn, "SELECT column_name FROM information_schema.columns WHERE table_name = 'prepare_jobs'"
-        )
+        for row in _execute(dsn, "SELECT column_name FROM information_schema.columns WHERE table_name = 'prepare_jobs'")
     }
     assert {"claim_generation", "heartbeat_at", "next_attempt_at", "raw_revision", "pending_refresh"} <= columns
     legacy = _execute(dsn, "SELECT claim_generation, raw_revision, pending_refresh FROM prepare_jobs")[0]
@@ -328,8 +326,6 @@ def test_collect_enqueue_keeps_requeued_force_until_job_completes(repository, ds
     claimed = repository.claim_prepare_job(worker_id="w1")
     assert claimed["payload"] == {"note": "x", "force": True, "collected": 2}
 
-    assert repository.complete_prepare_job(
-        job_id=job_id, worker_id="w1", claim_generation=claimed["claim_generation"]
-    )
+    assert repository.complete_prepare_job(job_id=job_id, worker_id="w1", claim_generation=claimed["claim_generation"])
     payload = _execute(dsn, "SELECT payload FROM prepare_jobs WHERE id = %s", (job_id,))[0][0]
     assert payload == {"note": "x", "collected": 2}

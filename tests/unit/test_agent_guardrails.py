@@ -111,8 +111,9 @@ def _fake_retriever(contexts: list[dict]) -> MagicMock:
 
 
 def _run_agent(model: ScriptedChatModel, retriever: MagicMock, **kwargs) -> list[dict]:
-    with patch.object(chatbot, "_build_agent_llm", return_value=model), patch.object(
-        tools, "PaperRetriever", return_value=retriever
+    with (
+        patch.object(chatbot, "_build_agent_llm", return_value=model),
+        patch.object(tools, "PaperRetriever", return_value=retriever),
     ):
         return list(chatbot.stream_agent_search("DPO 관련 논문 알려줘", **kwargs))
 
@@ -125,7 +126,9 @@ def test_agent_streams_chunks_then_single_citations_event():
     model = ScriptedChatModel(
         responses=[
             _search_call(),
-            AIMessage(content="- **[Direct Preference Optimization Revisited](https://arxiv.org/abs/2401.00001)** — 요약입니다."),
+            AIMessage(
+                content="- **[Direct Preference Optimization Revisited](https://arxiv.org/abs/2401.00001)** — 요약입니다."
+            ),
         ]
     )
     events = _run_agent(model, _fake_retriever([_context()]))
@@ -149,7 +152,9 @@ def test_agent_streams_chunks_then_single_citations_event():
 def test_agent_drops_text_streamed_before_tool_calls_in_the_same_message():
     preamble_then_search = AIMessage(
         content="먼저 관련 논문을 검색해 보겠습니다.",
-        tool_calls=[{"name": "search_paper_chunks_tool", "args": {"query": "dpo"}, "id": "call_1", "type": "tool_call"}],
+        tool_calls=[
+            {"name": "search_paper_chunks_tool", "args": {"query": "dpo"}, "id": "call_1", "type": "tool_call"}
+        ],
     )
     model = ScriptedChatModel(responses=[preamble_then_search, AIMessage(content="최종 답변입니다.")])
 
@@ -165,7 +170,10 @@ def _chunk(text: str, message_id: str, *, tool_call: bool = False, node: str = "
         if tool_call
         else []
     )
-    return ("messages", (AIMessageChunk(content=text, id=message_id, tool_call_chunks=tool_call_chunks), {"langgraph_node": node}))
+    return (
+        "messages",
+        (AIMessageChunk(content=text, id=message_id, tool_call_chunks=tool_call_chunks), {"langgraph_node": node}),
+    )
 
 
 def _agent_update(message_id: str, *, tool_calls: bool):
@@ -319,8 +327,9 @@ def test_agent_empty_tool_result_yields_empty_citations_and_no_invention_hint():
     model = ScriptedChatModel(responses=[_search_call(), AIMessage(content="검색 결과가 없습니다.")])
     retriever = _fake_retriever([])
 
-    with patch.object(chatbot, "_build_agent_llm", return_value=model), patch.object(
-        tools, "PaperRetriever", return_value=retriever
+    with (
+        patch.object(chatbot, "_build_agent_llm", return_value=model),
+        patch.object(tools, "PaperRetriever", return_value=retriever),
     ):
         tool_output = tools.search_paper_chunks_tool.invoke({"query": "nothing"})
         events = list(chatbot.stream_agent_search("없는 주제"))
@@ -399,9 +408,27 @@ def test_system_prompt_contains_guardrail_rules():
 
 class TestCitationVerification:
     hits = [
-        {"arxiv_id": "2401.00001", "title": "A", "url": "https://arxiv.org/abs/2401.00001", "section_title": "1 Intro", "chunk_id": 1},
-        {"arxiv_id": "2401.00001", "title": "A", "url": "https://arxiv.org/abs/2401.00001", "section_title": "1 Intro", "chunk_id": 1},
-        {"arxiv_id": "2402.00002", "title": "B", "url": "https://arxiv.org/pdf/2402.00002", "section_title": None, "chunk_id": None},
+        {
+            "arxiv_id": "2401.00001",
+            "title": "A",
+            "url": "https://arxiv.org/abs/2401.00001",
+            "section_title": "1 Intro",
+            "chunk_id": 1,
+        },
+        {
+            "arxiv_id": "2401.00001",
+            "title": "A",
+            "url": "https://arxiv.org/abs/2401.00001",
+            "section_title": "1 Intro",
+            "chunk_id": 1,
+        },
+        {
+            "arxiv_id": "2402.00002",
+            "title": "B",
+            "url": "https://arxiv.org/pdf/2402.00002",
+            "section_title": None,
+            "chunk_id": None,
+        },
     ]
 
     def test_only_linked_hits_are_returned(self):
@@ -502,6 +529,14 @@ def test_arxiv_id_from_url_requires_real_arxiv_host(url, expected):
 
 
 def test_lookalike_domain_is_not_attributed_to_an_arxiv_hit():
-    hits = [{"arxiv_id": "2401.00001", "title": "A", "url": "https://arxiv.org/abs/2401.00001", "section_title": None, "chunk_id": None}]
+    hits = [
+        {
+            "arxiv_id": "2401.00001",
+            "title": "A",
+            "url": "https://arxiv.org/abs/2401.00001",
+            "section_title": None,
+            "chunk_id": None,
+        }
+    ]
     citations = verify_agent_citations("[A](https://notarxiv.org/abs/2401.00001)", hits)
     assert all(not citation["in_answer"] for citation in citations)

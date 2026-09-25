@@ -212,7 +212,9 @@ def load_prepare_candidates(
     """전처리 후보 논문과 실행 메타데이터를 로드한다."""
     normalized_target_date = _normalize_optional_date(target_date)
     normalized_date = (
-        date_cls.fromisoformat(normalized_target_date).isoformat() if normalized_target_date else date_cls.today().isoformat()
+        date_cls.fromisoformat(normalized_target_date).isoformat()
+        if normalized_target_date
+        else date_cls.today().isoformat()
     )
     normalized_max_papers = _normalize_optional_positive_int(max_papers)
     allowed = allowed_categories or DEFAULT_ALLOWED_CATEGORIES
@@ -345,7 +347,6 @@ def prepare_single_paper(
         **parser.summarize_chunks(chunks),
     }
 
-    # 청크 DELETE는 임베딩까지 CASCADE 삭제하므로 일시적인 파서 장애로 인한 하향 교체와 동일 내용 재적재를 막는다.
     content_hash = compute_fulltext_content_hash(fulltext.text, fulltext.sections)
     existing = paper_repository.get_paper_fulltext_state(arxiv_id)
     existing_source = existing.get("source") if existing else None
@@ -383,7 +384,6 @@ def prepare_single_paper(
                 saved_chunks = len(chunks)
             else:
                 chunks_unchanged = True
-        # 청크 저장 전에 실패하면 hash가 NULL로 남아 재시도 때 unchanged로 건너뛰지 않는다.
         if saved_fulltext:
             paper_repository.update_paper_fulltext_content_hash(arxiv_id, content_hash)
 
@@ -391,7 +391,9 @@ def prepare_single_paper(
         "arxiv_id": arxiv_id,
         "title": prepared.get("title", ""),
         "primary_category": prepared.get("primary_category"),
-        "chunk_count": len(chunks) if (saved_chunks or skipped_unchanged) else (existing_chunk_count if skipped_lower_rank_overwrite else 0),
+        "chunk_count": len(chunks)
+        if (saved_chunks or skipped_unchanged)
+        else (existing_chunk_count if skipped_lower_rank_overwrite else 0),
         "fulltext_source": fulltext.source,
         "fallback_used": fulltext_quality_metrics.get("fallback_used"),
         "section_count": fulltext_quality_metrics.get("section_count", 0),
@@ -618,9 +620,9 @@ def _summarize_paper_failures(result: dict[str, Any]) -> str:
         headline = f"{failure_count} of {failure_count + success_count} paper(s) failed"
     else:
         headline = f"all {failure_count} paper(s) failed"
-    return (
-        f"{headline} (success={success_count}, failure={failure_count}); first error: {first_error}"
-    )[:MAX_FAILURE_ERROR_CHARS]
+    return (f"{headline} (success={success_count}, failure={failure_count}); first error: {first_error}")[
+        :MAX_FAILURE_ERROR_CHARS
+    ]
 
 
 def run_backfill_prepare_papers(
@@ -755,10 +757,14 @@ def run_backfill_prepare_papers(
                 "saved_chunks": int(result.get("saved_chunks", 0) or 0),
                 "fallback_fulltexts": int(result.get("fallback_fulltexts", 0) or 0),
                 "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
-                "prepared_arxiv_ids": [str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()],
+                "prepared_arxiv_ids": [
+                    str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()
+                ],
             }
         )
-        next_cursor_date = next_cursor_candidate.isoformat() if next_cursor_candidate >= normalized_oldest_date else None
+        next_cursor_date = (
+            next_cursor_candidate.isoformat() if next_cursor_candidate >= normalized_oldest_date else None
+        )
 
     status = "failed" if failures else ("completed" if next_cursor_date is None else "success")
     state = {
@@ -913,7 +919,9 @@ def run_consume_prepare_queue(
                 "skipped_unchanged": int(result.get("skipped_unchanged", 0) or 0),
                 "unchanged_chunk_sets": int(result.get("unchanged_chunk_sets", 0) or 0),
                 "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
-                "prepared_arxiv_count": len([str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()]),
+                "prepared_arxiv_count": len(
+                    [str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()]
+                ),
                 "success_count": int(result.get("success_count", 0) or 0),
                 "failure_count": int(result.get("failure_count", 0) or 0),
                 "failures": list(result.get("failures") or []),
@@ -952,7 +960,9 @@ def run_consume_prepare_queue(
                 "saved_chunks": int(result.get("saved_chunks", 0) or 0),
                 "fallback_fulltexts": int(result.get("fallback_fulltexts", 0) or 0),
                 "selected_candidate_count": int(result.get("selected_candidate_count", 0) or 0),
-                "prepared_arxiv_ids": [str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()],
+                "prepared_arxiv_ids": [
+                    str(value) for value in result.get("prepared_arxiv_ids", []) if str(value).strip()
+                ],
                 "paper_success_count": job_result["success_count"],
                 "paper_failure_count": job_result["failure_count"],
                 "paper_failures": job_result["failures"],

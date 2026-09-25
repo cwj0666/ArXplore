@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 DATA_LOAD_ERROR_MESSAGE = "논문 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 
-# 익명 데모 트래픽도 관련 논문 합성 과정에서 arXiv 검색을 호출하므로 IP당으로 제한한다.
 detail_rate_limit = rate_limit("detail", limit_setting="RATE_LIMIT_DETAIL_PER_MINUTE", per="ip")
 
 

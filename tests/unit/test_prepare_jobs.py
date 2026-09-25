@@ -285,7 +285,19 @@ def test_enqueue_without_revision_passes_null():
 
 def test_claim_issues_generation_token_and_skips_backoff():
     claimed_row = (
-        5, "auto", "2026-04-07", "collect", {}, "processing", 2, "w1", "c", "cl", "u", 4, 3,
+        5,
+        "auto",
+        "2026-04-07",
+        "collect",
+        {},
+        "processing",
+        2,
+        "w1",
+        "c",
+        "cl",
+        "u",
+        4,
+        3,
     )
     cursor = RecordingCursor(fetchone_results=[claimed_row])
     job = _repository_with_cursor(cursor).claim_prepare_job(mode="auto", worker_id="w1")
@@ -398,7 +410,9 @@ def test_fail_with_lost_claim_does_not_update():
     sql, params = cursor.executed[0]
     normalized = _normalize_sql(sql)
     assert normalized.startswith("SELECT attempt_count, pending_refresh FROM prepare_jobs")
-    assert "WHERE id = %s AND worker_id = %s AND claim_generation = %s AND status = 'processing' FOR UPDATE" in normalized
+    assert (
+        "WHERE id = %s AND worker_id = %s AND claim_generation = %s AND status = 'processing' FOR UPDATE" in normalized
+    )
     assert params == (5, "w1", 3)
 
 
@@ -445,8 +459,6 @@ def test_fail_with_pending_refresh_retries_immediately():
     assert params == ("pending", 0, None, None, "boom", False, False, False, False, 5)
     assert _notifies(cursor) == [("arxplore_prepare_jobs", "auto:2026-04-07")]
 
-
-# ---- scripts/requeue_failed_prepare_jobs.py ----
 
 from scripts import requeue_failed_prepare_jobs as requeue_script  # noqa: E402
 

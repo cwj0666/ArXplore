@@ -24,7 +24,6 @@ RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
 
 COPY . /workspace
 
-# 이미지에 디렉터리를 만들어 두어야 새 named volume이 app 소유로 초기화된다.
 RUN mkdir -p /workspace/backend/staticfiles \
     && chown app:app /workspace/backend/staticfiles
 

@@ -75,7 +75,6 @@ function describeRateLimit(retryAfterSeconds: number | null): string {
 }
 
 
-/** Non-2xx 응답을 ApiError로 변환한다. 본문의 `error` 문자열이 있으면 메시지로 쓰고, 429는 대기 시간을 안내한다. */
 export async function readApiError(response: Response): Promise<ApiError> {
   const body = await readJsonBody(response);
   const payload = body.ok ? body.value : null;
@@ -86,7 +85,6 @@ export async function readApiError(response: Response): Promise<ApiError> {
 }
 
 
-/** 회원가입 400 응답의 `password_errors` 목록. 없으면 빈 배열. */
 export function getPasswordErrors(error: unknown): string[] {
   if (!(error instanceof ApiError) || !error.payload || typeof error.payload !== "object") {
     return [];
@@ -132,13 +130,11 @@ function buildBodyInit(method: "POST" | "DELETE", body: unknown, signal?: AbortS
 }
 
 
-/** 2xx가 아니면 ApiError를 던진다. */
 export async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   return performJsonRequest<T>(input, init);
 }
 
 
-/** 2xx가 아니면 ApiError를 던진다. */
 export async function requestJsonWithBody<T>(
   input: RequestInfo | URL,
   method: "POST" | "DELETE",

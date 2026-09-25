@@ -78,10 +78,6 @@ export async function streamPaperChat(
 }
 
 
-/**
- * 스트리밍 엔드포인트가 없는 구버전 백엔드인지 판별한다.
- * 논문이 없을 때의 404는 `{ error }` JSON을 싣고, 라우트 자체가 없을 때는 JSON이 아니다.
- */
 export function isPaperChatStreamUnavailable(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404 && !hasErrorPayload(error);
 }

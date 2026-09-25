@@ -15,9 +15,6 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
   );
 }
 
-/**
- * 모달 대화상자의 키보드 접근성을 맡는다: 열릴 때 초기 포커스, Esc로 닫기, Tab 순환, 닫힐 때 포커스 복귀.
- */
 export function useModalDialog(
   open: boolean,
   dialogRef: RefObject<HTMLElement>,

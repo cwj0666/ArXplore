@@ -29,7 +29,6 @@ class TestKeywordTokens:
         assert tokens == ["vision-language", "for"]
 
     def test_leading_digits_are_skipped_not_the_whole_word(self):
-        # No word boundary in the pattern: "7b-scale" yields "b-scale".
         assert services._keyword_tokens_in_order("3D 7B-scale gpt-4o x2") == ["b-scale", "gpt-4o"]
 
 
@@ -42,7 +41,6 @@ class TestScoreRelatedPaper:
             primary_category="cs.LG",
         )
 
-        # 1 shared category (2.0) + title overlap {preference, optimization} (2 * 0.8).
         assert services._score_related_paper(SOURCE, candidate) == pytest.approx(2.0 + 1.6)
 
     def test_same_primary_category_bonus(self):
@@ -163,5 +161,4 @@ class TestExtractKeyFindings:
         assert _extract_key_findings("-   spaced    out   finding  ") == ["spaced out finding."]
 
     def test_leading_decimal_number_is_mistaken_for_list_numbering(self):
-        # Known quirk: "3.5%" at line start is read as the list marker "3." and stripped.
         assert _extract_key_findings("3.5% gain on GSM8K over the baseline") == ["5% gain on GSM8K over the baseline."]

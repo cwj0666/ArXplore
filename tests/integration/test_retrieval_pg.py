@@ -334,7 +334,6 @@ def _seed_embeddings(dsn: str) -> tuple[dict[tuple[str, int], int], list[float]]
     rows = [
         {"chunk_id": ids[key], "embedding": vector, "model_name": EMBEDDING_MODEL} for key, vector in vectors.items()
     ]
-    # 같은 chunk_id가 한 배치에 두 번 오면 마지막 값이 남는다.
     rows.append({"chunk_id": ids[("2601.00002", 1)], "embedding": _basis_vector((0, 1.0)), "model_name": "old-model"})
     DsnVectorRepository(dsn).upsert_paper_embeddings(rows)
     return ids, _basis_vector((0, 1.0))

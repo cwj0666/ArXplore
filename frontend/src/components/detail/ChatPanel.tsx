@@ -22,7 +22,6 @@ import { AiAccessNotice } from "./AiAccessNotice";
 
 interface ChatPanelProps {
   arxivId: string;
-  /** null이면 채팅 가능, 아니면 입력창 대신 안내를 보여 준다 */
   access: AiAccessReason | null;
   onOpenSettings: () => void;
 }
@@ -46,7 +45,6 @@ interface PanelRect {
 const WELCOME_MESSAGE = "이 논문에 대해 궁금한 점을 편하게 물어보세요!";
 const MIN_VISIBLE_HEADER = 40;
 
-// Flipped off once an older backend without the streaming route is detected.
 let paperChatStreamAvailable = true;
 
 function createMessage(role: UiRole, content: string): UiMessage {

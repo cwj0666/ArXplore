@@ -263,7 +263,6 @@ def test_extract_sections_and_build_chunks_on_realistic_text():
     chunks = FulltextParser.build_chunks(PAPER_TEXT, sections=sections, max_chars=max_chars, overlap_chars=100)
     assert len(chunks) > len(sections)
     assert [chunk["chunk_index"] for chunk in chunks] == list(range(len(chunks)))
-    # _adjust_chunk_end may extend a chunk by up to 220 chars to reach a sentence boundary.
     assert all(len(chunk["chunk_text"]) <= max_chars + 220 for chunk in chunks)
 
     roles_by_title: dict[str, set[str]] = {}

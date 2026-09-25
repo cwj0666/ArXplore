@@ -30,7 +30,6 @@ export function ListPage({ session, onOpenSettings, onLogout }: ListPageProps) {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // URL이 목록 상태의 원본이다. 뒤로/앞으로 가기가 페이지·정렬·검색어를 그대로 되살린다.
   const params = readListParams(searchParams);
   const { q: query, sort, mode, page } = params;
 

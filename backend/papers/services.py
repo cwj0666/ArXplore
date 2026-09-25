@@ -67,7 +67,9 @@ def get_paper_repository():
     return PaperRepository()
 
 
-def build_paper_list_payload(*, query: str, sort: str, mode: str, page: Any, user: AbstractBaseUser | AnonymousUser) -> dict[str, Any]:
+def build_paper_list_payload(
+    *, query: str, sort: str, mode: str, page: Any, user: AbstractBaseUser | AnonymousUser
+) -> dict[str, Any]:
     papers = get_paper_repository().list_recent_papers(limit=MAX_RECENT_PAPERS)
     normalized_query = query.strip()
     normalized_mode = mode if mode in VALID_SEARCH_MODES else "search"
@@ -114,8 +116,7 @@ def build_paper_detail_payload(arxiv_id: str, *, user: AbstractBaseUser | Anonym
         "paper": {
             **_serialize_paper_for_detail(paper, favorite_ids=favorite_ids),
             "related_papers": [
-                _serialize_related_paper(related_paper, favorite_ids=favorite_ids)
-                for related_paper in related_papers
+                _serialize_related_paper(related_paper, favorite_ids=favorite_ids) for related_paper in related_papers
             ],
         },
     }
@@ -354,8 +355,7 @@ def get_paper_summary(
     from src.core.translation_chains import build_summary
 
     summary_text = paper.get("text") or "\n\n".join(
-        f"[{section.get('title', '')}]\n{section.get('text', '')}"
-        for section in paper.get("sections", [])
+        f"[{section.get('title', '')}]\n{section.get('text', '')}" for section in paper.get("sections", [])
     )
     with override_openai_runtime(api_key=api_key, model=normalized_model):
         result = build_summary(
@@ -607,7 +607,12 @@ def _build_history_tuples(
         and isinstance(message.get("content"), str)
         and message["content"].strip()
     ]
-    if current_message and messages and messages[-1][0] == "user" and messages[-1][1].strip() == current_message.strip():
+    if (
+        current_message
+        and messages
+        and messages[-1][0] == "user"
+        and messages[-1][1].strip() == current_message.strip()
+    ):
         messages.pop()
     return messages[-CHAT_HISTORY_MAX_MESSAGES:]
 
@@ -634,9 +639,7 @@ def _get_favorite_ids(
     normalized_ids = [arxiv_id for arxiv_id in arxiv_ids if arxiv_id]
     if not normalized_ids:
         return set()
-    return set(
-        FavoritePaper.objects.filter(user=user, arxiv_id__in=normalized_ids).values_list("arxiv_id", flat=True)
-    )
+    return set(FavoritePaper.objects.filter(user=user, arxiv_id__in=normalized_ids).values_list("arxiv_id", flat=True))
 
 
 def _serialize_paper_for_list(paper: dict[str, Any], *, favorite_ids: set[str]) -> dict[str, Any]:
@@ -708,7 +711,9 @@ def _score_related_paper(source: dict[str, Any], candidate: dict[str, Any]) -> f
     source_categories = set(source.get("categories") or [])
     candidate_categories = set(candidate.get("categories") or [])
     category_overlap = len(source_categories & candidate_categories)
-    same_primary = source.get("primary_category") and source.get("primary_category") == candidate.get("primary_category")
+    same_primary = source.get("primary_category") and source.get("primary_category") == candidate.get(
+        "primary_category"
+    )
 
     source_title_tokens = _keyword_tokens(source.get("title") or "")
     candidate_title_tokens = _keyword_tokens(candidate.get("title") or "")
@@ -719,10 +724,7 @@ def _score_related_paper(source: dict[str, Any], candidate: dict[str, Any]) -> f
     abstract_overlap = len(source_abstract_tokens & candidate_abstract_tokens)
 
     return (
-        category_overlap * 2.0
-        + (1.5 if same_primary else 0.0)
-        + title_overlap * 0.8
-        + min(abstract_overlap, 12) * 0.12
+        category_overlap * 2.0 + (1.5 if same_primary else 0.0) + title_overlap * 0.8 + min(abstract_overlap, 12) * 0.12
     )
 
 

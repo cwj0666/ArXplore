@@ -44,9 +44,11 @@ def _post(path: str, *, user, body: dict | None = None):
 def _analyze(user, *, api_key=None, repo=None):
     repo = repo or _repo()
     request = _post(f"/papers/{ARXIV_ID}/analyze/", user=user)
-    with patch.object(services, "get_paper_repository", return_value=repo), patch.object(
-        api_views, "get_session_api_key", return_value=api_key
-    ), patch("src.core.analyze_paper_detail") as llm:
+    with (
+        patch.object(services, "get_paper_repository", return_value=repo),
+        patch.object(api_views, "get_session_api_key", return_value=api_key),
+        patch("src.core.analyze_paper_detail") as llm,
+    ):
         response = api_views.paper_analyze(request, ARXIV_ID)
     return response, json.loads(response.content), repo, llm
 
@@ -54,9 +56,11 @@ def _analyze(user, *, api_key=None, repo=None):
 def _summary(user, *, api_key=None, repo=None, model="gpt-5-mini"):
     repo = repo or _repo()
     request = _post(f"/papers/{ARXIV_ID}/summary/", user=user, body={"model": model})
-    with patch.object(services, "get_paper_repository", return_value=repo), patch.object(
-        api_views, "get_session_api_key", return_value=api_key
-    ), patch("src.core.translation_chains.build_summary", return_value="new summary") as llm:
+    with (
+        patch.object(services, "get_paper_repository", return_value=repo),
+        patch.object(api_views, "get_session_api_key", return_value=api_key),
+        patch("src.core.translation_chains.build_summary", return_value="new summary") as llm,
+    ):
         response = api_views.paper_summary(request, ARXIV_ID)
     return response, json.loads(response.content), repo, llm
 
@@ -94,9 +98,11 @@ class TestAnalyzeDemoMode:
         doc = MagicMock(overview="fresh", key_findings=["f"])
         repo = _repo()
         request = _post(f"/papers/{ARXIV_ID}/analyze/", user=_User())
-        with patch.object(services, "get_paper_repository", return_value=repo), patch.object(
-            api_views, "get_session_api_key", return_value="sk-user"
-        ), patch("src.core.analyze_paper_detail", return_value=doc) as llm:
+        with (
+            patch.object(services, "get_paper_repository", return_value=repo),
+            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
+            patch("src.core.analyze_paper_detail", return_value=doc) as llm,
+        ):
             response = api_views.paper_analyze(request, ARXIV_ID)
 
         assert response.status_code == 200
@@ -127,9 +133,11 @@ class TestAnalyzeDemoMode:
 
     def test_llm_failure_returns_generic_500(self):
         request = _post(f"/papers/{ARXIV_ID}/analyze/", user=_User())
-        with patch.object(services, "get_paper_repository", return_value=_repo()), patch.object(
-            api_views, "get_session_api_key", return_value="sk-user"
-        ), patch("src.core.analyze_paper_detail", side_effect=RuntimeError("postgres://user:pw@host")):
+        with (
+            patch.object(services, "get_paper_repository", return_value=_repo()),
+            patch.object(api_views, "get_session_api_key", return_value="sk-user"),
+            patch("src.core.analyze_paper_detail", side_effect=RuntimeError("postgres://user:pw@host")),
+        ):
             response = api_views.paper_analyze(request, ARXIV_ID)
 
         assert response.status_code == 500
@@ -175,7 +183,9 @@ class TestSummaryDemoMode:
         repo.get_detailed_summary.assert_not_called()
 
     def test_invalid_json_body_returns_400(self):
-        request = RequestFactory().post(f"/papers/{ARXIV_ID}/summary/", data="not json", content_type="application/json")
+        request = RequestFactory().post(
+            f"/papers/{ARXIV_ID}/summary/", data="not json", content_type="application/json"
+        )
         request.user = AnonymousUser()
         response = api_views.paper_summary(request, ARXIV_ID)
 
@@ -211,8 +221,9 @@ class TestDetailAndListAnonymous:
     def _detail(self, user, repo=None):
         request = RequestFactory().get(f"/papers/{ARXIV_ID}/detail.json")
         request.user = user
-        with patch.object(services, "get_paper_repository", return_value=repo or _repo()), patch.object(
-            services, "_search_external_related_papers", return_value=[]
+        with (
+            patch.object(services, "get_paper_repository", return_value=repo or _repo()),
+            patch.object(services, "_search_external_related_papers", return_value=[]),
         ):
             return page_views.paper_detail_data(request, ARXIV_ID)
 

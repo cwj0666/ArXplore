@@ -8,6 +8,7 @@
 같은 내용이어도 본문·청크를 다시 쓴다(내용이 바뀐 청크의 임베딩은 다시 만들어진다).
 출력의 attempt_count는 전환 전 값이다.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="failed prepare_jobs를 pending으로 재등록한다 (기본 dry-run).")
     parser.add_argument("--since", default=None, help="이 날짜(YYYY-MM-DD) 이상인 target_date만 대상으로 한다.")
     parser.add_argument("--mode", default="auto", help="prepare_jobs.mode 값. 기본 auto.")
-    parser.add_argument("--apply", action="store_true", help="지정하면 실제로 pending으로 전환하고 attempt_count를 초기화한다.")
+    parser.add_argument(
+        "--apply", action="store_true", help="지정하면 실제로 pending으로 전환하고 attempt_count를 초기화한다."
+    )
     parser.add_argument(
         "--force",
         action="store_true",

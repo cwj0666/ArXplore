@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,28 +14,44 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='UserSettings',
+            name="UserSettings",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('preferred_summary_model', models.CharField(default='gpt-5-mini', max_length=100)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='paper_settings', to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("preferred_summary_model", models.CharField(default="gpt-5-mini", max_length=100)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "user",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="paper_settings",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'db_table': 'user_settings',
+                "db_table": "user_settings",
             },
         ),
         migrations.CreateModel(
-            name='FavoritePaper',
+            name="FavoritePaper",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('arxiv_id', models.CharField(max_length=64)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='favorite_papers', to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("arxiv_id", models.CharField(max_length=64)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="favorite_papers",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'db_table': 'favorite_papers',
-                'constraints': [models.UniqueConstraint(fields=('user', 'arxiv_id'), name='favorite_papers_user_arxiv_unique')],
+                "db_table": "favorite_papers",
+                "constraints": [
+                    models.UniqueConstraint(fields=("user", "arxiv_id"), name="favorite_papers_user_arxiv_unique")
+                ],
             },
         ),
     ]

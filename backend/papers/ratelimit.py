@@ -46,7 +46,9 @@ def rate_limit(scope: str, *, limit_setting: str, per: str) -> Callable:
     return decorator
 
 
-def register_hit(scope: str, identity: str, *, limit: int, window: int = WINDOW_SECONDS, now: float | None = None) -> int | None:
+def register_hit(
+    scope: str, identity: str, *, limit: int, window: int = WINDOW_SECONDS, now: float | None = None
+) -> int | None:
     """요청 1회를 기록하고, 한도를 넘었으면 윈도가 끝날 때까지 남은 초를 돌려준다."""
     current = time.time() if now is None else now
     window_start = int(current // window) * window

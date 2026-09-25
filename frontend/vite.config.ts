@@ -9,7 +9,6 @@ const proxy = (target: string): ProxyOptions => ({
   target,
   changeOrigin: false,
   headers: { host: "localhost" },
-  // Django trusts these for rate limiting, so never forward client-supplied values.
   configure: (proxyServer) => {
     proxyServer.on("proxyReq", (proxyReq, req) => {
       const clientIp = req.socket.remoteAddress ?? "127.0.0.1";

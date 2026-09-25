@@ -44,9 +44,7 @@ def run_cleanup_langsmith(
     matched_run_summaries = [
         {
             "run_id": str(run.id),
-            "start_time": getattr(run, "start_time", None).isoformat()
-            if getattr(run, "start_time", None)
-            else None,
+            "start_time": getattr(run, "start_time", None).isoformat() if getattr(run, "start_time", None) else None,
             "user": ((getattr(run, "metadata", {}) or {}).get("user")),
         }
         for run in matched_runs

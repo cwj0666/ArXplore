@@ -79,11 +79,7 @@ class PaperSearchClient:
         if not normalized_query:
             return []
 
-        search_terms = [
-            f'all:"{term}"'
-            for term in normalized_query.split()[:8]
-            if term.strip()
-        ]
+        search_terms = [f'all:"{term}"' for term in normalized_query.split()[:8] if term.strip()]
         if not search_terms:
             return []
 

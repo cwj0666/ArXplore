@@ -258,6 +258,7 @@ class PaperRef(BaseModel):
     github_stars: int | None = None
     citation_count: int | None = None
 
+
 class PaperDetailDocument(BaseModel):
     arxiv_id: str
     title: str

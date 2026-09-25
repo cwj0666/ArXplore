@@ -7,7 +7,6 @@ export type SseEvent =
   | { type: "error"; message: string }
   | { type: "done" };
 
-/** 스트림 도중 서버가 `{"error": ...}` 이벤트를 보냈거나 `[DONE]` 없이 스트림이 끝난 경우. */
 export class StreamEventError extends Error {
   constructor(message: string) {
     super(message);
@@ -38,7 +37,6 @@ function normalizeCitation(value: unknown): Citation | null {
   };
 }
 
-/** `data:` 필드 값 하나를 이벤트로 해석한다. 알 수 없는 형식은 null. */
 export function parseSseData(data: string): SseEvent | null {
   if (data.trim() === "[DONE]") {
     return { type: "done" };
@@ -79,7 +77,6 @@ function parseSseLine(line: string): SseEvent | null {
   return parseSseData(value.startsWith(" ") ? value.slice(1) : value);
 }
 
-/** 임의로 잘린 텍스트 조각을 받아 완성된 줄 단위로 이벤트를 돌려준다. */
 export function createSseParser() {
   let buffer = "";
 
@@ -115,10 +112,6 @@ export interface StreamChatParams {
   onCitations?: (citations: Citation[]) => void;
 }
 
-/**
- * SSE 채팅 스트림을 끝까지 읽는다.
- * 스트림 시작 전 non-2xx는 ApiError, 스트림 중 error 이벤트나 `[DONE]` 없는 종료는 StreamEventError로 던진다.
- */
 export async function streamChat({ endpoint, body, signal, onChunk, onCitations }: StreamChatParams): Promise<void> {
   const csrfToken = getCsrfTokenFromCookie();
   const response = await fetch(endpoint, {
@@ -147,12 +140,9 @@ export async function streamChat({ endpoint, body, signal, onChunk, onCitations 
   const cancelReader = async () => {
     try {
       await reader.cancel();
-    } catch {
-      // The stream may already be closed or errored.
-    }
+    } catch {}
   };
 
-  // Returns true once the stream is finished (DONE received).
   const handle = async (events: SseEvent[]): Promise<boolean> => {
     for (const event of events) {
       switch (event.type) {

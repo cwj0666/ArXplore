@@ -89,7 +89,6 @@ class TestFilterLexicalCandidates:
 
         filtered = _retriever()._filter_lexical_candidates(self.QUERY, candidates)
 
-        # table_like is only down-weighted in vector rerank; lexical filtering keeps it.
         assert _ids(filtered) == [1, 8, 9]
 
     @pytest.mark.parametrize(
@@ -222,7 +221,6 @@ class TestRerankVectorCandidates:
         assert self._adjustment("zzqx discussion", section_title="Discussion") == pytest.approx(0.03 + 0.1)
 
     def test_section_intent_bonus(self):
-        # "limitations" matches the intent rule (+0.14) and the query token overlap (+0.03).
         assert self._adjustment("what are the limitations", section_title="Limitations") == pytest.approx(0.17)
         assert self._adjustment("future work", section_title="Future Directions") == pytest.approx(0.12 + 0.03)
 
@@ -283,8 +281,6 @@ class TestQueryTokens:
         assert tokens == {"policy", "dpo", "loss", "llms"}
 
     def test_korean_query_yields_no_tokens(self):
-        # Known limitation: tokenization is ASCII-only, so Korean queries get no lexical overlap
-        # bonus and never hit the >=5-token weighting branch.
         assert PaperRetriever._query_tokens("강화학습에서 보상 모델은 어떻게 학습되나요") == set()
 
     def test_mixed_query_keeps_only_ascii_tokens(self):

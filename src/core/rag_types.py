@@ -30,11 +30,7 @@ def context_title(context: dict[str, Any]) -> str:
 
 def context_text(context: dict[str, Any]) -> str:
     return str(
-        context.get("context_text")
-        or context.get("chunk_text")
-        or context.get("text")
-        or context.get("abstract")
-        or ""
+        context.get("context_text") or context.get("chunk_text") or context.get("text") or context.get("abstract") or ""
     )
 
 

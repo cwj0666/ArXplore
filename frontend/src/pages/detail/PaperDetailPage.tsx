@@ -53,7 +53,6 @@ function payloadFlag(error: ApiError, key: string): boolean {
 }
 
 
-/** 캐시가 없을 때 서버가 돌려주는 접근 거부(미로그인 401, 개인 키 없음 400)를 구분한다. */
 function classifyAccessError(error: unknown): AiAccessReason | null {
   if (!(error instanceof ApiError)) {
     return null;
@@ -205,7 +204,6 @@ export function PaperDetailPage({
 
   const analysisReady = analysisState.status === "ready";
 
-  // 로그인하거나 키를 등록하면 거부됐던 개요 요청을 다시 보낸다.
   useEffect(() => {
     if (!paperId || analysisReady) {
       return;

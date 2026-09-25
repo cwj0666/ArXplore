@@ -38,7 +38,6 @@ class TestMrrAtK:
         assert mrr_at_k(["x", "y", "a"], {"a"}, 2) == 0.0
 
     def test_duplicates_keep_positions(self):
-        # The same paper filling several chunk slots still pushes later papers down.
         assert mrr_at_k(["x", "x", "a"], {"a"}, 10) == pytest.approx(1 / 3)
 
     def test_empty_relevant_is_undefined(self):

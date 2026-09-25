@@ -468,10 +468,7 @@ class PrepareJobRepository:
                 for row in rows:
                     cursor.execute("SELECT pg_notify(%s, %s)", (self.channel_name, f"{mode}:{row[1]}"))
 
-        return [
-            {"id": int(row[0]), "target_date": str(row[1]), "attempt_count": int(row[2] or 0)}
-            for row in rows
-        ]
+        return [{"id": int(row[0]), "target_date": str(row[1]), "attempt_count": int(row[2] or 0)} for row in rows]
 
     def wait_for_prepare_job(
         self,

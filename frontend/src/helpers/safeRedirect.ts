@@ -1,6 +1,5 @@
 const UNSAFE_CHARACTERS = /[\\\u0000-\u001F\u007F]/;
 
-/** Rejects paths a browser or router could resolve off-origin (`//host`, backslashes), including percent-encoded forms. */
 export function isSameOriginPathname(pathname: string): boolean {
   if (pathname.startsWith("//") || UNSAFE_CHARACTERS.test(pathname)) {
     return false;

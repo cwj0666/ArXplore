@@ -15,9 +15,6 @@ from src.shared import AppSettings, build_postgres_connection_params, get_settin
 
 logger = logging.getLogger(__name__)
 
-# src/integrations/pdf_parser/section_roles.is_references_section_title의 SQL(~*) 버전.
-# 제목 전체가 참고문헌 제목일 때만 매치하므로 "Reference Model", "Direct Preference Optimization"은 제외된다.
-# PostgreSQL ARE에서 \b는 backspace라 단어 경계로 쓸 수 없어 전체 매치(^...$)로 표현한다.
 REFERENCES_SECTION_TITLE_SQL_REGEX = (
     r"^\s*(?:(?:\d+(?:\.\d+)*[.)]?|[ivxlc]+[.)]?)\s+)?[\s.:]*"
     r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?[\s.:]*$"
@@ -42,11 +39,9 @@ LEXICAL_INDEX_DDL = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_papers_title_abstract_vector ON papers USING GIN (title_abstract_vector)",
     "CREATE INDEX IF NOT EXISTS idx_paper_chunks_chunk_vector ON paper_chunks USING GIN (chunk_vector)",
-    # chunk_vector GIN으로 대체된 표현식 인덱스. 어떤 쿼리도 쓰지 않으므로 쓰기 비용만 든다.
     "DROP INDEX IF EXISTS idx_paper_chunks_fts",
 )
 
-# pgvector 0.5.0 미만에는 hnsw 접근 방식이 없다. 실패해도 스키마 생성은 계속한다.
 VECTOR_INDEX_DDL = (
     "CREATE INDEX IF NOT EXISTS paper_embeddings_embedding_hnsw "
     "ON paper_embeddings USING hnsw (embedding vector_cosine_ops)"
@@ -64,7 +59,6 @@ def escape_like(value: str) -> str:
     return _LIKE_SPECIAL_CHARS.sub(r"\\\1", value)
 
 
-# 질의의 모든 lexeme을 OR로 묶은 tsquery. lexeme은 이미 정규화된 값이라 text -> tsquery 캐스트로 그대로 쓴다.
 _ANY_QUERY_TERM_SQL = r"""
     SELECT string_agg('''' || replace(replace(lexeme, '\', '\\'), '''', '''''') || '''', ' | ')::tsquery AS any_term
     FROM unnest(
@@ -85,7 +79,6 @@ def build_lexical_candidates_query(
        (`papers.title_abstract_vector`, `paper_chunks.chunk_vector`)을 각각 조회해 UNION한다.
        AND 질의는 제목과 청크에 걸쳐 만족될 수 있어 컬럼별 `@@ 원래 질의`로는 후보가 빠진다.
     2. 판정·점수: 두 벡터를 이어 붙인 tsvector(제목 A, 초록 B, 청크 C)에 원래 질의를 적용한다.
-       이전의 행별 to_tsvector 식과 같은 tsvector라 ts_rank_cd 값도 같다.
     전체 질의 ILIKE는 후보 필터가 아니라 점수 보너스로만 쓴다.
     """
     normalized_query = " ".join(query.split())

@@ -158,7 +158,6 @@ class ConnectionPool:
 _registry_lock = threading.Lock()
 _pools: dict[tuple[tuple[str, str], ...], ConnectionPool] = {}
 _owner_pid = os.getpid()
-# fork 이전 풀. 자식 프로세스에서 GC로 닫히지 않도록 참조만 유지한다.
 _inherited_pools: list[ConnectionPool] = []
 
 

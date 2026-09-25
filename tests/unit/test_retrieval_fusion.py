@@ -11,7 +11,6 @@ BOTH_CHANNEL_BONUS = 0.015
 
 
 def _retriever() -> PaperRetriever:
-    # Collaborators are never touched by the methods under test.
     return PaperRetriever(repository=object(), embedding_client=object(), vector_repository=object())
 
 
@@ -40,7 +39,6 @@ class TestMergeHybridCandidates:
         merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
 
         by_id = {candidate["chunk_id"]: candidate for candidate in merged}
-        # High lexical confidence and a short query keep both channel weights at 1.0.
         assert by_id[1]["score"] == pytest.approx(1.0 / (RRF_K + 1))
         assert by_id[2]["score"] == pytest.approx(0.85 / (RRF_K + 2) + 1.0 / (RRF_K + 1) + BOTH_CHANNEL_BONUS)
         assert by_id[3]["score"] == pytest.approx(1.0 / (RRF_K + 2))
@@ -79,8 +77,6 @@ class TestMergeHybridCandidates:
         merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
         by_id = {candidate["chunk_id"]: candidate for candidate in merged}
 
-        # top lexical score 0.25 < 0.3 and no top-5 overlap: lexical 0.45 * 0.75, vector 1.1 * 1.08;
-        # the lexical hit also carries quality weight 0.4 (score in [0.2, 0.3)).
         assert by_id[1]["score"] == pytest.approx(0.45 * 0.75 * 0.4 / 61)
         assert by_id[2]["score"] == pytest.approx(1.1 * 1.08 / 61)
         assert _ids(merged) == [2, 1]
@@ -105,7 +101,6 @@ class TestMergeHybridCandidates:
         assert all(len(candidate["matched_methods"]) == 1 for candidate in merged)
 
     def test_ties_break_on_method_count_then_chunk_id(self):
-        # Same RRF contribution from each channel at rank 1; the higher chunk_id wins the tie.
         merged = _retriever()._merge_hybrid_candidates(
             "policy loss", [_candidate(5, 0.9)], [_candidate(7, 0.9)], arxiv_id=None, limit=10
         )
@@ -121,7 +116,6 @@ class TestMergeHybridCandidates:
             "policy loss", same_paper, [*same_paper, other_paper], arxiv_id=None, limit=3
         )
 
-        # Pure score order would be [1, 2, 3]; at most two chunks per paper are taken first.
         assert _ids(merged) == [1, 2, 10]
 
 
@@ -177,7 +171,6 @@ class TestResolveHybridMethodWeights:
 
         weights = _retriever()._resolve_hybrid_method_weights(self.SHORT_QUERY, lexical, vector)
 
-        # chunk 6 is 6th in the lexical list, so the top-5 intersection is empty.
         assert weights["lexical"] == pytest.approx(0.7 * 0.75)
 
     def test_floors_are_never_reached_with_current_constants(self):
@@ -196,8 +189,6 @@ class TestResolveHybridMethodWeights:
             observed_lexical.append(weights["lexical"])
             observed_vector.append(weights["vector"])
 
-        # Worst case multiplies every lexical penalty: 0.85 * 0.45 * 0.75 = 0.286875 > 0.2 floor.
-        # Vector multipliers are all >= 1, so its minimum is 1.0 > 0.5 floor.
         assert min(observed_lexical) == pytest.approx(0.85 * 0.45 * 0.75)
         assert min(observed_lexical) > 0.2
         assert min(observed_vector) == 1.0

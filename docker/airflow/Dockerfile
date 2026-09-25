@@ -14,7 +14,6 @@ RUN apt-get update \
 
 USER airflow
 COPY requirements-airflow.txt /requirements-airflow.txt
-# apache-airflow를 함께 적어야 의존성 해석 중에 Airflow 버전이 바뀌지 않는다.
 RUN pip install --no-cache-dir \
     "apache-airflow==${AIRFLOW_VERSION}" \
     -r /requirements-airflow.txt \

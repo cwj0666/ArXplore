@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import re
 
-# Leading section numbers such as "7", "7.", "7.1", "VII." are ignored; letter prefixes
-# are not, so "Appendix A References" / "A References" stay non-reference titles.
 _SECTION_NUMBER_PREFIX = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?|[IVXLC]+[.)]?|(?i:[ivxlc]+)[.)])\s+")
 _REFERENCES_TITLE = re.compile(
     r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?",

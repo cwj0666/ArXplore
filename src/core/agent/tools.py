@@ -12,8 +12,7 @@ from .retrieval import retrieve_contexts
 SEARCH_RESULT_LIMIT = 5
 TRENDING_PAPER_LIMIT = 10
 NO_SEARCH_RESULTS_MESSAGE = (
-    "검색된 관련 논문이 없습니다. 이 결과를 근거로 논문을 추천하거나 지어내지 말고, "
-    "검색 결과가 없다고 답하세요."
+    "검색된 관련 논문이 없습니다. 이 결과를 근거로 논문을 추천하거나 지어내지 말고, 검색 결과가 없다고 답하세요."
 )
 
 

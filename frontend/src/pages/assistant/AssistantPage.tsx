@@ -58,7 +58,6 @@ export function AssistantPage({
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      // Deferred so StrictMode's synchronous unmount/remount does not cancel the initial query.
       window.setTimeout(() => {
         if (!isMountedRef.current) abortControllerRef.current?.abort();
       }, 0);

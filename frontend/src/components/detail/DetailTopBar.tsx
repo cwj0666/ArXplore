@@ -31,7 +31,6 @@ export function DetailTopBar({
   const location = useLocation();
   const navigate = useNavigate();
 
-  // 앱 안에서 들어온 경우 history로 돌아가 목록의 페이지·정렬·검색어를 그대로 복원한다.
   const handleBack = (event: MouseEvent<HTMLAnchorElement>) => {
     if (location.key !== "default") {
       event.preventDefault();

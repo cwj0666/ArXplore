@@ -27,7 +27,6 @@ class TestResolveHostAndPort:
         assert resolve_host_and_port(raw, 5432) == expected
 
     def test_host_only_uses_default_port_even_when_server_publishes_another(self):
-        # The server compose publishes PostgreSQL on 15432; a bare host still resolves to the default port.
         assert resolve_host_and_port("server.tailnet", 5432) == ("server.tailnet", 5432)
 
     @pytest.mark.parametrize("raw", ["", "   ", ":5432", "::1"])

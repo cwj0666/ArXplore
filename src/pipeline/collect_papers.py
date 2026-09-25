@@ -21,7 +21,9 @@ def run_collect_papers(
     """HF Daily Papers를 수집하고 MongoDB에 원본을 저장한다."""
     normalized_target_date = (target_date or "").strip() or None
     normalized_date = (
-        date_cls.fromisoformat(normalized_target_date).isoformat() if normalized_target_date else date_cls.today().isoformat()
+        date_cls.fromisoformat(normalized_target_date).isoformat()
+        if normalized_target_date
+        else date_cls.today().isoformat()
     )
 
     search_client = PaperSearchClient()

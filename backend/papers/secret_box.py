@@ -31,7 +31,7 @@ def decrypt_secret(token: str) -> str:
     if not isinstance(token, str) or not token.startswith(TOKEN_PREFIX):
         raise InvalidToken("unsupported token format")
     try:
-        return _fernet().decrypt(token[len(TOKEN_PREFIX):].encode("ascii")).decode("utf-8")
+        return _fernet().decrypt(token[len(TOKEN_PREFIX) :].encode("ascii")).decode("utf-8")
     except (FernetInvalidToken, UnicodeError) as exc:
         raise InvalidToken("invalid token") from exc
 

@@ -25,7 +25,6 @@ def _normalize_optional_positive_int(value: int | str | None, default: int) -> i
 def _collect_prepared_arxiv_ids(prepare_result: dict[str, Any]) -> list[str]:
     seen: set[str] = set()
     collected: list[str] = []
-    # 일부 논문이 실패해 재시도로 넘어간 날짜도 이미 적재된 논문은 바로 임베딩한다.
     for success in [*prepare_result.get("successes", []), *prepare_result.get("failures", [])]:
         if not isinstance(success, dict):
             continue
@@ -168,7 +167,6 @@ def _run_once(args: argparse.Namespace) -> dict[str, Any]:
             }
             return prepare_result
 
-        # prepare 성공이 없어도 backlog 임베딩은 예산만큼 진행한다.
         try:
             embed_result = _run_embed_after_prepare(
                 prepare_result=prepare_result,
@@ -212,8 +210,12 @@ def main() -> int:
         help="auto는 신규 수집분 자동 추적, backfill은 과거 날짜 수동 배치 처리다.",
     )
     parser.add_argument("--max-jobs-per-run", type=int, default=1, help="auto 모드에서 한 run에 소비할 큐 작업 수.")
-    parser.add_argument("--cursor-date", default="", help="시작 cursor 날짜(YYYY-MM-DD). 비우면 저장된 state를 사용한다.")
-    parser.add_argument("--oldest-date", default="", help="종료 기준 날짜(YYYY-MM-DD). 비우면 state 또는 기본값을 사용한다.")
+    parser.add_argument(
+        "--cursor-date", default="", help="시작 cursor 날짜(YYYY-MM-DD). 비우면 저장된 state를 사용한다."
+    )
+    parser.add_argument(
+        "--oldest-date", default="", help="종료 기준 날짜(YYYY-MM-DD). 비우면 state 또는 기본값을 사용한다."
+    )
     parser.add_argument("--batch-days", type=int, default=3, help="한 번에 처리할 날짜 수. 기본값은 3이다.")
     parser.add_argument("--max-papers", default="", help="날짜당 최대 논문 수. 비우면 해당 날짜 전체를 처리한다.")
     parser.add_argument(

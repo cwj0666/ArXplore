@@ -35,7 +35,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <button type="button" onClick={() => window.location.reload()}>
             새로고침
           </button>
-          {/* 라우터 상태가 깨졌을 수 있으므로 전체 페이지를 다시 불러온다 */}
           <a href="/">첫 화면으로</a>
         </div>
       </main>

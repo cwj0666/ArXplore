@@ -18,9 +18,7 @@ function resolveCitationHref(citation: Citation): string {
       if (parsed.origin === window.location.origin && isSameOriginPathname(parsed.pathname)) {
         return `${parsed.pathname}${parsed.search}${parsed.hash}`;
       }
-    } catch {
-      // Fall through to the paper detail link.
-    }
+    } catch {}
   }
   return `/papers/${encodeURIComponent(citation.arxiv_id)}/`;
 }

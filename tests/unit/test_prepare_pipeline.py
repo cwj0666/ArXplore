@@ -24,7 +24,14 @@ class FakeParser:
         )
 
     def build_chunks(self, text: str, *, sections: list[dict[str, Any]]):
-        return [{"chunk_index": 0, "chunk_text": text, "section_title": "Introduction", "metadata": {"content_role": "body"}}]
+        return [
+            {
+                "chunk_index": 0,
+                "chunk_text": text,
+                "section_title": "Introduction",
+                "metadata": {"content_role": "body"},
+            }
+        ]
 
     def summarize_chunks(self, chunks):
         return {"chunk_count": len(chunks)}

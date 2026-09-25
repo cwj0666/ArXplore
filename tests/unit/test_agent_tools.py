@@ -129,8 +129,9 @@ def test_search_tool_uses_lexical_without_embedding_key():
 def test_search_tool_honors_lexical_retrieval_mode():
     retriever = _retriever([_retriever_context()])
 
-    with patch.object(tools, "PaperRetriever", return_value=retriever), patch.object(
-        retrieval, "get_settings", return_value=SimpleNamespace(retrieval_mode="lexical")
+    with (
+        patch.object(tools, "PaperRetriever", return_value=retriever),
+        patch.object(retrieval, "get_settings", return_value=SimpleNamespace(retrieval_mode="lexical")),
     ):
         search_paper_chunks_tool.invoke({"query": "dpo"})
 

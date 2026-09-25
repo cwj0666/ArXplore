@@ -24,11 +24,9 @@ logger = logging.getLogger(__name__)
 
 AGENT_TOOLS = (search_paper_chunks_tool, get_trending_papers_tool)
 AGENT_NODE = "agent"
-# create_react_agent가 remaining_steps 부족으로 도구 호출을 끊을 때 넣는 문구
 _LANGGRAPH_STEP_LIMIT_TEXT = "Sorry, need more steps to process this request."
 STEP_LIMIT_MESSAGE = (
-    "검색 단계가 허용 횟수를 넘어 답변을 끝까지 만들지 못했습니다. "
-    "질문을 더 구체적으로 좁혀 다시 시도해 주세요."
+    "검색 단계가 허용 횟수를 넘어 답변을 끝까지 만들지 못했습니다. 질문을 더 구체적으로 좁혀 다시 시도해 주세요."
 )
 EMPTY_ANSWER_MESSAGE = "답변을 생성하지 못했습니다. 질문을 바꿔 다시 시도해 주세요."
 
@@ -38,7 +36,6 @@ def _build_agent_llm() -> BaseChatModel:
 
 
 def _select_agent_model(state: Any, runtime: Any):
-    # 호출마다 요청 범위 키로 모델을 만든다. 컴파일된 그래프는 공유하지만 OpenAI 클라이언트는 공유하지 않는다.
     return _build_agent_llm().bind_tools(list(AGENT_TOOLS))
 
 
@@ -105,10 +102,6 @@ def stream_agent_search(
     }
     parts: list[str] = []
     step_limit_hit = False
-    # 모델은 같은 메시지 안에서 텍스트를 먼저 내보낸 뒤 tool_call_chunks를 붙일 수 있다. 메시지 텍스트는
-    # tool_call_chunk가 나오거나(버림), buffer_chars에 닿거나 메시지가 끝날 때(내보냄)까지
-    # 모아 둔다. 내보낸 뒤의 토큰은 바로 흘려보낸다. buffer_chars를 넘긴 앞말 뒤의 도구 호출은 막지 못하므로
-    # 시스템 프롬프트가 도구 호출 차례에 텍스트를 쓰지 않도록 지시한다.
     pending: dict[str, list[str]] = {}
     live_message_ids: set[str] = set()
     tool_call_message_ids: set[str] = set()

@@ -35,7 +35,6 @@ def _fetch_limit(limit: int) -> int:
 
 
 def _lexical_pipeline(retriever: Any, query: str, limit: int, *, apply_filter: bool = True) -> list[dict]:
-    # search_paper_chunks에서 _apply_paper_diversity 직전까지와 동일
     candidates = retriever.repository.list_chunk_candidates_by_query(query, limit=_fetch_limit(limit), arxiv_id=None)
     candidates = retriever._normalize_candidates(query, candidates, retrieval_method="lexical")
     candidates = retriever._rerank_lexical_candidates(query, candidates)
@@ -45,7 +44,6 @@ def _lexical_pipeline(retriever: Any, query: str, limit: int, *, apply_filter: b
 
 
 def _vector_pipeline(retriever: Any, query: str, limit: int, *, apply_rerank: bool = True) -> list[dict]:
-    # search_paper_chunks_by_vector에서 _apply_paper_diversity 직전까지와 동일
     embedding = retriever.embedding_client.embed_texts([query])[0]
     candidates = retriever.vector_repository.search_paper_chunks(embedding, limit=_fetch_limit(limit), arxiv_id=None)
     candidates = retriever._normalize_candidates(query, candidates, retrieval_method="vector")
@@ -59,7 +57,6 @@ def _diversify(retriever: Any, candidates: list[dict], limit: int) -> list[dict]
 
 
 def _with_contexts(retriever: Any, candidates: list[dict], adjacency_window: int) -> list[dict]:
-    # 기본 방식과 같은 후처리 비용을 치르도록 문맥 창 조회까지 수행한다
     return retriever._build_contexts(candidates, adjacency_window=adjacency_window)
 
 
@@ -98,7 +95,6 @@ def _search_hybrid_nodiv(retriever: Any, query: str, k: int, window: int) -> lis
     sub_limit = _fetch_limit(k)
     lexical = _lexical_pipeline(retriever, query, sub_limit)[:sub_limit]
     vector = _vector_pipeline(retriever, query, sub_limit)[:sub_limit]
-    # limit을 후보 수 이상으로 주면 _apply_paper_diversity가 순서를 바꾸지 않고 그대로 자른다
     merged = retriever._merge_hybrid_candidates(
         query, lexical, vector, arxiv_id=None, limit=max(1, len(lexical) + len(vector))
     )

@@ -175,7 +175,9 @@ def test_main_ensures_schema_once_at_startup(monkeypatch):
 def test_papers_prepared_in_a_partially_failed_job_are_embedded(monkeypatch):
     embed = FakeEmbed()
     prepare_result = _prepare_result(status="failed")
-    prepare_result["failures"] = [{"date": "2026-04-07", "error": "1 of 3 paper(s) failed", "prepared_arxiv_ids": ["a", "b"]}]
+    prepare_result["failures"] = [
+        {"date": "2026-04-07", "error": "1 of 3 paper(s) failed", "prepared_arxiv_ids": ["a", "b"]}
+    ]
     _patch(monkeypatch, prepare_result, embed)
 
     result = prepare_worker._run_once(_args(embed_backlog_max_chunks=0))

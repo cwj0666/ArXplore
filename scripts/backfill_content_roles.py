@@ -8,6 +8,7 @@
 제목과 무관하게 본문 휴리스틱으로 references가 된 청크는 건드리지 않는다.
 청크·임베딩은 삭제하지 않으며, 갱신된 청크는 prepare-worker의 임베딩 backlog가 이어서 처리한다.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -108,7 +109,9 @@ def _default_connection():
 
 
 def main(argv: list[str] | None = None, *, connection_factory: Callable | None = None) -> int:
-    parser = argparse.ArgumentParser(description="잘못 references로 분류된 청크의 content_role을 body로 되돌린다 (기본 dry-run).")
+    parser = argparse.ArgumentParser(
+        description="잘못 references로 분류된 청크의 content_role을 body로 되돌린다 (기본 dry-run)."
+    )
     parser.add_argument("--apply", action="store_true", help="지정하면 실제로 metadata를 갱신한다.")
     parser.add_argument("--show-titles", type=int, default=30, help="출력할 섹션 제목 상위 개수.")
     args = parser.parse_args(argv)

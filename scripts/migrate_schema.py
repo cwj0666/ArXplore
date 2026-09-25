@@ -8,6 +8,7 @@
 GIN·HNSW 인덱스를 만든다. 이 동안 두 테이블에 쓰기 잠금이 걸리므로 prepare-worker를 멈춘 상태에서 실행한다.
 HNSW 인덱스는 pgvector 0.5.0 이상에서만 만들어지고, 없으면 경고만 남기고 계속한다.
 """
+
 from __future__ import annotations
 
 import sys

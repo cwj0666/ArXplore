@@ -151,7 +151,9 @@ class PaperRetriever:
                 {
                     **candidate,
                     "context_chunks": context_chunks,
-                    "context_text": "\n\n".join(chunk["chunk_text"] for chunk in context_chunks if chunk.get("chunk_text")),
+                    "context_text": "\n\n".join(
+                        chunk["chunk_text"] for chunk in context_chunks if chunk.get("chunk_text")
+                    ),
                 }
             )
         return contexts
@@ -170,9 +172,13 @@ class PaperRetriever:
         """벡터 검색 결과를 섹션 prior와 lexical overlap으로 한 번 더 정렬한다."""
         query_tokens = self._query_tokens(query)
         query_lowered = query.lower()
-        appendix_requested = any(keyword in query_lowered for keyword in ("appendix", "supplement", "additional analysis"))
+        appendix_requested = any(
+            keyword in query_lowered for keyword in ("appendix", "supplement", "additional analysis")
+        )
         conclusion_requested = any(keyword in query_lowered for keyword in ("conclusion", "limitation", "discussion"))
-        reference_requested = self._reference_intent_requested(query) or bool(re.search(r"\bcitations?\b", query_lowered))
+        reference_requested = self._reference_intent_requested(query) or bool(
+            re.search(r"\bcitations?\b", query_lowered)
+        )
         section_intent_bonus = self._section_intent_bonus(query)
 
         reranked: list[dict] = []
@@ -187,12 +193,22 @@ class PaperRetriever:
             rerank_adjustment = overlap_bonus
             if not appendix_requested and any(
                 keyword in section_lowered
-                for keyword in ("appendix", "additional analysis", "supplementary", "experimental details", "implementation details")
+                for keyword in (
+                    "appendix",
+                    "additional analysis",
+                    "supplementary",
+                    "experimental details",
+                    "implementation details",
+                )
             ):
                 rerank_adjustment -= 0.08
-            if not conclusion_requested and any(keyword in section_lowered for keyword in ("conclusion", "discussion", "limitations")):
+            if not conclusion_requested and any(
+                keyword in section_lowered for keyword in ("conclusion", "discussion", "limitations")
+            ):
                 rerank_adjustment -= 0.03
-            if not reference_requested and (is_references_section_title(section_title) or "acknowledg" in section_lowered):
+            if not reference_requested and (
+                is_references_section_title(section_title) or "acknowledg" in section_lowered
+            ):
                 rerank_adjustment -= 0.18
             if content_role in {"front_matter", "table_like"}:
                 rerank_adjustment -= 0.02
@@ -213,11 +229,15 @@ class PaperRetriever:
                 }
             )
 
-        return sorted(reranked, key=lambda item: (self._to_float(item.get("score")), int(item.get("chunk_id") or 0)), reverse=True)
+        return sorted(
+            reranked, key=lambda item: (self._to_float(item.get("score")), int(item.get("chunk_id") or 0)), reverse=True
+        )
 
     def _normalize_candidates(self, query: str, candidates: list[dict], *, retrieval_method: str) -> list[dict]:
         """lexical/vector 후보를 공용 retrieval shape로 맞춘다."""
-        return [self._normalize_candidate(query, candidate, retrieval_method=retrieval_method) for candidate in candidates]
+        return [
+            self._normalize_candidate(query, candidate, retrieval_method=retrieval_method) for candidate in candidates
+        ]
 
     def _rerank_lexical_candidates(self, query: str, candidates: list[dict]) -> list[dict]:
         """명시적 section-intent 질의에서는 lexical 결과도 해당 섹션을 약하게 우대한다."""
@@ -240,7 +260,9 @@ class PaperRetriever:
                 }
             )
 
-        return sorted(reranked, key=lambda item: (self._to_float(item.get("score")), int(item.get("chunk_id") or 0)), reverse=True)
+        return sorted(
+            reranked, key=lambda item: (self._to_float(item.get("score")), int(item.get("chunk_id") or 0)), reverse=True
+        )
 
     def _filter_lexical_candidates(self, query: str, candidates: list[dict]) -> list[dict]:
         """reference-like lexical 오염을 기본 경로에서 차단한다."""
@@ -459,11 +481,7 @@ class PaperRetriever:
     def _normalize_candidate(self, query: str, candidate: dict, *, retrieval_method: str) -> dict:
         """후보 하나를 공용 필드 집합으로 정규화한다."""
         score = self._to_float(candidate.get("score") or candidate.get("similarity_score"))
-        content_role = str(
-            candidate.get("content_role")
-            or (candidate.get("metadata") or {}).get("content_role")
-            or ""
-        )
+        content_role = str(candidate.get("content_role") or (candidate.get("metadata") or {}).get("content_role") or "")
         paper_title = str(candidate.get("paper_title") or "")
         paper_abstract = str(candidate.get("paper_abstract") or "")
         chunk_text = str(candidate.get("chunk_text") or "")
@@ -479,7 +497,9 @@ class PaperRetriever:
             "similarity_score": score,
             "retrieval_method": retrieval_method,
             "score_source": retrieval_method,
-            "snippet": str(candidate.get("snippet") or self._build_search_snippet(query, chunk_text, paper_abstract, paper_title)),
+            "snippet": str(
+                candidate.get("snippet") or self._build_search_snippet(query, chunk_text, paper_abstract, paper_title)
+            ),
         }
 
     @staticmethod

@@ -30,6 +30,7 @@ def dsn(test_database_url: str):
     db.close_all_pools()
     _drop_paper_tables(test_database_url)
 
+
 ARXIV_ID = "2601.00001"
 SEEDED_CHUNKS = [
     ("Abstract", "Latent diffusion transformers generate long videos.", "body"),
@@ -162,7 +163,11 @@ def test_chunk_write_failure_leaves_hash_unset_so_retry_rewrites_chunks(dsn, mon
 
     with pytest.raises(psycopg2.OperationalError):
         prepare_papers.prepare_single_paper(candidate, parser=_Parser("layout_pdf"), paper_repository=repository)
-    assert repository.get_paper_fulltext_state(arxiv_id) == {"source": "layout_pdf", "content_hash": None, "chunk_count": 0}
+    assert repository.get_paper_fulltext_state(arxiv_id) == {
+        "source": "layout_pdf",
+        "content_hash": None,
+        "chunk_count": 0,
+    }
 
     retried = prepare_papers.prepare_single_paper(candidate, parser=_Parser("layout_pdf"), paper_repository=repository)
 

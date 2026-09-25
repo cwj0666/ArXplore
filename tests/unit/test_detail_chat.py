@@ -63,7 +63,11 @@ class TestRetrieval:
         )
         retriever.search_paper_contexts.assert_not_called()
         assert result.retrieval_mode == "hybrid"
-        assert [source["section_title"] for source in result.sources] == [ABSTRACT_SECTION_TITLE, "3 Method", "4 Experiments"]
+        assert [source["section_title"] for source in result.sources] == [
+            ABSTRACT_SECTION_TITLE,
+            "3 Method",
+            "4 Experiments",
+        ]
         assert result.sources[0]["text"] == "We revisit DPO."
         assert result.sources[0]["chunk_id"] is None
         assert [source["chunk_id"] for source in result.sources[1:]] == [10, 11]
@@ -76,7 +80,9 @@ class TestRetrieval:
             result = retrieve_paper_chat_sources(PAPER, "q", retriever=retriever)
 
         retriever.search_paper_contexts_by_hybrid.assert_not_called()
-        retriever.search_paper_contexts.assert_called_once_with("q", arxiv_id="2401.00001", limit=PAPER_CHAT_CONTEXT_LIMIT)
+        retriever.search_paper_contexts.assert_called_once_with(
+            "q", arxiv_id="2401.00001", limit=PAPER_CHAT_CONTEXT_LIMIT
+        )
         assert result.retrieval_mode == "lexical"
 
     def test_missing_embedding_key_degrades_to_lexical(self):
@@ -99,8 +105,20 @@ class TestRetrieval:
 
     def test_empty_retrieval_falls_back_to_first_chunks(self):
         first_chunks = [
-            {"chunk_id": 1, "arxiv_id": PAPER["arxiv_id"], "chunk_index": 0, "chunk_text": "intro text", "section_title": "1 Introduction"},
-            {"chunk_id": 2, "arxiv_id": PAPER["arxiv_id"], "chunk_index": 1, "chunk_text": "more", "section_title": None},
+            {
+                "chunk_id": 1,
+                "arxiv_id": PAPER["arxiv_id"],
+                "chunk_index": 0,
+                "chunk_text": "intro text",
+                "section_title": "1 Introduction",
+            },
+            {
+                "chunk_id": 2,
+                "arxiv_id": PAPER["arxiv_id"],
+                "chunk_index": 1,
+                "chunk_text": "more",
+                "section_title": None,
+            },
         ]
         retriever = _retriever(first_chunks=first_chunks)
 
@@ -185,7 +203,9 @@ class TestStreaming:
 
 
 def test_paper_chat_trace_uses_own_stage_and_runtime():
-    config = build_paper_chat_trace_config(runtime="production", user="tester", extra_metadata={"retrieval_mode": "hybrid"})
+    config = build_paper_chat_trace_config(
+        runtime="production", user="tester", extra_metadata={"retrieval_mode": "hybrid"}
+    )
 
     assert config["run_name"] == "paper_chat"
     assert config["metadata"]["runtime"] == "production"
@@ -223,9 +243,11 @@ class TestServices:
             seen_keys.append(get_runtime_openai_api_key())
             return FakeListChatModel(responses=["답 [2]"])
 
-        with patch.object(services, "get_paper_repository", return_value=repo), patch(
-            "src.integrations.paper_retriever.PaperRetriever", return_value=retriever
-        ) as retriever_cls, patch.object(paper_chat, "build_chat_llm", side_effect=build_llm):
+        with (
+            patch.object(services, "get_paper_repository", return_value=repo),
+            patch("src.integrations.paper_retriever.PaperRetriever", return_value=retriever) as retriever_cls,
+            patch.object(paper_chat, "build_chat_llm", side_effect=build_llm),
+        ):
             prepared = services.prepare_paper_chat("2401.00001", "질문", [], user=_User(), session_api_key="sk-user")
             events = list(services.stream_paper_chat(prepared))
 
@@ -237,9 +259,11 @@ class TestServices:
     def test_answer_paper_chat_returns_answer_citations_and_mode(self):
         retriever = _retriever(first_chunks=[{"chunk_id": 1, "chunk_text": "intro", "section_title": "1 Introduction"}])
 
-        with patch.object(services, "get_paper_repository", return_value=self._repo()), patch(
-            "src.integrations.paper_retriever.PaperRetriever", return_value=retriever
-        ), patch.object(paper_chat, "build_chat_llm", return_value=FakeListChatModel(responses=["답변"])):
+        with (
+            patch.object(services, "get_paper_repository", return_value=self._repo()),
+            patch("src.integrations.paper_retriever.PaperRetriever", return_value=retriever),
+            patch.object(paper_chat, "build_chat_llm", return_value=FakeListChatModel(responses=["답변"])),
+        ):
             payload = services.answer_paper_chat("2401.00001", "질문", [], user=_User(), session_api_key="sk-user")
 
         assert payload["answer"] == "답변"
@@ -249,5 +273,8 @@ class TestServices:
     def test_prepare_paper_chat_raises_not_found(self):
         repo = self._repo(paper=None)
 
-        with patch.object(services, "get_paper_repository", return_value=repo), pytest.raises(services.PaperNotFoundError):
+        with (
+            patch.object(services, "get_paper_repository", return_value=repo),
+            pytest.raises(services.PaperNotFoundError),
+        ):
             services.prepare_paper_chat("2401.99999", "질문", [], user=_User(), session_api_key="sk-user")

@@ -561,7 +561,6 @@ AGREEING_TITLES = [
 
 @pytest.mark.parametrize("title", AGREEING_TITLES)
 def test_sql_regex_agrees_with_parser_rule(title):
-    # PostgreSQL ~* 는 대소문자 무시이며, 이 패턴에 쓰인 문법은 Python re와 의미가 같다.
     sql_match = re.search(REFERENCES_SECTION_TITLE_SQL_REGEX, title, re.IGNORECASE) is not None
     assert sql_match == is_references_section_title(title)
 
@@ -578,8 +577,6 @@ def test_sql_regex_agrees_with_parser_rule(title):
 def test_sql_regex_expected_examples(title, expected):
     assert (re.search(REFERENCES_SECTION_TITLE_SQL_REGEX, title, re.IGNORECASE) is not None) is expected
 
-
-# ---- scripts/backfill_content_roles.py ----
 
 from scripts import backfill_content_roles as backfill  # noqa: E402
 

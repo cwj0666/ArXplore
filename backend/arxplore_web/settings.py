@@ -49,108 +49,108 @@ def _normalize_url_prefix(value: str) -> str:
     return f"{prefix}/"
 
 
-# 명시적으로 "true"일 때만 켠다.
 DEBUG = os.getenv("DJANGO_DEBUG", "").strip().lower() == "true"
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
 if not SECRET_KEY:
     if not DEBUG:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=False.")
     SECRET_KEY = "django-insecure-dev-only-arxplore-secret-key"
-# test_settings는 이 모듈을 import하기 전에 ALLOW_PLACEHOLDER_SECRET_KEY = True를 둔다.
 _ALLOW_PLACEHOLDER_SECRET_KEY = bool(
     getattr(sys.modules.get("arxplore_web.test_settings"), "ALLOW_PLACEHOLDER_SECRET_KEY", False)
 )
 if SECRET_KEY.startswith("change-me") and not _ALLOW_PLACEHOLDER_SECRET_KEY:
     raise ImproperlyConfigured(
         "DJANGO_SECRET_KEY is still the .env.example placeholder (starts with 'change-me'). "
-        "Set a real secret key, e.g. python -c \"import secrets; print(secrets.token_urlsafe(50))\"."
+        'Set a real secret key, e.g. python -c "import secrets; print(secrets.token_urlsafe(50))".'
     )
 FRONTEND_PORT = os.getenv("FRONTEND_PORT", "5173")
 
 ALLOWED_HOSTS = _env_csv("DJANGO_ALLOWED_HOSTS", ["*"] if DEBUG else ["localhost", "127.0.0.1"])
-CSRF_TRUSTED_ORIGINS = _env_csv("DJANGO_CSRF_TRUSTED_ORIGINS", [
-    "http://localhost",
-    "http://127.0.0.1",
-    f'http://localhost:{FRONTEND_PORT}',
-    f'http://127.0.0.1:{FRONTEND_PORT}',
-])
+CSRF_TRUSTED_ORIGINS = _env_csv(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    [
+        "http://localhost",
+        "http://127.0.0.1",
+        f"http://localhost:{FRONTEND_PORT}",
+        f"http://127.0.0.1:{FRONTEND_PORT}",
+    ],
+)
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'papers',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "papers",
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'arxplore_web.urls'
+ROOT_URLCONF = "arxplore_web.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'arxplore_web.wsgi.application'
+WSGI_APPLICATION = "arxplore_web.wsgi.application"
 
 try:
     DATABASES = {
-        'default': build_django_postgres_database_config(APP_SETTINGS),
+        "default": build_django_postgres_database_config(APP_SETTINGS),
     }
 except ValueError as exc:
     raise ImproperlyConfigured(str(exc)) from exc
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
-LANGUAGE_CODE = 'ko-kr'
+LANGUAGE_CODE = "ko-kr"
 
-TIME_ZONE = 'Asia/Seoul'
+TIME_ZONE = "Asia/Seoul"
 
 USE_I18N = True
 
 USE_TZ = True
 
-STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [('frontend', FRONTEND_DIST_DIR)] if FRONTEND_DIST_DIR.exists() else []
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [("frontend", FRONTEND_DIST_DIR)] if FRONTEND_DIST_DIR.exists() else []
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# HTTPS 뒤에서만 켠다. 켜면 쿠키가 HTTPS로만 전송되고 X-Forwarded-Proto: https를 신뢰한다.
 SECURE_COOKIES = _env_bool("DJANGO_SECURE_COOKIES", False)
 SESSION_COOKIE_SECURE = SECURE_COOKIES
 CSRF_COOKIE_SECURE = SECURE_COOKIES
@@ -166,10 +166,8 @@ SECURE_REFERRER_POLICY = "same-origin"
 ADMIN_ENABLED = _env_bool("DJANGO_ADMIN_ENABLED", False)
 ADMIN_PATH = _normalize_url_prefix(os.getenv("DJANGO_ADMIN_PATH", "admin/"))
 
-# 데모 모드: 비로그인 상세 열람, 캐시된 overview/요약을 로그인·키 없이 반환한다.
 DEMO_MODE = _env_bool("DEMO_MODE", True)
 
-# 비어 있으면 SECRET_KEY에서 세션 API 키 암호화 키를 유도한다. 값을 바꾸면 기존 세션의 키는 폐기된다.
 SESSION_KEY_ENCRYPTION_KEY = os.getenv("SESSION_KEY_ENCRYPTION_KEY", "")
 
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
@@ -181,7 +179,6 @@ if REDIS_URL:
         }
     }
 else:
-    # 프로세스별 캐시. gunicorn worker가 여러 개면 rate limit 카운터가 worker마다 따로 쌓인다.
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
@@ -193,7 +190,6 @@ RATE_LIMIT_ENABLED = _env_bool("RATE_LIMIT_ENABLED", True)
 RATE_LIMIT_AUTH_PER_MINUTE = _env_int("RATE_LIMIT_AUTH_PER_MINUTE", 10)
 RATE_LIMIT_LLM_PER_MINUTE = _env_int("RATE_LIMIT_LLM_PER_MINUTE", 30)
 RATE_LIMIT_DETAIL_PER_MINUTE = _env_int("RATE_LIMIT_DETAIL_PER_MINUTE", 60)
-# nginx가 덮어쓰는 헤더만 신뢰한다. 비우면 REMOTE_ADDR만 쓴다.
 RATE_LIMIT_IP_HEADER = os.getenv("RATE_LIMIT_IP_HEADER", "X-Real-IP").strip()
 
 LOGGING = {

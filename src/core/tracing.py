@@ -32,13 +32,13 @@ def build_analysis_trace_config(
         quality_score: 평가 점수 (0.0~1.0, 선택, 평가 루프용). 기본값: None
         eval_tags: 평가 태그 (["high_quality", "needs_review"] 등, 선택). 기본값: None
         extra_metadata: 추가 메타데이터 (dict, 선택). 기본값: None
-    
+
     Returns:
         Dict[str, Any]: LangChain .invoke()의 config 파라미터로 전달할 설정
-    
+
     Raises:
         ValueError: stage, runtime, quality_score가 유효하지 않은 경우
-    
+
     Example:
         >>> config = build_analysis_trace_config(
         ...     stage="overview",
@@ -62,13 +62,13 @@ def build_analysis_trace_config(
     }
     if stage not in valid_stages:
         raise ValueError(f"stage는 {valid_stages} 중 하나여야 합니다. 받은 값: {stage}")
-    
+
     if runtime not in VALID_TRACE_RUNTIMES:
         raise ValueError(f"runtime은 {set(VALID_TRACE_RUNTIMES)} 중 하나여야 합니다. 받은 값: {runtime}")
-    
+
     if quality_score is not None and not (0.0 <= quality_score <= 1.0):
         raise ValueError(f"quality_score는 0.0~1.0 사이여야 합니다. 받은 값: {quality_score}")
-    
+
     merged_metadata = extra_metadata or {}
 
     if quality_score is not None:
@@ -82,7 +82,7 @@ def build_analysis_trace_config(
         base_tags.append("high_quality")
     elif quality_score is not None and quality_score < 0.5:
         base_tags.append("needs_review")
-    
+
     try:
         context = build_langsmith_trace_context(
             stage=stage,
@@ -94,6 +94,7 @@ def build_analysis_trace_config(
         return context.as_langchain_config()
     except Exception as e:
         raise RuntimeError(f"LangSmith trace 설정 생성 실패: {e}") from e
+
 
 def build_paper_overview_trace_config(
     *,
