@@ -38,24 +38,24 @@ def _session_request(user=None):
 
 class TestSecretBox:
     def test_roundtrip(self):
-        token = secret_box.encrypt_secret("sk-proj-abc123")
+        token = secret_box.encrypt_secret("dummy-personal-key-abc123")
 
         assert token.startswith(secret_box.TOKEN_PREFIX)
-        assert "sk-proj-abc123" not in token
-        assert secret_box.decrypt_secret(token) == "sk-proj-abc123"
+        assert "dummy-personal-key-abc123" not in token
+        assert secret_box.decrypt_secret(token) == "dummy-personal-key-abc123"
 
     def test_nonce_makes_ciphertexts_differ(self):
         assert secret_box.encrypt_secret("same") != secret_box.encrypt_secret("same")
 
     def test_tampered_token_is_rejected(self):
-        token = secret_box.encrypt_secret("sk-proj-abc123")
+        token = secret_box.encrypt_secret("dummy-personal-key-abc123")
         body = bytearray(token[len(secret_box.TOKEN_PREFIX) :].encode())
         body[30] = ord("A") if body[30] != ord("A") else ord("B")
 
         with pytest.raises(secret_box.InvalidToken):
             secret_box.decrypt_secret(secret_box.TOKEN_PREFIX + body.decode())
 
-    @pytest.mark.parametrize("value", ["sk-legacy-plaintext", "v1.AAAA", "v2.", "v2.!!!", "v2.한글", "", None, 123])
+    @pytest.mark.parametrize("value", ["dummy-legacy-plaintext", "v1.AAAA", "v2.", "v2.!!!", "v2.한글", "", None, 123])
     def test_malformed_or_legacy_values_are_rejected(self, value):
         with pytest.raises(secret_box.InvalidToken):
             secret_box.decrypt_secret(value)
@@ -63,22 +63,22 @@ class TestSecretBox:
     def test_token_is_a_prefixed_fernet_token(self):
         from cryptography.fernet import Fernet
 
-        token = secret_box.encrypt_secret("sk-proj-abc123")
+        token = secret_box.encrypt_secret("dummy-personal-key-abc123")
 
         assert token.startswith("v2.gAAAAA")
         assert isinstance(secret_box._fernet(), Fernet)
 
     def test_other_secret_key_cannot_decrypt(self):
-        token = secret_box.encrypt_secret("sk-proj-abc123")
+        token = secret_box.encrypt_secret("dummy-personal-key-abc123")
 
         with override_settings(SECRET_KEY="another-secret"), pytest.raises(secret_box.InvalidToken):
             secret_box.decrypt_secret(token)
 
     def test_dedicated_encryption_key_takes_precedence_over_secret_key(self):
         with override_settings(SESSION_KEY_ENCRYPTION_KEY="dedicated-key"):
-            token = secret_box.encrypt_secret("sk-proj-abc123")
+            token = secret_box.encrypt_secret("dummy-personal-key-abc123")
             with override_settings(SECRET_KEY="rotated-django-secret"):
-                assert secret_box.decrypt_secret(token) == "sk-proj-abc123"
+                assert secret_box.decrypt_secret(token) == "dummy-personal-key-abc123"
 
         with pytest.raises(secret_box.InvalidToken):
             secret_box.decrypt_secret(token)
@@ -88,34 +88,34 @@ class TestSessionApiKey:
     def test_key_is_stored_encrypted_and_read_back(self):
         request = _session_request()
 
-        services.save_personal_api_key(request, "  sk-proj-abc123  ")
+        services.save_personal_api_key(request, "  dummy-personal-key-abc123  ")
 
         stored = request.session[services.SESSION_API_KEY_KEY]
-        assert "sk-proj-abc123" not in stored
-        assert services.get_session_api_key(request) == "sk-proj-abc123"
+        assert "dummy-personal-key-abc123" not in stored
+        assert services.get_session_api_key(request) == "dummy-personal-key-abc123"
         assert services.has_personal_api_key(request) is True
 
     def test_legacy_plaintext_value_is_cleared_and_treated_as_missing(self, caplog):
         request = _session_request()
-        request.session[services.SESSION_API_KEY_KEY] = "sk-legacy-plaintext"
+        request.session[services.SESSION_API_KEY_KEY] = "dummy-legacy-plaintext"
 
         with caplog.at_level("WARNING"):
             assert services.get_session_api_key(request) is None
 
         assert services.SESSION_API_KEY_KEY not in request.session
-        assert "sk-legacy-plaintext" not in caplog.text
+        assert "dummy-legacy-plaintext" not in caplog.text
 
     def test_key_encrypted_with_old_secret_is_cleared(self):
         request = _session_request()
         with override_settings(SECRET_KEY="old-secret"):
-            services.save_personal_api_key(request, "sk-proj-abc123")
+            services.save_personal_api_key(request, "dummy-personal-key-abc123")
 
         assert services.get_session_api_key(request) is None
         assert services.SESSION_API_KEY_KEY not in request.session
 
     def test_clear_removes_key(self):
         request = _session_request()
-        services.save_personal_api_key(request, "sk-proj-abc123")
+        services.save_personal_api_key(request, "dummy-personal-key-abc123")
 
         services.clear_personal_api_key(request)
 
@@ -123,11 +123,13 @@ class TestSessionApiKey:
 
     def test_save_requires_login(self):
         with pytest.raises(services.AuthenticationRequiredError):
-            services.save_personal_api_key(_session_request(user=AnonymousUser()), "sk-proj-abc123")
+            services.save_personal_api_key(_session_request(user=AnonymousUser()), "dummy-personal-key-abc123")
 
     def test_save_view_response_does_not_echo_key(self):
         request = RequestFactory().post(
-            "/settings/api-key/", data=json.dumps({"api_key": "sk-proj-abc123"}), content_type="application/json"
+            "/settings/api-key/",
+            data=json.dumps({"api_key": "dummy-personal-key-abc123"}),
+            content_type="application/json",
         )
         request.user = _User()
         request.session = SessionStore()
@@ -135,7 +137,7 @@ class TestSessionApiKey:
         response = api_views.settings_api_key_detail(request)
 
         assert response.status_code == 200
-        assert "sk-proj-abc123" not in response.content.decode()
+        assert "dummy-personal-key-abc123" not in response.content.decode()
         assert json.loads(response.content)["has_personal_api_key"] is True
 
 

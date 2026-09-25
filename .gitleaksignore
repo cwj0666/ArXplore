@@ -1,2 +1,4 @@
 # Revoked Tailscale auth key committed in c7b2c34 and removed in the phase 0 fix commit.
 c7b2c3407c8170d370b4417811d8003a78238994:docs/management/TEAM_SETUP.md:tailscale-auth-key:41
+# Placeholder "sk-proj-abc123" used in a unit test before it was renamed to a non-key-like dummy value.
+dd3b01376f54bf6881f5d23374fecaaf42b08c87:tests/unit/test_security.py:generic-api-key:130
