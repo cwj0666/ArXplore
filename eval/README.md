@@ -251,7 +251,7 @@ python scripts/eval_generation.py --answers eval/results/answers_run1.jsonl --me
 | 관점(category) | 케이스 | answer / refuse / clarify | 입력 거부 기대 | 검색 평가 대상 | 다루는 것 |
 | --- | --- | --- | --- | --- | --- |
 | `language` | 10 | 10 / 0 / 0 | 0 | 10 | 한국어, 영어, 한·영 혼용 2, 한국어 오타, 영어 약어만(DPO·RLHF·RAG), 로마자 한국어, 소문자 키워드 나열 |
-| `query_form` | 12 | 11 / 0 / 1 | 0 | 12 | 단어 하나(en·ko), 800자 넘는 문단(ko 886자·en 1,185자), 서술문 2, 제목 전체, 제목 일부, 핵심 용어 오타 2, 숫자·단위 2 |
+| `query_form` | 12 | 11 / 0 / 1 | 0 | 12 | 단어 하나(en·ko), 800자 넘는 문단(ko 886자·en 1,185자), 서술문 2, 제목 전체, 제목 일부, 핵심 용어 오타 2, 숫자·단위 2. 제목 전체·일부를 뺀 10건의 정답은 주제 집합 자리표시자 |
 | `evidence_location` | 9 | 9 / 0 / 0 | 0 | 9 | 초록, 방법 섹션, 실험 결과 표 수치 2, 한계(limitations) 2, 부록, 그림 캡션, 참고문헌 목록 요청 |
 | `out_of_corpus` | 9 | 0 / 9 / 0 | 0 | 0 | 존재하지 않는 논문 2, AI 밖 주제 2, 미래 날짜 문서, 코퍼스에 없는 실존 논문 2, 개인 의견 요구 2 |
 | `multi_paper` | 6 | 6 / 0 / 0 | 0 | 6 | 두 논문 비교 2(둘 다 링크 필수), 주제별 논문 목록 2, "처음 제안한 논문" 2 |
@@ -290,7 +290,8 @@ python scripts/eval_generation.py --collect --queries eval/queries.cases.jsonl -
 python scripts/eval_generation.py --answers eval/results/answers_<timestamp>.jsonl   # 같은 답변에 RAGAS까지
 ```
 
-- `placeholders.json`의 조건: `title_keyword`(제목 ILIKE, `%` 와일드카드 가능), `min_chunks`(청크 수 하한), `section_keyword`(그 섹션 제목을 가진 청크 존재), `content_role`(예: `appendix` 청크 존재), `chunk_pattern`(본문 ILIKE, 예: `Figure 1`). `need`는 사람이 확인할 조건 설명입니다.
+- `placeholders.json`의 조건: `title_keyword`(제목 ILIKE, `%` 와일드카드 가능), `title_keywords`(그중 하나라도 맞으면 되는 OR 목록, 있으면 `title_keyword` 대신 씀), `exclude_title_keywords`(제목에 있으면 빼는 목록), `min_chunks`(청크 수 하한), `section_keyword`(그 섹션 제목을 가진 청크 존재), `content_role`(예: `appendix` 청크 존재), `chunk_pattern`(본문 ILIKE, 예: `Figure 1`). `need`는 사람이 확인할 조건 설명입니다.
+- **집합 자리표시자**(`all_matches: true`, `0000.0000r`~`0000.0000x`): 조건에 맞는 논문 **전부**(최대 50편)가 정답이 됩니다. "diffusion", "4비트 양자화"처럼 특정 논문이 아니라 주제를 묻는 `query_form` 질의에 씁니다. 첫 실측에서 이런 질의에 단일 자리표시자를 붙였더니 제목 키워드가 우연히 맞는 논문(예: `Quantiz` → 벡터 양자화 토크나이저 논문) 하나만 정답이 되어 12건 중 10건이 검색은 맞았는데도 0점이었습니다. 리스트 안의 집합 자리표시자는 모든 id로 펼쳐지고, 문자열 안(`{{title:...}}`, 링크)에서는 첫 논문을 씁니다. 다른 자리표시자가 고른 논문도 집합에서 빼지 않습니다.
 - 채우지 못한 자리표시자가 남은 케이스와 `absent` 논문이 코퍼스에 있는 케이스는 빼고 목록을 출력합니다. 자리표시자가 없는 케이스(거절·입력 거부·인젝션 일부)는 그대로 들어갑니다.
 - 채운 파일은 측정에 쓴 질의셋으로 결과와 함께 커밋합니다(리포트 머리말의 sha256으로 대조).
 

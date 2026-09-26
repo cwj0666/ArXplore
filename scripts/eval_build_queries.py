@@ -28,6 +28,7 @@ import argparse
 import json
 import random
 import sys
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ from eval.dataset import (  # noqa: E402
     PLACEHOLDER_PATTERN,
     DatasetError,
     EvalQuery,
+    PaperFill,
     build_chunk_synth_prompt,
     build_known_item_prompt,
     chunk_synth_query,
@@ -58,7 +60,17 @@ CHUNK_PROMPT_MAX_CHARS = 3000
 DEFAULT_CASES_DIR = REPO_ROOT / "eval" / "cases"
 DEFAULT_ATTACH_OUT = REPO_ROOT / "eval" / "queries.cases.jsonl"
 PLACEHOLDER_REGISTRY_NAME = "placeholders.json"
-REGISTRY_FILTER_KEYS = ("title_keyword", "min_chunks", "section_keyword", "content_role", "chunk_pattern")
+REGISTRY_FILTER_KEYS = (
+    "title_keyword",
+    "title_keywords",
+    "exclude_title_keywords",
+    "all_matches",
+    "min_chunks",
+    "section_keyword",
+    "content_role",
+    "chunk_pattern",
+)
+ALL_MATCHES_LIMIT = 50
 
 PAPER_IDS_SQL = """
     SELECT p.arxiv_id
@@ -340,6 +352,7 @@ def load_placeholder_registry(path: str | Path) -> dict[str, Any]:
     """자리표시자 조건 파일을 읽고 검증한다.
 
     형식: `{"placeholders": {"0000.0000a": {"title_keyword": "...", "need": "...", ...}}, "absent": {케이스 id: 제목 키워드}}`.
+    `title_keywords`(OR 목록)와 `exclude_title_keywords`는 문자열 리스트, `all_matches`는 bool이다.
     """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     placeholders = payload.get("placeholders") if isinstance(payload, dict) else None
@@ -354,6 +367,12 @@ def load_placeholder_registry(path: str | Path) -> dict[str, Any]:
         unknown = set(entry) - {*REGISTRY_FILTER_KEYS, "need"}
         if unknown:
             raise DatasetError(f"{path}: {key}에 알 수 없는 키 {sorted(unknown)}")
+        for list_key in ("title_keywords", "exclude_title_keywords"):
+            values = entry.get(list_key, [])
+            if not isinstance(values, list) or not all(isinstance(value, str) and value.strip() for value in values):
+                raise DatasetError(f"{path}: {key}의 {list_key}는 비어 있지 않은 문자열 리스트여야 합니다.")
+        if not isinstance(entry.get("all_matches", False), bool):
+            raise DatasetError(f"{path}: {key}의 all_matches는 true/false여야 합니다.")
     if not all(isinstance(value, str) and value.strip() for value in absent.values()):
         raise DatasetError(f"{path}: 'absent' 값은 비어 있지 않은 제목 키워드여야 합니다.")
     return {"placeholders": placeholders, "absent": absent}
@@ -362,11 +381,18 @@ def load_placeholder_registry(path: str | Path) -> dict[str, Any]:
 def candidate_sql(entry: dict[str, Any], limit: int) -> tuple[str, list[Any]]:
     """자리표시자 조건에 맞는 논문(arxiv_id, title)을 최신 순으로 고르는 SQL과 인자.
 
-    title_keyword는 제목 ILIKE `%키워드%`(키워드 안의 `%`는 와일드카드), min_chunks는 청크 수 하한(기본 1),
-    section_keyword·content_role·chunk_pattern은 조건을 만족하는 청크가 하나 이상 있어야 한다는 뜻이다.
+    title_keyword는 제목 ILIKE `%키워드%`(키워드 안의 `%`는 와일드카드), title_keywords는 그중 하나라도 맞으면 되는
+    OR 목록(있으면 title_keyword 대신 쓴다), exclude_title_keywords는 제목에 있으면 빼는 목록, min_chunks는 청크 수
+    하한(기본 1), section_keyword·content_role·chunk_pattern은 조건을 만족하는 청크가 하나 이상 있어야 한다는 뜻이다.
     """
-    clauses = ["p.title ILIKE %s", "(SELECT COUNT(*) FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id) >= %s"]
-    params: list[Any] = [f"%{entry.get('title_keyword') or ''}%", max(1, int(entry.get("min_chunks") or 1))]
+    keywords = list(entry.get("title_keywords") or []) or [entry.get("title_keyword") or ""]
+    clauses = ["(" + " OR ".join("p.title ILIKE %s" for _ in keywords) + ")"]
+    params: list[Any] = [f"%{keyword}%" for keyword in keywords]
+    for keyword in entry.get("exclude_title_keywords") or []:
+        clauses.append("p.title NOT ILIKE %s")
+        params.append(f"%{keyword}%")
+    clauses.append("(SELECT COUNT(*) FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id) >= %s")
+    params.append(max(1, int(entry.get("min_chunks") or 1)))
     if entry.get("section_keyword"):
         clauses.append(
             "EXISTS (SELECT 1 FROM paper_chunks c WHERE c.arxiv_id = p.arxiv_id AND c.section_title ILIKE %s)"
@@ -390,11 +416,21 @@ def candidate_sql(entry: dict[str, Any], limit: int) -> tuple[str, list[Any]]:
     return sql, params
 
 
-def choose_distinct(candidates: dict[str, list[tuple[str, str]]]) -> dict[str, tuple[str, str]]:
-    """자리표시자 이름순으로 후보 목록의 앞에서부터, 앞선 자리표시자가 이미 고른 논문은 피해 하나씩 고른다."""
-    chosen: dict[str, tuple[str, str]] = {}
+def choose_distinct(
+    candidates: dict[str, list[tuple[str, str]]], all_matches: Collection[str] = ()
+) -> dict[str, PaperFill]:
+    """자리표시자 이름순으로 후보 목록의 앞에서부터, 앞선 자리표시자가 이미 고른 논문은 피해 하나씩 고른다.
+
+    `all_matches`에 든 집합 자리표시자는 후보 전체를 리스트로 고르고, 다른 자리표시자가 고른 논문도 빼지 않는다
+    (주제 질의의 정답 집합이므로). 후보가 없으면 고르지 않는다.
+    """
+    chosen: dict[str, PaperFill] = {}
     used: set[str] = set()
     for placeholder in sorted(candidates):
+        if placeholder in all_matches:
+            if candidates[placeholder]:
+                chosen[placeholder] = list(candidates[placeholder])
+            continue
         for arxiv_id, title in candidates[placeholder]:
             if arxiv_id not in used:
                 chosen[placeholder] = (arxiv_id, title)
@@ -404,7 +440,7 @@ def choose_distinct(candidates: dict[str, list[tuple[str, str]]]) -> dict[str, t
 
 
 def attach_catalogue(
-    payloads: list[dict[str, Any]], papers: dict[str, tuple[str, str]], *, absent_present: dict[str, str]
+    payloads: list[dict[str, Any]], papers: Mapping[str, PaperFill], *, absent_present: dict[str, str]
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """카탈로그 케이스의 자리표시자를 채운 사본과 뺀 케이스 설명을 돌려준다.
 
@@ -490,7 +526,8 @@ def run_attach(args: argparse.Namespace) -> int:
                 if placeholder in overrides:
                     candidates[placeholder] = [(overrides[placeholder], titles[overrides[placeholder]])]
                     continue
-                sql, params = candidate_sql(registry["placeholders"][placeholder], args.candidates)
+                entry = registry["placeholders"][placeholder]
+                sql, params = candidate_sql(entry, ALL_MATCHES_LIMIT if entry.get("all_matches") else args.candidates)
                 cursor.execute(sql, params)
                 candidates[placeholder] = [(row[0], row[1] or "") for row in cursor.fetchall()]
             for case_id, keyword in registry["absent"].items():
@@ -509,11 +546,21 @@ def run_attach(args: argparse.Namespace) -> int:
     finally:
         connection.close()
 
-    papers = choose_distinct(candidates)
-    print("자리표시자 → 선택한 논문 (후보는 최신 순, 사람이 확인할 것)")
+    all_matches = {
+        placeholder
+        for placeholder in needed
+        if placeholder not in overrides and registry["placeholders"][placeholder].get("all_matches")
+    }
+    papers = choose_distinct(candidates, all_matches)
+    print("자리표시자 → 선택한 논문 (후보는 최신 순, 사람이 확인할 것. 집합 자리표시자는 조건에 맞는 논문 전부)")
     for placeholder in needed:
         need = registry["placeholders"].get(placeholder, {}).get("need", "--set 지정")
         chosen = papers.get(placeholder)
+        if isinstance(chosen, list):
+            print(f"  {placeholder}  집합 {len(chosen)}편\n      조건: {need}")
+            for arxiv_id, title in chosen:
+                print(f"      포함: {arxiv_id}  {title[:80]}")
+            continue
         label = f"{chosen[0]}  {chosen[1][:90]}" if chosen else "(후보 없음)"
         print(f"  {placeholder}  {label}\n      조건: {need}")
         for arxiv_id, title in candidates.get(placeholder, [])[1:]:

@@ -759,6 +759,27 @@ class TestAttachIds:
         assert find_placeholders(filled) == {"0000.0000b"}
         assert payload["relevant_arxiv_ids"][0] == "0000.0000a"
 
+    def test_set_placeholder_expands_in_lists_and_uses_first_paper_in_text(self):
+        papers = {
+            "0000.0000a": ("2405.01234", "Single Paper"),
+            "0000.0000r": [
+                ("2501.00001", "Diffusion One"),
+                ("2501.00002", "Diffusion Two"),
+                ("2405.01234", "Single Paper"),
+            ],
+        }
+        payload = {
+            "query": "{{title_head:0000.0000r:2}} and 0000.0000r",
+            "relevant_arxiv_ids": ["0000.0000r", "0000.0000a"],
+            "must_mention_arxiv_ids": ["0000.0000a", "0000.0000r"],
+        }
+        filled = fill_placeholders(payload, papers)
+        assert filled["query"] == "Diffusion One and 2501.00001"
+        assert filled["relevant_arxiv_ids"] == ["2501.00001", "2501.00002", "2405.01234"]
+        assert filled["must_mention_arxiv_ids"] == ["2405.01234", "2501.00001", "2501.00002"]
+        assert fill_placeholders(["0000.0000z"], {"0000.0000z": []}) == ["0000.0000z"]
+        assert find_placeholders(filled) == set()
+
     def test_choose_distinct_avoids_reusing_a_paper(self):
         script = _load_script("eval_build_queries")
         chosen = script.choose_distinct(
@@ -769,6 +790,14 @@ class TestAttachIds:
             }
         )
         assert chosen == {"0000.0000a": ("1", "One"), "0000.0000b": ("3", "Three")}
+
+    def test_choose_distinct_keeps_every_candidate_for_set_placeholders(self):
+        script = _load_script("eval_build_queries")
+        chosen = script.choose_distinct(
+            {"0000.0000a": [("1", "One")], "0000.0000r": [("1", "One"), ("2", "Two")], "0000.0000s": []},
+            all_matches={"0000.0000r", "0000.0000s"},
+        )
+        assert chosen == {"0000.0000a": ("1", "One"), "0000.0000r": [("1", "One"), ("2", "Two")]}
 
     def test_attach_catalogue_drops_unresolved_and_present_absent_cases(self):
         script = _load_script("eval_build_queries")
@@ -792,14 +821,39 @@ class TestAttachIds:
         assert params == ["%Expert%", 25, "%Limitation%", "appendix", 5]
         sql, params = script.candidate_sql({"title_keyword": "", "chunk_pattern": "Figure 1"}, 3)
         assert params == ["%%", 1, "%Figure 1%", 3]
+        sql, params = script.candidate_sql(
+            {"title_keywords": ["Quantization", "4-bit"], "exclude_title_keywords": ["Tokenizer"], "all_matches": True},
+            50,
+        )
+        assert sql.count("%s") == len(params)
+        assert "(p.title ILIKE %s OR p.title ILIKE %s)" in sql and "p.title NOT ILIKE %s" in sql
+        assert params == ["%Quantization%", "%4-bit%", "%Tokenizer%", 1, 50]
+
+    @pytest.mark.parametrize(
+        "entry, message",
+        [
+            ({"title_keyword": "x", "title_keywords": "Diffusion"}, "title_keywords"),
+            ({"title_keyword": "x", "exclude_title_keywords": [""]}, "exclude_title_keywords"),
+            ({"title_keyword": "x", "all_matches": "yes"}, "all_matches"),
+        ],
+    )
+    def test_registry_rejects_bad_set_fields(self, tmp_path, entry, message):
+        script = _load_script("eval_build_queries")
+        path = tmp_path / "placeholders.json"
+        path.write_text(json.dumps({"placeholders": {"0000.0000a": entry}, "absent": {}}), encoding="utf-8")
+        with pytest.raises(DatasetError, match=message):
+            script.load_placeholder_registry(path)
 
     def test_attached_catalogue_is_valid(self, tmp_path):
         script = _load_script("eval_build_queries")
         registry = script.load_placeholder_registry(REGISTRY_PATH)
-        papers = {
-            placeholder: (f"2501.{index:05d}", f"Paper number {index} about things")
-            for index, placeholder in enumerate(sorted(registry["placeholders"]), start=1)
-        }
+        papers = {}
+        for index, placeholder in enumerate(sorted(registry["placeholders"]), start=1):
+            paper = (f"2501.{index:05d}", f"Paper number {index} about things")
+            if registry["placeholders"][placeholder].get("all_matches"):
+                papers[placeholder] = [paper, (f"2502.{index:05d}", f"Second paper {index}")]
+            else:
+                papers[placeholder] = paper
         attached, dropped = script.attach_catalogue(script.read_case_payloads(CASES_DIR), papers, absent_present={})
         assert dropped == []
         out = tmp_path / "queries.cases.jsonl"
@@ -812,6 +866,18 @@ class TestAttachIds:
         by_id = {query.id: query for query in loaded}
         assert by_id["qf-exact-title"].query == papers["0000.0000g"][1]
         assert by_id["qf-partial-title"].query.startswith("Paper number 9 about ")
+        assert len(by_id["qf-single-word-en"].relevant_arxiv_ids) == 2
+        assert by_id["qf-single-word-en"].retrieval_eligible
+
+    def test_topic_cases_use_set_placeholders(self):
+        registry = _registry()["placeholders"]
+        topic_cases = {case.id: case for case in _catalogue() if case.category == "query_form"}
+        for case_id in ("qf-single-word-en", "qf-statement-en", "qf-numbers-units-ko", "qf-typo-key-term-en"):
+            (placeholder,) = topic_cases[case_id].relevant_arxiv_ids
+            assert registry[placeholder].get("all_matches") is True, case_id
+        for case_id in ("qf-exact-title", "qf-partial-title"):
+            (placeholder,) = topic_cases[case_id].relevant_arxiv_ids
+            assert not registry[placeholder].get("all_matches"), case_id
 
     @pytest.mark.parametrize(
         "argv",

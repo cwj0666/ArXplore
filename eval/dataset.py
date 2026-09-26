@@ -288,34 +288,65 @@ def find_placeholders(value: Any) -> set[str]:
     return set()
 
 
-def _fill_text(text: str, papers: Mapping[str, tuple[str, str]]) -> str:
+PaperFill = tuple[str, str] | list[tuple[str, str]]
+
+
+def _first_paper(fill: PaperFill) -> tuple[str, str] | None:
+    """단일 자리표시자는 (arxiv_id, 제목) 그대로, 집합 자리표시자는 첫 논문. 빈 집합이면 None."""
+    if isinstance(fill, tuple):
+        return fill
+    return fill[0] if fill else None
+
+
+def _fill_text(text: str, papers: Mapping[str, PaperFill]) -> str:
     def title(match: re.Match[str]) -> str:
         kind, placeholder, words = match.group(1), match.group(2), match.group(3)
-        if placeholder not in papers:
+        paper = _first_paper(papers[placeholder]) if placeholder in papers else None
+        if paper is None:
             return match.group(0)
-        paper_title = " ".join(papers[placeholder][1].split())
+        paper_title = " ".join(paper[1].split())
         if kind == "title_head":
             return " ".join(paper_title.split()[: max(1, int(words or 4))])
         return paper_title
 
+    def arxiv_id(match: re.Match[str]) -> str:
+        paper = _first_paper(papers[match.group(0)]) if match.group(0) in papers else None
+        return paper[0] if paper is not None else match.group(0)
+
     filled = TITLE_TEMPLATE_PATTERN.sub(title, text)
-    return PLACEHOLDER_PATTERN.sub(
-        lambda match: papers[match.group(0)][0] if match.group(0) in papers else match.group(0), filled
-    )
+    return PLACEHOLDER_PATTERN.sub(arxiv_id, filled)
 
 
-def fill_placeholders(value: Any, papers: Mapping[str, tuple[str, str]]) -> Any:
+def _fill_list(items: list[Any], papers: Mapping[str, PaperFill]) -> list[Any]:
+    """리스트 원소가 집합 자리표시자 하나뿐인 문자열이면 집합의 모든 arxiv_id로 펼친다(중복 제거). 빈 집합이면 그대로 둔다."""
+    filled: list[Any] = []
+    for item in items:
+        fill = papers.get(item) if isinstance(item, str) and PLACEHOLDER_PATTERN.fullmatch(item) else None
+        if isinstance(fill, list) and fill:
+            for arxiv_id, _title in fill:
+                if arxiv_id not in filled:
+                    filled.append(arxiv_id)
+            continue
+        value = fill_placeholders(item, papers)
+        if isinstance(value, str) and value in filled:
+            continue
+        filled.append(value)
+    return filled
+
+
+def fill_placeholders(value: Any, papers: Mapping[str, PaperFill]) -> Any:
     """자리표시자를 실제 논문으로 바꾼 사본을 돌려준다.
 
-    `papers`는 자리표시자 → (arxiv_id, 제목). 문자열 안의 `{{title:ID}}`는 제목 전체로,
-    `{{title_head:ID:N}}`은 제목 앞 N단어로, 나머지 `ID`는 arxiv_id로 바꾼다. 매핑에 없는 자리표시자는 그대로 둔다.
+    `papers`는 자리표시자 → (arxiv_id, 제목) 또는 [(arxiv_id, 제목), ...](집합 자리표시자). 문자열 안의
+    `{{title:ID}}`는 제목 전체로, `{{title_head:ID:N}}`은 제목 앞 N단어로, 나머지 `ID`는 arxiv_id로 바꾼다(집합은
+    첫 논문). 리스트 원소가 집합 자리표시자이면 집합의 모든 arxiv_id로 펼친다. 매핑에 없는 자리표시자는 그대로 둔다.
     """
     if isinstance(value, str):
         return _fill_text(value, papers)
     if isinstance(value, Mapping):
         return {key: fill_placeholders(item, papers) for key, item in value.items()}
     if isinstance(value, list):
-        return [fill_placeholders(item, papers) for item in value]
+        return _fill_list(value, papers)
     return value
 
 

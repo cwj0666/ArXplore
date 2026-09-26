@@ -74,6 +74,90 @@
     "0000.0000q": {
       "title_keyword": "Quantiz",
       "need": "양자화(quantization) 논문"
+    },
+    "0000.0000r": {
+      "title_keywords": [
+        "Diffusion"
+      ],
+      "all_matches": true,
+      "need": "집합: 제목에 Diffusion이 있는 논문 전부(단어 하나 질의 'diffusion'의 정답 집합)"
+    },
+    "0000.0000s": {
+      "title_keywords": [
+        "Reinforcement",
+        "Policy Optimization",
+        "RLHF",
+        "RLVR",
+        "Reward"
+      ],
+      "all_matches": true,
+      "need": "집합: 강화학습 논문 전부(단어 하나 질의 '강화학습'의 정답 집합)"
+    },
+    "0000.0000t": {
+      "title_keywords": [
+        "Video Generation",
+        "Video Diffusion",
+        "Text-to-Video",
+        "Video Model",
+        "World Model"
+      ],
+      "all_matches": true,
+      "need": "집합: 비디오 생성·월드 모델 논문 전부(서술문 질의의 정답 집합)"
+    },
+    "0000.0000u": {
+      "title_keywords": [
+        "Quantization",
+        "Quantized",
+        "Quantizing",
+        "Low-bit",
+        "4-bit",
+        "FP8",
+        "INT4"
+      ],
+      "exclude_title_keywords": [
+        "Vector-Quantized",
+        "Vector Quantiz",
+        "Tokenizer"
+      ],
+      "all_matches": true,
+      "need": "집합: LLM 양자화 논문 전부. 벡터 양자화 토크나이저 논문은 뺀다(4-bit 양자화 질의의 정답 집합)"
+    },
+    "0000.0000v": {
+      "title_keywords": [
+        "Mixture-of-Experts",
+        "Mixture of Experts",
+        "MoE",
+        "Expert Routing",
+        "Experts"
+      ],
+      "all_matches": true,
+      "need": "집합: mixture-of-experts 논문 전부(MoE 라우팅·부하 분산 질의의 정답 집합)"
+    },
+    "0000.0000w": {
+      "title_keywords": [
+        "Long-Context",
+        "Long Context",
+        "Context Window",
+        "Context Extension",
+        "Context Length",
+        "KV Cache",
+        "Needle"
+      ],
+      "exclude_title_keywords": [
+        "In-Context"
+      ],
+      "all_matches": true,
+      "need": "집합: 긴 문맥 처리 논문 전부. in-context learning 논문은 뺀다(긴 문맥 질의의 정답 집합)"
+    },
+    "0000.0000x": {
+      "title_keywords": [
+        "Retrieval-Augmented",
+        "Retrieval Augmented",
+        "RAG",
+        "Retrieval"
+      ],
+      "all_matches": true,
+      "need": "집합: 검색 증강 생성·검색 논문 전부(RAG 오타 질의의 정답 집합)"
     }
   },
   "absent": {
