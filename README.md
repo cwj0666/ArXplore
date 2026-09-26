@@ -192,15 +192,21 @@ GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 
 ## Evaluation
 
-검색 품질은 아직 측정하지 않았습니다. 아래 표는 측정할 항목의 자리이고, 값은 실제 실행 결과로만 채웁니다.
+검색 품질은 HF Daily Papers 14일치로 만든 로컬 코퍼스(논문 275편, 청크 15,897개, 임베딩 14,125개, 본문 source는 모두 pypdf)에서
+쟀습니다. 질의 146개(LLM 생성 known-item 57 + 청크 합성 15, 수작업 케이스 74) 중 정답 논문이 있는 115개(ko 60 / en 55)를 k=10으로
+채점한 논문 단위 결과입니다(`eval/results/20260925-225658.md`, 커밋 5f9c4cd).
 
 | 검색 방식 | hit@1 | hit@5 | hit@10 | MRR@10 | 지연 p50 / p95 (ms) |
 | --- | --- | --- | --- | --- | --- |
-| lexical | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
-| vector | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
-| hybrid | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
+| lexical | 0.539 | 0.609 | 0.643 | 0.573 | 202 / 427 |
+| vector | 0.704 | 0.809 | 0.826 | 0.741 | 173 / 243 |
+| hybrid | 0.704 | 0.809 | 0.817 | 0.737 | 483 / 821 |
 
-평가 하니스는 [`eval/`](./eval/README.md)에 있습니다. 한국어·영어 질의 30~50개(알려진 논문을 초록으로 찾는 known-item 질의 + 본문 청크 하나로만 답할 수 있는 LLM 합성 질의)로 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF)을 비교하고, 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
+- hybrid는 vector를 넘지 못했고 지연은 2.8배입니다. 그래도 기본값을 hybrid로 둔 이유는 영어 질의의 lexical hit@1(0.727)이 vector(0.709)보다 높고, 임베딩 키가 없을 때의 lexical 폴백 경로를 한 곳에서 관리하기 위해서입니다. 차이가 작아 결론을 내리기보다 한계로 기록했습니다.
+- ablation에서 표준 RRF(`hybrid_plainrrf`)는 hit@1 0.600으로 낮지만 hit@10 0.835로 가장 높아, 현재 가중치 규칙이 1위 정확도와 상위 10위 재현을 맞바꾸고 있습니다. vector rerank를 빼면 hit@1이 0.687로 내려갑니다.
+- 가장 약한 부분집합은 질의 형태 관점(query_form 12건)으로 세 방식 모두 hit@10 0.167~0.333이고, 한국어 lexical은 hit@10 0.500입니다. 세 방식 모두 상위 10개 안의 참고문헌·목차 청크 비율(noise@10)은 0입니다.
+
+평가 하니스는 [`eval/`](./eval/README.md)에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
 
 ```bash
 python scripts/eval_build_queries.py                     # 표본·프롬프트 확인 (dry-run, LLM 미호출)
@@ -211,14 +217,18 @@ python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (O
 
 결과는 `eval/results/<timestamp>.md`(위 표와 같은 모양의 붙여넣기용 표 포함)와 질의별 CSV로 남습니다. DB에 연결할 수 없거나 질의셋의 정답 id가 DB에 없으면 결과를 쓰지 않고 실패합니다.
 
-생성 품질은 RAGAS LLM 판정으로 잽니다. 같은 질의셋으로 에이전트와 상세 챗의 답변, 그리고 LLM에 넘긴 발췌문을 모은 뒤 판정 모델(기본 `gpt-5-mini`)로 채점합니다.
+생성 품질은 RAGAS LLM 판정으로 잽니다. 같은 질의셋으로 에이전트와 상세 챗의 답변, 그리고 LLM에 넘긴 발췌문을 모은 뒤 판정 모델(기본 `gpt-5-mini`)로 채점합니다. 아래는 같은 코퍼스에서 답변 모델 `gpt-4o`, 판정 `gpt-5-mini`로 243개 답변(agent 138, paper_chat 105; ko 134 / en 109)을 채점한 결과입니다(`eval/results/generation_20260925-233840.md`, 커밋 bcdc84b). 괄호는 계산된 답변 수입니다.
 
 | 모드 | faithfulness | answer_relevancy | context_precision | context_recall |
 | --- | --- | --- | --- | --- |
-| agent | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
-| paper_chat | 측정 예정 | 측정 예정 | 측정 예정 | 측정 예정 |
+| agent | 0.870 (117) | 0.654 (118) | 0.737 (14) | n/a |
+| paper_chat | 0.928 (95) | 0.577 (95) | 0.807 (15) | n/a |
 
-`context_precision`은 질의셋의 `reference_answer`나 정답 청크 본문이 있는 질의만, `context_recall`은 `reference_answer`가 있는 질의만 계산합니다. LLM 판정 점수이므로 같은 판정 모델로 잰 값끼리 상대 비교에만 씁니다. 지표 정의와 비용, 해석할 때 주의할 점은 [`eval/README.md`](./eval/README.md#생성-품질ragas)에 있습니다.
+- LLM 판정 없는 행동 지표는 거절 정확도가 에이전트 0.933(15건), 상세 챗 0.833(6건)이고, 날조 링크 없음·금지 문자열 없음·잘못된 입력 거부는 두 모드 모두 1.000입니다.
+- 에이전트 청크 합성 질의의 faithfulness(0.688, 14건)와 근거 위치 관점의 answer_relevancy(에이전트 0.463, 상세 챗 0.384)가 낮습니다.
+- 답변 수집은 각 1회라 분산을 모릅니다. 프롬프트를 바꾸지 않은 상세 챗도 두 실행 사이에 context_precision이 0.741에서 0.807로 움직였으므로, 이 정도 차이로는 개선 여부를 판단하지 않습니다.
+
+`context_precision`은 질의셋의 `reference_answer`나 정답 청크 본문이 있는 질의만, `context_recall`은 `reference_answer`가 있는 질의만 계산합니다. 현재 질의셋에는 `reference_answer`가 없어 `context_recall`은 n/a입니다. LLM 판정 점수이므로 같은 판정 모델로 잰 값끼리 상대 비교에만 씁니다. 지표 정의와 비용, 해석할 때 주의할 점은 [`eval/README.md`](./eval/README.md#생성-품질ragas)에 있습니다.
 
 ```bash
 python scripts/eval_generation.py --collect --keep-going                     # 답변 수집 + RAGAS 채점 (DB + OPENAI_API_KEY)
@@ -236,7 +246,8 @@ python scripts/eval_generation.py --answers eval/results/answers_<timestamp>.jso
 
 ## 알려진 한계와 로드맵
 
-- **검색 평가 수치**: 위 Evaluation 표는 아직 비어 있습니다. hybrid를 제품 경로로 먼저 연결했고, 재처리·백필을 마친 DB에서 lexical / vector / hybrid와 ablation을 측정해 채울 계획입니다. 인덱스 도입 전후 지연도 `EXPLAIN ANALYZE`로 함께 기록합니다.
+- **평가 규모**: 275편·질의 115개의 단일 실행이라 HNSW 효과와 운영 규모 지연, 지표의 분산을 말할 수 없습니다. 본문 source가 모두 pypdf라 HURIDOCS 파싱 결과에서의 수치는 아직 없습니다. LLM이 만든 질의가 절반이라 실제 사용자 질의보다 코퍼스 문장과 어휘 겹침이 클 수 있습니다.
+- **hybrid 가중치**: hybrid가 vector를 넘지 못했고, 질의 형태 관점(hit@10 0.167~0.333)이 가장 약합니다. RRF 가중치 규칙과 lexical 필터를 다시 다듬을 지점입니다.
 - **한국어 lexical**: FTS 설정이 `english`라 임베딩 키가 없는 lexical 폴백에서는 한국어 질문이 거의 맞지 않습니다.
 - **ASGI 전환**: 지금은 gunicorn gthread(워커 4 × 스레드 8)라 SSE 스트림 하나가 스레드 하나를 오래 점유합니다.
 - **배포**: nginx가 HTTP만 제공합니다. 외부에 공개하기 전에 TLS(또는 Tailscale 전용 접근)와 `DJANGO_SECURE_COOKIES=true`, 공유 rate limit용 Redis가 필요합니다.
