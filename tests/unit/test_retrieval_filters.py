@@ -47,12 +47,19 @@ class TestReferenceLikeText:
     @pytest.mark.parametrize(
         "text",
         [
-            "as shown in [1], [2] and [3] the method scales",
+            "[1] A. Smith. Scaling laws.\n[2] B. Jones. Sparse routing.\n[3] C. Lee. Long context.",
+            "  [12] A. Smith. Title.\n\n[13] B. Jones. Title.\n[14] C. Lee. Title.\n[15] D. Kim. Title.",
             "prior work [4] in 2019 and [5] in 2021 studied this",
             "Proceedings of the Conference on Vision 2020, and ICLR 2021",
             "Smith, J., Doe, A. Scaling laws. CVPR 2020.",
         ],
-        ids=["three-bracket-cites", "two-cites-two-years", "two-venues-two-years", "author-list-year-venue"],
+        ids=[
+            "three-numbered-entries",
+            "numbered-entries-with-indent",
+            "two-cites-two-years",
+            "two-venues-two-years",
+            "author-list-year-venue",
+        ],
     )
     def test_detected(self, text):
         assert PaperRetriever._looks_reference_like_text(text) is True
@@ -64,16 +71,32 @@ class TestReferenceLikeText:
             "",
             "We follow the setup of [1] published in 2020.",
             "Results at NeurIPS 2022 show gains.",
+            "as shown in [1], [2] and [3] the method scales",
+            "Video generation has advanced rapidly [4, 32, 9]. Diffusion models [7] and [10] and [12] generate clips.",
+            "Table 3. COCO comparison\nTAPe+ML v3 84.7 65.3\nRF-DETR-2XL [2]\n78.5 60.1 126.9 M\nRF-DETR-M [2]\n"
+            "73.6 54.7 33.7 M\nYOLO11-M [1] 64.1 48.6 20.1 M",
+            "[1] one entry only\nas discussed in [2] and later in [3]",
         ],
-        ids=["plain-body", "empty", "one-cite-one-year", "one-venue-one-year"],
+        ids=[
+            "plain-body",
+            "empty",
+            "one-cite-one-year",
+            "one-venue-one-year",
+            "in-text-cites-only",
+            "citation-heavy-intro",
+            "table-rows-with-cites",
+            "one-entry-two-in-text-cites",
+        ],
     )
     def test_not_detected(self, text):
         assert PaperRetriever._looks_reference_like_text(text) is False
 
     def test_only_first_1200_chars_are_inspected(self):
-        tail = " [1] [2] [3]"
+        tail = "\n[1] a\n[2] b\n[3] c"
         assert PaperRetriever._looks_reference_like_text("x" * 1100 + tail) is True
         assert PaperRetriever._looks_reference_like_text("x" * 1200 + tail) is False
+        assert PaperRetriever._looks_reference_like_text("x " * 550 + " [1] 2019 [2] 2020") is True
+        assert PaperRetriever._looks_reference_like_text("x " * 600 + " [1] 2019 [2] 2020") is False
 
 
 class TestFilterLexicalCandidates:
@@ -86,15 +109,16 @@ class TestFilterLexicalCandidates:
             _candidate(3, content_role="front_matter"),
             _candidate(4, section_title="References"),
             _candidate(5, section_title="Front Matter"),
-            _candidate(6, text="See [1], [2], [3] for details."),
+            _candidate(6, text="[1] A. Smith. 2019.\n[2] B. Jones. 2020.\n[3] C. Lee. 2021."),
             _candidate(7, text="The rest of this paper is organized as follows. Section 2 presents the method."),
             _candidate(8, content_role="table_like"),
             _candidate(9, section_title="3.2 Reference Model"),
+            _candidate(10, text="See [1], [2], [3] for details on the policy loss."),
         ]
 
         filtered = _retriever()._filter_lexical_candidates(self.QUERY, candidates)
 
-        assert _ids(filtered) == [1, 8, 9]
+        assert _ids(filtered) == [1, 8, 9, 10]
 
     @pytest.mark.parametrize(
         "text",
@@ -382,7 +406,7 @@ class TestRerankVectorCandidates:
         assert adjustment == pytest.approx(expected)
 
     def test_reference_like_text_penalty_stacks_with_title_penalty(self):
-        adjustment = self._adjustment(self.NEUTRAL_QUERY, section_title="References", text="[1] a [2] b [3] c")
+        adjustment = self._adjustment(self.NEUTRAL_QUERY, section_title="References", text="[1] a\n[2] b\n[3] c")
 
         assert adjustment == pytest.approx(-0.18 - 0.14)
 

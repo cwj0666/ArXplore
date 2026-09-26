@@ -620,11 +620,27 @@ class PaperRetriever:
 
     @staticmethod
     def _looks_reference_like_text(text: str) -> bool:
-        """본문 검색에서 제외해야 할 reference-like 청크를 감지한다."""
-        compact = " ".join(text.split())[:1200]
+        """본문 검색에서 제외해야 할 reference-like 청크를 감지한다.
+
+        앞 1,200자(공백 정규화 기준)만 본다. 줄 머리가 `[n]`으로 시작하는 줄이 3개 이상이면 번호 참고문헌 목록으로
+        본다. 문장 안의 인용 표지(`... [1], [2], [3] ...`)만으로는 판정하지 않는다: 서론과 결과 표도 인용 표지를 여러 개
+        담기 때문이다. 인용 표지·학회명은 연도가 2개 이상 함께 있을 때만 참고문헌 신호로 센다.
+        """
+        compact_lines: list[str] = []
+        total = 0
+        for raw_line in str(text or "").splitlines():
+            line = " ".join(raw_line.split())
+            if not line:
+                continue
+            if total >= 1200:
+                break
+            compact_lines.append(line)
+            total += len(line) + 1
+        compact = " ".join(compact_lines)[:1200]
         if not compact:
             return False
 
+        entry_markers = sum(1 for line in compact_lines if re.match(r"\[\d+\]", line))
         reference_markers = len(re.findall(r"\[\d+\]", compact))
         year_markers = len(re.findall(r"\b(?:19|20)\d{2}\b", compact))
         venue_markers = len(
@@ -641,7 +657,7 @@ class PaperRetriever:
             )
         )
 
-        if reference_markers >= 3:
+        if entry_markers >= 3:
             return True
         if reference_markers >= 2 and year_markers >= 2:
             return True
