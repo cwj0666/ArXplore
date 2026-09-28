@@ -76,7 +76,7 @@ def test_selection_caps_each_bucket_and_fills_with_other() -> None:
     ]
 
 
-def test_grouping_leaves_other_sections_out() -> None:
+def test_grouping_keeps_other_sections_as_their_own_bucket() -> None:
     grouped = group_summary_sections(select_summary_sections(_four_bucket_sections()))
 
     assert {bucket: len(items) for bucket, items in grouped.items()} == {
@@ -84,14 +84,21 @@ def test_grouping_leaves_other_sections_out() -> None:
         "method": 3,
         "experiments": 3,
         "limitations": 3,
+        "other": 1,
     }
 
 
-def test_other_only_input_is_capped_at_twelve_and_never_grouped() -> None:
+def test_other_only_input_is_capped_at_twelve_and_grouped_as_other() -> None:
     selected = select_summary_sections([_section(f"Appendix {index}") for index in range(20)])
 
     assert len(selected) == 12
-    assert all(not items for items in group_summary_sections(selected).values())
+    assert {bucket: len(items) for bucket, items in group_summary_sections(selected).items()} == {
+        "background": 0,
+        "method": 0,
+        "experiments": 0,
+        "limitations": 0,
+        "other": 12,
+    }
 
 
 def test_selection_skips_non_mapping_and_blank_sections() -> None:
@@ -160,7 +167,7 @@ def _user_texts(fake_openai: Any) -> list[str]:
     return [request.body["messages"][-1]["content"] for request in fake_openai.requests_for("/v1/chat/completions")]
 
 
-async def test_full_four_bucket_input_makes_sixteen_calls(
+async def test_full_input_summarizes_the_other_bucket_too(
     fake_openai: Any, models: ChatModelFactory, tracer: Tracer
 ) -> None:
     result = await SummaryWriter(models, tracer).summarize(
@@ -168,12 +175,16 @@ async def test_full_four_bucket_input_makes_sixteen_calls(
     )
 
     assert result.startswith("Fake reply ")
-    assert _temperatures(fake_openai) == {SECTION_TEMPERATURE: 11, BUCKET_TEMPERATURE: 4, FINAL_TEMPERATURE: 1}
+    assert _temperatures(fake_openai) == {SECTION_TEMPERATURE: 12, BUCKET_TEMPERATURE: 5, FINAL_TEMPERATURE: 1}
     final_prompt = _user_texts(fake_openai)[-1]
-    for label in ("배경/문제", "방법", "실험/결과", "한계/결론"):
+    labels = ("배경/문제", "방법", "실험/결과", "한계/결론", "기타")
+    positions = [final_prompt.index(f"[{label} 해설]") for label in labels]
+    assert positions == sorted(positions)
+    for label in labels:
         assert f"[{label} 원문 근거]" in final_prompt
-    assert "Acknowledgments" not in final_prompt
+    assert "[근거 1] Acknowledgments 0" in final_prompt
     assert "저자: A. Author" in final_prompt
+    assert any(re.search(r"^bucket: other$", text, re.M) for text in _user_texts(fake_openai))
 
 
 async def test_section_prompt_gets_3200_characters_and_the_bucket_name(
@@ -213,7 +224,7 @@ async def test_empty_buckets_skip_calls(fake_openai: Any, models: ChatModelFacto
     assert _temperatures(fake_openai) == {SECTION_TEMPERATURE: 2, BUCKET_TEMPERATURE: 2, FINAL_TEMPERATURE: 1}
 
 
-async def test_unclassified_sections_use_the_fallback_text_only(
+async def test_unclassified_sections_are_summarized_instead_of_the_fallback_text(
     fake_openai: Any, models: ChatModelFactory, tracer: Tracer
 ) -> None:
     result = await SummaryWriter(models, tracer).summarize(
@@ -221,6 +232,19 @@ async def test_unclassified_sections_use_the_fallback_text_only(
     )
 
     assert result
+    assert _temperatures(fake_openai) == {SECTION_TEMPERATURE: 1, BUCKET_TEMPERATURE: 1, FINAL_TEMPERATURE: 1}
+    final_prompt = _user_texts(fake_openai)[-1]
+    assert "본문:\n[기타 해설]\n" in final_prompt
+    assert "fallback body" not in final_prompt
+
+
+async def test_blank_sections_still_fall_back_to_the_text(
+    fake_openai: Any, models: ChatModelFactory, tracer: Tracer
+) -> None:
+    await SummaryWriter(models, tracer).summarize(
+        title="Paper", authors="A", text=" fallback body ", sections=[_section("Appendix", "  ")], model="gpt-4o"
+    )
+
     assert _temperatures(fake_openai) == {FINAL_TEMPERATURE: 1}
     assert "본문:\nfallback body\n---" in _user_texts(fake_openai)[0]
 
