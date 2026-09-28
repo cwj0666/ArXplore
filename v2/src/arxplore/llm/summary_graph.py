@@ -113,10 +113,10 @@ def select_summary_sections(sections: Sequence[Any]) -> list[Section]:
     for section in sections:
         if not isinstance(section, Mapping) or not str(section.get("text") or "").strip():
             continue
-        bucket = _bucket_of(section)
-        if bucket == OTHER_BUCKET and not is_summarizable_other_title(str(section.get("title") or "")):
+        bucket_name = _bucket_of(section)
+        if bucket_name == OTHER_BUCKET and not is_summarizable_other_title(str(section.get("title") or "")):
             continue
-        by_bucket[bucket].append(section)
+        by_bucket[bucket_name].append(section)
     selected: list[Section] = []
     for bucket in CLASSIFIED_BUCKETS:
         selected.extend(by_bucket[bucket.name][: bucket.selection_limit])
