@@ -1,0 +1,27 @@
+:where(.page, .page *) {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.page {
+  display: block;
+  width: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100vh;
+  font-family: var(--font-sans);
+}
+
+.inner {
+  max-width: 940px;
+  margin: 24px auto;
+  padding: 0 20px 28px;
+}
+
+@media (max-width: 720px) {
+  .inner {
+    padding: 0 14px 22px;
+    margin-top: 18px;
+  }
+}

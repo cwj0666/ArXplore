@@ -1,0 +1,28 @@
+.layoutCtrlBtn {
+  background: var(--color-surface-muted);
+  border: 1px solid #d7dbe0;
+  color: var(--color-text-strong);
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  transition: all 0.2s;
+}
+
+.layoutCtrlBtn:hover {
+  background: #eceef1;
+  border-color: #bfc5cc;
+}
+
+.pdfCloseBtn {
+  background: var(--color-surface);
+  font-size: 1.1rem;
+  padding: 0 8px;
+  min-height: 32px;
+}

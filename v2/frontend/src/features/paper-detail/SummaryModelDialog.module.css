@@ -1,0 +1,37 @@
+.title {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #d5dbe1;
+  border-radius: 12px;
+  padding: 11px 12px;
+  font: inherit;
+  width: 100%;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.actions button {
+  border: 1px solid #d6dbe1;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 12px;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-weight: 700;
+}
+
+.actions .primary {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-color: var(--color-primary);
+}

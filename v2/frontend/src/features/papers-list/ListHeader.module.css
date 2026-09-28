@@ -1,0 +1,26 @@
+.hero {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.hero h1 {
+  font-size: 3.35rem;
+  line-height: 1;
+  letter-spacing: -0.08em;
+}
+
+.hero a {
+  text-decoration: none;
+}
+
+@media (max-width: 600px) {
+  .hero {
+    margin-bottom: 18px;
+  }
+
+  .hero h1 {
+    font-size: 2.6rem;
+  }
+}

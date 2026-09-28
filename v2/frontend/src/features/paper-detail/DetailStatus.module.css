@@ -1,0 +1,25 @@
+.wrap {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.arxivFallbackBtn {
+  display: inline-block;
+  padding: 10px 24px;
+  background: #1a1a2e;
+  color: var(--color-on-primary);
+  border-radius: 999px;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.arxivFallbackBtn:hover {
+  background: #2d2d4e;
+}
