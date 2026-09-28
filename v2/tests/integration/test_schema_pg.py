@@ -4,7 +4,14 @@ from typing import Any
 import psycopg
 import pytest
 
-from arxplore.db.migrate import load_migrations, migrate
+from arxplore.db.migrate import (
+    Migration,
+    SchemaNotReadyError,
+    compute_checksum,
+    load_migrations,
+    migrate,
+    verify_schema,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -82,3 +89,53 @@ async def test_hnsw_failure_only_warns(open_connection) -> None:
     assert [migration.version for migration in applied] == [1]
     assert any("HNSW" in message for message in warnings)
     assert not await _relation_exists(setup, "paper_embeddings_embedding_hnsw")
+
+
+async def test_verify_schema_accepts_a_migrated_database(open_connection) -> None:
+    connection = await open_connection()
+    await migrate(connection)
+
+    await verify_schema(connection, embedding_dimensions=1536)
+
+
+async def test_verify_schema_rejects_pending_migrations(open_connection) -> None:
+    connection = await open_connection()
+    await migrate(connection)
+    sql = "SELECT 1;"
+    future = Migration(version=9999, name="9999_future", sql=sql, checksum=compute_checksum(sql))
+
+    with pytest.raises(SchemaNotReadyError, match="pending migrations: 9999_future"):
+        await verify_schema(connection, embedding_dimensions=1536, migrations=[*load_migrations(), future])
+
+
+async def test_verify_schema_rejects_an_empty_database(open_connection) -> None:
+    connection = await open_connection()
+
+    with pytest.raises(SchemaNotReadyError, match=r"0001_baseline.*paper_embeddings\.embedding is missing"):
+        await verify_schema(connection, embedding_dimensions=1536)
+
+
+async def test_verify_schema_rejects_a_dimension_mismatch(open_connection) -> None:
+    connection = await open_connection()
+    await migrate(connection)
+
+    with pytest.raises(SchemaNotReadyError, match=r"vector\(1536\) but OPENAI_EMBEDDING_DIMENSIONS is 3072"):
+        await verify_schema(connection, embedding_dimensions=3072)
+
+
+async def test_verify_schema_rejects_modified_migrations(open_connection) -> None:
+    connection = await open_connection()
+    await migrate(connection)
+    await connection.execute("UPDATE schema_migrations SET checksum = %s WHERE version = 1", ("0" * 64,))
+
+    with pytest.raises(SchemaNotReadyError, match="modified migrations: 0001_baseline"):
+        await verify_schema(connection, embedding_dimensions=1536)
+
+
+async def test_verify_schema_rejects_unknown_database_versions(open_connection) -> None:
+    connection = await open_connection()
+    await migrate(connection)
+    await connection.execute("INSERT INTO schema_migrations (version, checksum) VALUES (9998, 'future')")
+
+    with pytest.raises(SchemaNotReadyError, match="unknown migrations in database: 9998"):
+        await verify_schema(connection, embedding_dimensions=1536)

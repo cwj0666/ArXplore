@@ -16,6 +16,7 @@ from arxplore.db.migrate import (
     load_migrations,
     migration_status,
     plan_migrations,
+    readiness_problems,
 )
 
 APPLIED_AT = datetime(2026, 9, 29, tzinfo=UTC)
@@ -156,3 +157,32 @@ class TestPlan:
 
         with pytest.raises(MigrationOrderError, match="0002_step"):
             plan_migrations([first, second, third], [_applied(first), _applied(third)])
+
+
+class TestReadiness:
+    def test_ready_when_everything_is_applied_and_dimensions_match(self) -> None:
+        first = _migration(1)
+        statuses = migration_status([first], [_applied(first)])
+
+        assert readiness_problems(statuses, embedding_dimensions=1536, expected_embedding_dimensions=1536) == []
+
+    def test_reports_pending_changed_unknown_and_dimension_problems(self) -> None:
+        first, second = _migration(1), _migration(2)
+        statuses = migration_status(
+            [first, second],
+            [_applied(first, checksum="0" * 64), AppliedMigration(version=5, checksum="f" * 64, applied_at=APPLIED_AT)],
+        )
+
+        problems = readiness_problems(statuses, embedding_dimensions=3072, expected_embedding_dimensions=1536)
+
+        assert problems == [
+            "pending migrations: 0002_step",
+            "modified migrations: 0001_step",
+            "unknown migrations in database: 0005",
+            "paper_embeddings.embedding is vector(3072) but OPENAI_EMBEDDING_DIMENSIONS is 1536",
+        ]
+
+    def test_missing_embedding_column_is_a_problem(self) -> None:
+        assert readiness_problems([], embedding_dimensions=None, expected_embedding_dimensions=1536) == [
+            "paper_embeddings.embedding is missing or is not a vector(n) column"
+        ]

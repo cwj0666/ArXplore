@@ -80,7 +80,7 @@ def migrate_command(
     _run(operation, role="migrate")
 
 
-@app.command("db-status", help="Show migration state and search indexes.")
+@app.command("db-status", help="Show migration state, embedding width and search indexes.")
 def db_status_command() -> None:
     async def operation(settings: AppSettings, connection: DictConnection) -> None:
         statuses = migrations.migration_status(
@@ -91,7 +91,18 @@ def db_status_command() -> None:
         for status in statuses:
             applied_at = status.applied_at.isoformat(timespec="seconds") if status.applied_at else ""
             typer.echo(f"{status.label:<{width}}  {status.state.value:<8} {applied_at}".rstrip())
+        dimensions = await migrations.fetch_embedding_dimensions(connection)
+        typer.echo(
+            f"embedding dimensions: {dimensions if dimensions is not None else 'missing'} "
+            f"(OPENAI_EMBEDDING_DIMENSIONS={settings.openai_embedding_dimensions})"
+        )
         await _echo_search_indexes(connection)
+        problems = migrations.readiness_problems(
+            statuses,
+            embedding_dimensions=dimensions,
+            expected_embedding_dimensions=settings.openai_embedding_dimensions,
+        )
+        typer.echo("ready: yes" if not problems else f"ready: no ({'; '.join(problems)})")
 
     _run(operation, role="cli")
 

@@ -15,6 +15,7 @@ from psycopg.rows import dict_row
 MIGRATION_FILE_PATTERN = re.compile(r"^(?P<version>\d{4})_(?P<slug>[a-z0-9_]+)\.sql$")
 MIGRATION_LOCK_KEY = 0x41525850_4D494752
 LOCK_POLL_SECONDS = 0.2
+EMBEDDING_COLUMN_TYPE = re.compile(r"^vector\((?P<dimensions>\d+)\)$")
 SEARCH_INDEXES = (
     "idx_papers_title_abstract_vector",
     "idx_paper_chunks_chunk_vector",
@@ -47,6 +48,10 @@ class MigrationOrderError(MigrationError):
 
 
 class MigrationLockTimeoutError(MigrationError):
+    pass
+
+
+class SchemaNotReadyError(MigrationError):
     pass
 
 
@@ -255,6 +260,24 @@ async def migrate(
         await release_migration_lock(connection)
 
 
+async def fetch_embedding_dimensions(connection: AsyncConnection[Any]) -> int | None:
+    async with connection.cursor(row_factory=dict_row) as cursor:
+        await cursor.execute(
+            """
+            SELECT format_type(attribute.atttypid, attribute.atttypmod) AS column_type
+            FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = to_regclass('paper_embeddings')
+              AND attribute.attname = 'embedding'
+              AND NOT attribute.attisdropped
+            """
+        )
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    match = EMBEDDING_COLUMN_TYPE.match(str(row["column_type"]))
+    return int(match["dimensions"]) if match else None
+
+
 async def fetch_search_indexes(connection: AsyncConnection[Any]) -> dict[str, bool]:
     async with connection.cursor(row_factory=dict_row) as cursor:
         await cursor.execute(
@@ -263,3 +286,45 @@ async def fetch_search_indexes(connection: AsyncConnection[Any]) -> dict[str, bo
         )
         present = {str(row["indexname"]) for row in await cursor.fetchall()}
     return {name: name in present for name in SEARCH_INDEXES}
+
+
+def readiness_problems(
+    statuses: Sequence[MigrationStatus],
+    *,
+    embedding_dimensions: int | None,
+    expected_embedding_dimensions: int,
+) -> list[str]:
+    problems: list[str] = []
+    for state, description in (
+        (MigrationState.PENDING, "pending migrations"),
+        (MigrationState.CHANGED, "modified migrations"),
+        (MigrationState.UNKNOWN, "unknown migrations in database"),
+    ):
+        matching = [status for status in statuses if status.state is state]
+        if matching:
+            problems.append(f"{description}: {_labels(matching)}")
+    if embedding_dimensions is None:
+        problems.append("paper_embeddings.embedding is missing or is not a vector(n) column")
+    elif embedding_dimensions != expected_embedding_dimensions:
+        problems.append(
+            f"paper_embeddings.embedding is vector({embedding_dimensions}) "
+            f"but OPENAI_EMBEDDING_DIMENSIONS is {expected_embedding_dimensions}"
+        )
+    return problems
+
+
+async def verify_schema(
+    connection: AsyncConnection[Any],
+    *,
+    embedding_dimensions: int,
+    migrations: Sequence[Migration] | None = None,
+) -> None:
+    available = list(migrations) if migrations is not None else load_migrations()
+    statuses = migration_status(available, await fetch_applied(connection))
+    problems = readiness_problems(
+        statuses,
+        embedding_dimensions=await fetch_embedding_dimensions(connection),
+        expected_embedding_dimensions=embedding_dimensions,
+    )
+    if problems:
+        raise SchemaNotReadyError("; ".join(problems) + "; run `arxplore migrate` or fix the settings")
