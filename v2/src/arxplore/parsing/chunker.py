@@ -13,31 +13,20 @@ DEFAULT_OVERLAP_CHARS = 200
 MIN_MAX_CHARS = 300
 END_LOOKAHEAD_CHARS = 220
 MIN_BREAK_CHARS = 220
-START_REWIND_CHARS = 160
-WORD_BOUNDARY_SCAN_CHARS = 80
-FRAGMENT_WINDOW_CHARS = 260
-LOWERCASE_SKIP_WINDOW_CHARS = 220
 TINY_CHUNK_CHARS = 160
 ABSORB_MAX_CHARS = 360
 ABSORB_MAX_WORDS = 12
 
 _END_PREFERRED_BREAK = re.compile(r"(?:\n{2,}|\.\s+|\?\s+|!\s+)")
 _END_LINE_BREAK = re.compile(r"\n+")
-_START_SENTENCE_BREAK = re.compile(r"(?:\.\s+|\?\s+|!\s+|\n{2,})")
-_LOWERCASE_WORD_OPENING = re.compile(r"^[a-z][a-z-]{2,}\b")
-_FRAGMENTARY_OPENINGS = (
-    re.compile(r"^\d{4}[a-z]?\](?:,)?\s+[a-z]"),
-    re.compile(r"^\(\d+\)\s+[a-z]"),
-    re.compile(r"^\d+[a-z]?\),\s+[a-z]"),
-    re.compile(r"^\d+[a-z]\),"),
-    re.compile(r"^\d+[a-z]?,\s+[a-z]"),
-    re.compile(r"^\d+[A-Z][a-z]"),
-)
 _LOWERCASE_OR_DIGIT_OPENING = re.compile(r"^[a-z0-9]")
 _NUMERIC_ONLY_TEXT = re.compile(r"[\d\s.,;:()[\]{}%-]{1,360}")
 _SUSPICIOUS_OPENING = re.compile(r"^[a-z0-9,.;:)\]%-]")
 _SENTENCE_END_CHARS = ".?!:\n"
 _CONTINUATION_CHARS = ",.;:)]}%-"
+_SENTENCE_END_MARKS = ".?!"
+_SENTENCE_CLOSERS = "\"')]\u201d\u2019"
+_PARAGRAPH_BREAK = "\n\n"
 
 
 @dataclass(slots=True)
@@ -124,43 +113,40 @@ def _chunk_end(text: str, start: int, max_chars: int) -> int:
     return tentative_end
 
 
-def _looks_like_fragmentary_start(text: str) -> bool:
-    compact = text.lstrip()
-    return any(pattern.match(compact) for pattern in _FRAGMENTARY_OPENINGS)
+def _word_starts(text: str, lower: int, upper: int) -> list[int]:
+    return [
+        position
+        for position in range(lower, upper + 1)
+        if text[position - 1].isspace() and not text[position].isspace()
+    ]
 
 
-def _skip_whitespace(text: str, position: int) -> int:
-    while position < len(text) and text[position].isspace():
-        position += 1
-    return position
+def _is_sentence_start(text: str, position: int) -> bool:
+    index = position - 1
+    while index >= 0 and text[index].isspace():
+        index -= 1
+    if _PARAGRAPH_BREAK in text[index + 1 : position]:
+        return True
+    while index >= 0 and text[index] in _SENTENCE_CLOSERS:
+        index -= 1
+    return index >= 0 and text[index] in _SENTENCE_END_MARKS and not text[position].islower()
 
 
-def _next_chunk_start(text: str, end: int, overlap_chars: int) -> int:
-    start = max(0, end - overlap_chars)
-    if start <= 0:
-        return 0
-    rewind_start = max(0, end - overlap_chars - START_REWIND_CHARS)
-    sentence_breaks = list(_START_SENTENCE_BREAK.finditer(text[rewind_start:end]))
-    if sentence_breaks:
-        start = rewind_start + sentence_breaks[-1].end()
-    else:
-        sentence_break = _START_SENTENCE_BREAK.search(text[start : min(len(text), start + START_REWIND_CHARS)])
-        if sentence_break is not None:
-            start += sentence_break.end()
-    boundary_window_end = min(len(text), start + WORD_BOUNDARY_SCAN_CHARS)
-    while start < boundary_window_end and text[start - 1].isalnum() and text[start].isalnum():
-        start += 1
-    start = _skip_whitespace(text, start)
-    fragment_window = text[start : min(len(text), start + FRAGMENT_WINDOW_CHARS)]
-    if _looks_like_fragmentary_start(fragment_window):
-        sentence_break = _START_SENTENCE_BREAK.search(fragment_window)
-        if sentence_break is not None:
-            start = _skip_whitespace(text, start + sentence_break.end())
-    elif _LOWERCASE_WORD_OPENING.match(fragment_window):
-        sentence_break = _START_SENTENCE_BREAK.search(fragment_window[:LOWERCASE_SKIP_WINDOW_CHARS])
-        if sentence_break is not None:
-            start = _skip_whitespace(text, start + sentence_break.end())
-    return start
+def _next_chunk_start(text: str, *, start: int, end: int, overlap_chars: int) -> int:
+    if overlap_chars <= 0:
+        return end
+    target = end - overlap_chars
+    slack = overlap_chars // 2
+    lower = max(start + 1, target - slack)
+    upper = min(end - 1, target + slack)
+    if lower > upper:
+        return end
+    word_starts = _word_starts(text, lower, upper)
+    sentence_starts = [position for position in word_starts if _is_sentence_start(text, position)]
+    candidates = sentence_starts or word_starts
+    if not candidates:
+        return min(upper, max(lower, target))
+    return min(candidates, key=lambda position: (abs(position - target), position))
 
 
 def _clean_chunk_text(candidate: str) -> str:
@@ -208,29 +194,45 @@ def _chunk_section(
     section_chunk_index = 0
     while start < len(section_text):
         end = _chunk_end(section_text, start, max_chars)
-        clean_text = _clean_chunk_text(section_text[start:end])
-        if clean_text:
-            draft = _ChunkDraft(
+        previous_end = drafts[-1].char_end if drafts and drafts[-1].section_index == section_index else start
+        new_start = max(start, previous_end)
+        new_text = _clean_chunk_text(section_text[new_start:end])
+        if new_text:
+            new_content = _ChunkDraft(
                 chunk_index=len(drafts),
-                text=clean_text,
+                text=new_text,
                 section_title=section_title,
                 section_index=section_index,
                 section_chunk_index=section_chunk_index,
                 section_char_length=len(section_text),
-                char_start=start,
+                char_start=new_start,
                 char_end=end,
-                starts_mid_sentence=starts_mid_sentence(section_text, start),
+                starts_mid_sentence=starts_mid_sentence(section_text, new_start),
                 ends_mid_sentence=ends_mid_sentence(section_text, end),
             )
-            if _should_absorb(drafts, draft):
-                _absorb(drafts[-1], draft)
+            if _should_absorb(drafts, new_content):
+                _absorb(drafts[-1], new_content)
             else:
-                draft.content_role = chunk_role(section_title, clean_text)
-                drafts.append(draft)
+                chunk_text = new_text if new_start == start else _clean_chunk_text(section_text[start:end])
+                drafts.append(
+                    _ChunkDraft(
+                        chunk_index=len(drafts),
+                        text=chunk_text,
+                        section_title=section_title,
+                        section_index=section_index,
+                        section_chunk_index=section_chunk_index,
+                        section_char_length=len(section_text),
+                        char_start=start,
+                        char_end=end,
+                        starts_mid_sentence=starts_mid_sentence(section_text, start),
+                        ends_mid_sentence=new_content.ends_mid_sentence,
+                        content_role=chunk_role(section_title, chunk_text),
+                    )
+                )
                 section_chunk_index += 1
         if end >= len(section_text):
             break
-        start = _next_chunk_start(section_text, end, overlap_chars)
+        start = _next_chunk_start(section_text, start=start, end=end, overlap_chars=overlap_chars)
 
 
 def _finalize(drafts: Sequence[_ChunkDraft], index: int) -> Chunk:

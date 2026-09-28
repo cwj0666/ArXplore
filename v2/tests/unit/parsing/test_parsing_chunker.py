@@ -1,5 +1,10 @@
+import random
+import statistics
+from itertools import pairwise
+
 from arxplore.parsing.chunker import (
     DEFAULT_MAX_CHARS,
+    DEFAULT_OVERLAP_CHARS,
     build_chunks,
     ends_mid_sentence,
     rough_token_count,
@@ -31,6 +36,26 @@ METADATA_KEYS = {
 
 def section(title: str, text: str) -> dict[str, str]:
     return {"title": title, "text": text}
+
+
+def random_prose(seed: int, sentences: int) -> str:
+    rng = random.Random(seed)
+    words = ["model", "data", "training", "results", "we", "the", "loss", "layer", "attention", "improves", "shows"]
+    parts = []
+    for _ in range(sentences):
+        body = " ".join(rng.choice(words) for _ in range(rng.randint(4, 30)))
+        parts.append(body[0].upper() + body[1:] + rng.choice([".", ".", ".", "?", "!"]))
+        if rng.random() < 0.1:
+            parts.append("\n\n")
+    return " ".join(parts).replace(" \n\n ", "\n\n")
+
+
+def overlaps(chunks: list) -> list[int]:
+    return [
+        previous["metadata"]["char_end"] - current["metadata"]["char_start"]
+        for previous, current in pairwise(chunks)
+        if previous["metadata"]["section_index"] == current["metadata"]["section_index"]
+    ]
 
 
 def test_empty_text_has_no_chunks():
@@ -74,20 +99,61 @@ def test_chunk_ends_prefer_the_last_sentence_break_inside_the_lookahead_window()
 
     assert [(chunk["metadata"]["char_start"], chunk["metadata"]["char_end"]) for chunk in chunks] == [
         (0, 2001),
-        (2001, 3926),
-        (3926, 5851),
-        (5851, 6299),
+        (1826, 3751),
+        (3576, 5501),
+        (5326, 6299),
     ]
     assert max(len(chunk["chunk_text"]) for chunk in chunks) == 2000
     assert all(chunk["chunk_text"].endswith(".") for chunk in chunks)
 
 
-def test_the_next_chunk_starts_where_the_previous_one_ended():
+def test_consecutive_chunks_overlap_and_restart_at_a_sentence():
     chunks = build_chunks(LONG_BODY, [section("2 Method", LONG_BODY)])
 
-    starts = [chunk["metadata"]["char_start"] for chunk in chunks[1:]]
-    ends = [chunk["metadata"]["char_end"] for chunk in chunks[:-1]]
-    assert starts == ends
+    assert overlaps(chunks) == [175, 175, 175]
+    for chunk in chunks[1:]:
+        start = chunk["metadata"]["char_start"]
+        assert LONG_BODY[start - 2 : start] == ". "
+        assert LONG_BODY[start:].startswith(chunk["chunk_text"][:60])
+
+
+def test_overlap_length_stays_near_the_target():
+    measured = []
+    for seed in range(20):
+        text = random_prose(seed, 400)
+        measured.extend(overlaps(build_chunks(text, [section("2 Method", text)])))
+
+    assert len(measured) > 100
+    assert min(measured) >= DEFAULT_OVERLAP_CHARS // 2
+    assert max(measured) <= DEFAULT_OVERLAP_CHARS + DEFAULT_OVERLAP_CHARS // 2
+    assert abs(statistics.mean(measured) - DEFAULT_OVERLAP_CHARS) < 25
+
+
+def test_overlap_falls_back_to_word_boundaries_without_sentence_breaks():
+    text = " ".join(f"token{index}" for index in range(1500))
+
+    chunks = build_chunks(text, [section("2 Method", text)])
+
+    assert len(chunks) > 3
+    assert all(100 <= overlap <= 300 for overlap in overlaps(chunks))
+    for chunk in chunks[1:]:
+        start = chunk["metadata"]["char_start"]
+        assert text[start - 1] == " "
+        assert chunk["chunk_text"].startswith("token")
+
+
+def test_zero_overlap_restarts_at_the_previous_end():
+    chunks = build_chunks(LONG_BODY, [section("2 Method", LONG_BODY)], overlap_chars=0)
+
+    assert overlaps(chunks) == [0, 0, 0]
+
+
+def test_small_chunk_windows_always_make_progress():
+    text = "Sentence one ends here. " + "word " * 50 + "y" * 400
+
+    chunks = build_chunks(text, [section("2 Method", text)], max_chars=300, overlap_chars=200)
+
+    assert chunks[-1]["metadata"]["char_end"] == len(text)
 
 
 def test_chunk_length_can_exceed_max_chars_by_the_lookahead():
@@ -103,6 +169,7 @@ def test_a_short_tail_is_absorbed_into_the_previous_chunk_with_a_newline():
 
     assert len(chunks) == 1
     assert chunks[0]["chunk_text"].endswith("large language models.\nand a short tail")
+    assert chunks[0]["chunk_text"].count("Our approach") == text.count("Our approach")
     assert chunks[0]["metadata"]["char_end"] == len(text)
 
 
