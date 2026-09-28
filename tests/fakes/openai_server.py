@@ -6,6 +6,7 @@ import json
 import math
 import socket
 import struct
+import sys
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -73,6 +74,7 @@ class ChatReply:
     content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     finish_reason: str | None = None
+    abort_after_events: int | None = None
 
 
 ChatHandler = Callable[[Mapping[str, Any]], ChatReply | str | ToolCall | Sequence[ToolCall]]
@@ -514,6 +516,7 @@ class _Response:
     content_type: str
     body: bytes = b""
     events: list[bytes] | None = None
+    abort: bool = False
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -563,6 +566,12 @@ class _HTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], fake: "FakeOpenAIServer") -> None:
         self.fake = fake
         super().__init__(address, _RequestHandler)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, OSError):
+            return
+        self.fake._append_record(RecordedError(0, "", "", 0, f"handler failure: {type(error).__name__}: {error}"))
 
 
 class FakeOpenAIServer:
@@ -782,6 +791,10 @@ class FakeOpenAIServer:
             handler.end_headers()
             for event in response.events:
                 handler.wfile.write(f"{len(event):X}\r\n".encode("ascii") + event + b"\r\n")
+            if response.abort:
+                handler.close_connection = True
+                handler.connection.shutdown(socket.SHUT_RDWR)
+                return
             handler.wfile.write(b"0\r\n\r\n")
         except ConnectionError:
             handler.close_connection = True
@@ -812,6 +825,10 @@ class FakeOpenAIServer:
         )
         events = [b"data: " + _json_bytes(chunk) + b"\n\n" for chunk in chunks]
         events.append(b"data: [DONE]\n\n")
+        if reply.abort_after_events is not None:
+            return _Response(
+                200, "text/event-stream; charset=utf-8", events=events[: reply.abort_after_events], abort=True
+            )
         return _Response(200, "text/event-stream; charset=utf-8", events=events)
 
     def _embeddings(self, body: Any, query: dict[str, list[str]]) -> _Response:
