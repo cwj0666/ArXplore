@@ -26,7 +26,7 @@ const noComments = {
 const local = { rules: { "no-comments": noComments } };
 
 export default defineConfig([
-  globalIgnores(["dist", "coverage"]),
+  globalIgnores(["dist", "coverage", "src/shared/api/schema.d.ts"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [

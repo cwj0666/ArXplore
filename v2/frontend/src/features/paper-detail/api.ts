@@ -1,7 +1,12 @@
 import { queryOptions } from "@tanstack/react-query";
 
 import { getJson, postJson } from "../../shared/api/http";
-import type { AnalysisResponse, PaperDetailResponse, SummaryResponse } from "../../shared/api/types";
+import type {
+  AnalysisResponse,
+  PaperDetailResponse,
+  SummaryRequest,
+  SummaryResponse,
+} from "../../shared/api/types";
 
 function paperEndpoint(arxivId: string, suffix: string): string {
   return `/papers/${encodeURIComponent(arxivId)}/${suffix}`;
@@ -23,5 +28,6 @@ export function requestSummary(
   model: string,
   signal: AbortSignal,
 ): Promise<SummaryResponse> {
-  return postJson<SummaryResponse>(paperEndpoint(arxivId, "summary/"), { model }, signal);
+  const body: SummaryRequest = { model };
+  return postJson<SummaryResponse>(paperEndpoint(arxivId, "summary/"), body, signal);
 }

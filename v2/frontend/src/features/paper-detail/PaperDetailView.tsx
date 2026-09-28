@@ -12,7 +12,7 @@ import { formatSummaryBlocks, type SummaryBlock } from "./summaryBlocks";
 import { SummaryModelDialog } from "./SummaryModelDialog";
 import { useAbortableMutation } from "./useAbortableMutation";
 
-interface SummaryRequest {
+interface SummaryVariables {
   arxivId: string;
   model: string;
 }
@@ -21,7 +21,7 @@ function analyze(arxivId: string, signal: AbortSignal) {
   return requestAnalysis(arxivId, signal);
 }
 
-function summarize({ arxivId, model }: SummaryRequest, signal: AbortSignal) {
+function summarize({ arxivId, model }: SummaryVariables, signal: AbortSignal) {
   return requestSummary(arxivId, model, signal);
 }
 
