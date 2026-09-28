@@ -22,7 +22,6 @@ from eval.runner import (
     ABLATIONS,
     METHODS,
     aggregate,
-    plain_rrf,
     resolve_methods,
     run_evaluation,
     run_query,
@@ -424,18 +423,6 @@ class TestAblationsOnRealRetriever:
         retriever = _real_retriever()
         hits = METHODS["lexical_nodiv"].search(retriever, query.query, 2, 1)
         assert [hit["context_text"] for hit in hits] == ["context 1", "context 2"]
-
-
-class TestPlainRrf:
-    def test_sums_reciprocal_ranks_without_weights(self):
-        merged = plain_rrf([[{"chunk_id": 1}, {"chunk_id": 2}], [{"chunk_id": 2}, {"chunk_id": 3}]])
-        assert [item["chunk_id"] for item in merged] == [2, 1, 3]
-        assert merged[0]["score"] == pytest.approx(1 / 62 + 1 / 61)
-        assert merged[1]["score"] == pytest.approx(1 / 61)
-
-    def test_ties_break_by_chunk_id_descending(self):
-        merged = plain_rrf([[{"chunk_id": 1}], [{"chunk_id": 5}]])
-        assert [item["chunk_id"] for item in merged] == [5, 1]
 
 
 def _load_script(name: str):

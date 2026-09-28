@@ -3,7 +3,18 @@ from __future__ import annotations
 import re
 
 from src.integrations.embedding_client import EmbeddingClient
-from src.integrations.paper_repository import STRICT_MATCH_BONUS, PaperRepository
+from src.integrations.hybrid_fusion import (
+    DEFAULT_HYBRID_FUSION,
+    HybridFusionConfig,
+    apply_paper_diversity,
+    fuse_hybrid_candidates,
+    hybrid_quality_weight,
+    lexical_confidence,
+    query_tokens,
+    resolve_hybrid_method_weights,
+    to_float,
+)
+from src.integrations.paper_repository import PaperRepository
 from src.integrations.pdf_parser.section_roles import is_references_section_title
 from src.integrations.vector_repository import VectorRepository
 
@@ -96,9 +107,38 @@ class PaperRetriever:
     ) -> list[dict]:
         """lexical/vector 결과를 rank fusion으로 결합해 공용 retrieval shape로 반환한다.
         제어 문자를 지운 질의가 비면 []를 반환한다."""
-        query = normalize_search_query(query)
+        query, lexical_candidates, vector_candidates = self.hybrid_fusion_inputs(
+            query,
+            arxiv_id=arxiv_id,
+            limit=limit,
+            lexical_limit=lexical_limit,
+            vector_limit=vector_limit,
+        )
         if not query:
             return []
+        return self._merge_hybrid_candidates(
+            query,
+            lexical_candidates,
+            vector_candidates,
+            arxiv_id=arxiv_id,
+            limit=max(1, limit),
+        )
+
+    def hybrid_fusion_inputs(
+        self,
+        query: str,
+        *,
+        arxiv_id: str | None = None,
+        limit: int = 5,
+        lexical_limit: int | None = None,
+        vector_limit: int | None = None,
+    ) -> tuple[str, list[dict], list[dict]]:
+        """hybrid 융합에 들어가는 (정규화 질의, lexical 결과, vector 결과). 각 채널은 자기 경로의 정규화·rerank·
+        필터·diversity를 거친 `hybrid_branch_limit(limit)`개다. 질의가 비면 DB를 조회하지 않고 빈 목록을 돌려준다.
+        `scripts/eval_dump_candidates.py`가 같은 입력을 저장해 융합만 다시 재생한다."""
+        query = normalize_search_query(query)
+        if not query:
+            return query, [], []
         normalized_limit = max(1, limit)
         lexical_candidates = self.search_paper_chunks(
             query,
@@ -110,13 +150,7 @@ class PaperRetriever:
             arxiv_id=arxiv_id,
             limit=vector_limit or hybrid_branch_limit(normalized_limit),
         )
-        return self._merge_hybrid_candidates(
-            query,
-            lexical_candidates,
-            vector_candidates,
-            arxiv_id=arxiv_id,
-            limit=normalized_limit,
-        )
+        return query, lexical_candidates, vector_candidates
 
     def search_paper_contexts(
         self,
@@ -326,81 +360,10 @@ class PaperRetriever:
         *,
         arxiv_id: str | None,
         limit: int,
+        config: HybridFusionConfig = DEFAULT_HYBRID_FUSION,
     ) -> list[dict]:
-        """lexical/vector 결과를 reciprocal rank fusion으로 병합한다.
-
-        vector 결과가 있으면 lexical 결과 중 일부 lexeme만 일치한 행(`strict_match`가 False)은 융합에서 뺀다.
-        vector 결과가 없으면 lexical 결과를 모두 쓴다.
-        """
-        if vector_candidates:
-            lexical_candidates = [
-                candidate
-                for candidate in lexical_candidates
-                if (candidate.get("score_breakdown") or {}).get("strict_match") is not False
-            ]
-        rank_constant = 60.0
-        method_weights = self._resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates)
-        merged: dict[int, dict] = {}
-        fallback_key_seed = -1
-
-        for method, candidates in (("lexical", lexical_candidates), ("vector", vector_candidates)):
-            for index, candidate in enumerate(candidates):
-                chunk_id = int(candidate.get("chunk_id") or fallback_key_seed)
-                if not candidate.get("chunk_id"):
-                    fallback_key_seed -= 1
-
-                entry = merged.setdefault(
-                    chunk_id,
-                    {
-                        **candidate,
-                        "retrieval_method": "hybrid",
-                        "score_source": "hybrid",
-                        "matched_methods": [],
-                        "score_breakdown": {},
-                        "score": 0.0,
-                        "similarity_score": 0.0,
-                    },
-                )
-
-                rank = index + 1
-                quality_weight = self._candidate_hybrid_quality_weight(method, candidate)
-                rrf_score = (method_weights[method] * quality_weight) / (rank_constant + rank)
-                method_score = self._to_float(candidate.get("score"))
-                method_breakdown = dict(candidate.get("score_breakdown") or {})
-
-                if method not in entry["matched_methods"]:
-                    entry["matched_methods"].append(method)
-
-                entry["score"] = self._to_float(entry.get("score")) + rrf_score
-                entry["similarity_score"] = entry["score"]
-                entry["score_breakdown"][f"{method}_rank"] = rank
-                entry["score_breakdown"][f"{method}_rrf_score"] = rrf_score
-                entry["score_breakdown"][f"{method}_score"] = method_score
-                entry["score_breakdown"][f"{method}_weight"] = method_weights[method]
-                entry["score_breakdown"][f"{method}_quality_weight"] = quality_weight
-                entry["score_breakdown"][f"{method}_score_breakdown"] = method_breakdown
-
-                if method == "vector" and "lexical" not in entry["matched_methods"]:
-                    entry["snippet"] = candidate.get("snippet") or entry.get("snippet")
-                elif method == "lexical":
-                    entry["snippet"] = candidate.get("snippet") or entry.get("snippet")
-
-        merged_candidates = list(merged.values())
-        for candidate in merged_candidates:
-            overlap_bonus = 0.015 if len(candidate.get("matched_methods") or []) > 1 else 0.0
-            if overlap_bonus > 0:
-                candidate["score"] = self._to_float(candidate.get("score")) + overlap_bonus
-                candidate["similarity_score"] = candidate["score"]
-                candidate["score_breakdown"]["cross_method_overlap_bonus"] = overlap_bonus
-
-        merged_candidates.sort(
-            key=lambda item: (
-                self._to_float(item.get("score")),
-                len(item.get("matched_methods") or []),
-                int(item.get("chunk_id") or 0),
-            ),
-            reverse=True,
-        )
+        """lexical/vector 결과를 reciprocal rank fusion(`fuse_hybrid_candidates`)으로 병합한 뒤 논문 다양성을 적용한다."""
+        merged_candidates = fuse_hybrid_candidates(query, lexical_candidates, vector_candidates, config)
         return self._apply_paper_diversity(merged_candidates, limit=limit, arxiv_id=arxiv_id)
 
     def _apply_paper_diversity(
@@ -411,35 +374,10 @@ class PaperRetriever:
         arxiv_id: str | None,
         max_chunks_per_paper: int = 2,
     ) -> list[dict]:
-        """논문마다 앞에서부터 `max_chunks_per_paper`개까지만 고르고, 후보가 모자랄 때만
-        상한을 넘긴 청크를 원래 순서대로 채운다. 논문 범위 검색이나 후보가 `limit` 이하면 순서대로 자른다."""
-        normalized_limit = max(1, limit)
-        if arxiv_id or len(candidates) <= normalized_limit:
-            return candidates[:normalized_limit]
-
-        selected: list[dict] = []
-        overflow: list[dict] = []
-        paper_counts: dict[str, int] = {}
-
-        for candidate in candidates:
-            candidate_arxiv_id = str(candidate.get("arxiv_id") or "")
-            count = paper_counts.get(candidate_arxiv_id, 0)
-            if candidate_arxiv_id and count >= max_chunks_per_paper:
-                overflow.append(candidate)
-                continue
-
-            selected.append(candidate)
-            if candidate_arxiv_id:
-                paper_counts[candidate_arxiv_id] = count + 1
-            if len(selected) >= normalized_limit:
-                return selected[:normalized_limit]
-
-        for candidate in overflow:
-            selected.append(candidate)
-            if len(selected) >= normalized_limit:
-                break
-
-        return selected[:normalized_limit]
+        """논문당 청크 상한을 우선하는 다양성 규칙(`apply_paper_diversity`)."""
+        return apply_paper_diversity(
+            candidates, limit=limit, arxiv_id=arxiv_id, max_chunks_per_paper=max_chunks_per_paper
+        )
 
     def _resolve_hybrid_method_weights(
         self,
@@ -447,60 +385,16 @@ class PaperRetriever:
         lexical_candidates: list[dict],
         vector_candidates: list[dict],
     ) -> dict[str, float]:
-        """질의 성격과 lexical confidence를 보고 hybrid 가중치를 조정한다."""
-        weights = {
-            "lexical": 1.0,
-            "vector": 1.0,
-        }
-        lexical_top_score = self._lexical_confidence(lexical_candidates[0]) if lexical_candidates else 0.0
-        query_tokens = self._query_tokens(query)
-        lexical_top_ids = {int(candidate.get("chunk_id") or 0) for candidate in lexical_candidates[:5]}
-        vector_top_ids = {int(candidate.get("chunk_id") or 0) for candidate in vector_candidates[:5]}
-        overlap_count = len(lexical_top_ids & vector_top_ids)
-
-        if len(query_tokens) >= 5:
-            weights["lexical"] *= 0.85
-            weights["vector"] *= 1.05
-        if lexical_top_score < 0.3:
-            weights["lexical"] *= 0.45
-            weights["vector"] *= 1.1
-        elif lexical_top_score < 0.5:
-            weights["lexical"] *= 0.7
-            weights["vector"] *= 1.05
-        if overlap_count == 0 and lexical_top_score < 0.4:
-            weights["lexical"] *= 0.75
-            weights["vector"] *= 1.08
-
-        return {
-            "lexical": max(0.2, weights["lexical"]),
-            "vector": max(0.5, weights["vector"]),
-        }
+        """제품 설정의 hybrid 채널 가중치(`resolve_hybrid_method_weights`)."""
+        return resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates, DEFAULT_HYBRID_FUSION)
 
     def _candidate_hybrid_quality_weight(self, method: str, candidate: dict) -> float:
-        """RRF에 후보 자체의 confidence를 반영한다."""
-        if method != "lexical":
-            return 1.0
-        score = self._lexical_confidence(candidate)
-        if score < 0.2:
-            return 0.2
-        if score < 0.3:
-            return 0.4
-        if score < 0.5:
-            return 0.65
-        if score < 0.8:
-            return 0.85
-        return 1.0
+        """제품 설정의 후보 품질 가중(`hybrid_quality_weight`)."""
+        return hybrid_quality_weight(method, candidate, DEFAULT_HYBRID_FUSION)
 
     def _lexical_confidence(self, candidate: dict) -> float:
-        """hybrid 가중치 판단에 쓰는 lexical 점수. strict 일치 행은 `STRICT_MATCH_BONUS`를 뺀 점수,
-        일부 lexeme만 일치한 행은 0이다. `strict_match`가 없는 후보는 점수를 그대로 쓴다."""
-        score = self._to_float(candidate.get("score"))
-        strict_match = (candidate.get("score_breakdown") or {}).get("strict_match")
-        if strict_match is None:
-            return score
-        if not strict_match:
-            return 0.0
-        return score - STRICT_MATCH_BONUS
+        """hybrid 가중치 판단에 쓰는 lexical 점수(`lexical_confidence`)."""
+        return lexical_confidence(candidate)
 
     def _section_intent_bonus(self, query: str):
         """명시적 section-intent 질의에서만 해당 섹션을 밀어준다."""
@@ -588,19 +482,12 @@ class PaperRetriever:
 
     @staticmethod
     def _to_float(value: object) -> float:
-        try:
-            return float(value or 0.0)
-        except (TypeError, ValueError):
-            return 0.0
+        return to_float(value)
 
     @staticmethod
     def _query_tokens(query: str) -> set[str]:
         """짧은 영문 질의에서 의미 있는 토큰만 뽑는다."""
-        return {
-            token
-            for token in re.findall(r"[a-z0-9]+", query.lower())
-            if len(token) >= 3 and token not in {"the", "and", "for", "with", "from", "that", "this"}
-        }
+        return query_tokens(query)
 
     @staticmethod
     def _lexical_overlap_bonus(query_tokens: set[str], text: str) -> float:

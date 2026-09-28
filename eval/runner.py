@@ -14,11 +14,11 @@ from typing import Any, Protocol
 
 from eval.dataset import EvalQuery
 from eval.metrics import hit_at_k, mean, mrr_at_k, percentile, recall_at_k
+from src.integrations.hybrid_fusion import STANDARD_RRF_FUSION, fuse_hybrid_candidates
 from src.integrations.paper_retriever import candidate_fetch_limit, hybrid_branch_limit, normalize_search_query
 
 NOISE_ROLES = frozenset({"references", "toc", "front_matter"})
 HIT_KS = (1, 5, 10)
-RRF_RANK_CONSTANT = 60.0
 
 
 class SupportsContextSearch(Protocol):
@@ -68,17 +68,6 @@ def _with_contexts(retriever: Any, candidates: list[dict], adjacency_window: int
     return retriever._build_contexts(candidates, adjacency_window=adjacency_window)
 
 
-def plain_rrf(ranked_lists: Sequence[Sequence[dict]], *, rank_constant: float = RRF_RANK_CONSTANT) -> list[dict]:
-    """가중치·품질 보정·교차 보너스 없는 표준 RRF. 동점은 chunk_id 내림차순(retriever와 같은 규칙)."""
-    merged: dict[int, dict] = {}
-    for candidates in ranked_lists:
-        for rank, candidate in enumerate(candidates, start=1):
-            chunk_id = int(candidate.get("chunk_id") or 0)
-            entry = merged.setdefault(chunk_id, {**candidate, "retrieval_method": "hybrid_plain_rrf", "score": 0.0})
-            entry["score"] += 1.0 / (rank_constant + rank)
-    return sorted(merged.values(), key=lambda item: (item["score"], int(item.get("chunk_id") or 0)), reverse=True)
-
-
 def _search_lexical(retriever: Any, query: str, k: int, window: int) -> list[dict]:
     return retriever.search_paper_contexts(query, limit=k, adjacency_window=window)
 
@@ -120,10 +109,11 @@ def _search_vector_norerank(retriever: Any, query: str, k: int, window: int) -> 
 
 
 def _search_hybrid_plainrrf(retriever: Any, query: str, k: int, window: int) -> list[dict]:
-    sub_limit = hybrid_branch_limit(k)
-    lexical = retriever.search_paper_chunks(query, limit=sub_limit)
-    vector = retriever.search_paper_chunks_by_vector(query, limit=sub_limit)
-    return _with_contexts(retriever, _diversify(retriever, plain_rrf([lexical, vector]), k), window)
+    query, lexical, vector = retriever.hybrid_fusion_inputs(query, limit=k)
+    if not query:
+        return []
+    merged = fuse_hybrid_candidates(query, lexical, vector, STANDARD_RRF_FUSION)
+    return _with_contexts(retriever, _diversify(retriever, merged, k), window)
 
 
 @dataclass(frozen=True)
@@ -147,7 +137,7 @@ METHODS: dict[str, MethodSpec] = {
             "lexical_nofilter", _search_lexical_nofilter, False, "lexical, references/front_matter/outline 필터 제거"
         ),
         MethodSpec("vector_norerank", _search_vector_norerank, True, "vector, Python 재정렬 제거(SQL 감점은 유지)"),
-        MethodSpec("hybrid_plainrrf", _search_hybrid_plainrrf, True, "hybrid, 가중치·품질 보정 없는 표준 RRF"),
+        MethodSpec("hybrid_plainrrf", _search_hybrid_plainrrf, True, "hybrid, 표준 RRF(STANDARD_RRF_FUSION)"),
     )
 }
 
