@@ -56,10 +56,13 @@ API_TITLE = "ArXplore API"
 POOL_ROLE = "api"
 DEFAULT_FRONTEND_DIST = Path("frontend/dist")
 SPA_INDEX = "index.html"
+STATIC_ASSET_PREFIX = "assets/"
 SPA_METHODS = frozenset({"GET", "HEAD"})
 MISSING_BUILD_MESSAGE = "React build output이 없습니다. frontend에서 npm run build를 먼저 실행하세요."
 OPENAPI_URL = "/openapi.json"
 DEBUG_DOCS_URL = "/docs"
+VALIDATION_ERROR_STATUS = "422"
+VALIDATION_ERROR_SCHEMAS = ("HTTPValidationError", "ValidationError")
 
 type ServicesFactory = Callable[[AppSettings], AbstractAsyncContextManager[ApiServices]]
 
@@ -140,6 +143,8 @@ def spa_response(request: Request, dist: Path) -> Response:
         candidate = (root / relative).resolve()
         if candidate.is_relative_to(root) and candidate.is_file():
             return FileResponse(candidate)
+        if relative.startswith(STATIC_ASSET_PREFIX):
+            return error_response(404, ROUTE_NOT_FOUND_MESSAGE)
     index = root / SPA_INDEX
     if not index.is_file():
         return PlainTextResponse(MISSING_BUILD_MESSAGE, status_code=503)
@@ -162,6 +167,11 @@ def build_openapi_schema(app: FastAPI) -> dict[str, Any]:
     components = schema.setdefault("components", {}).setdefault("schemas", {})
     for name, definition in definitions.get("$defs", {}).items():
         components.setdefault(name, definition)
+    for operations in schema.get("paths", {}).values():
+        for operation in operations.values():
+            operation.get("responses", {}).pop(VALIDATION_ERROR_STATUS, None)
+    for name in VALIDATION_ERROR_SCHEMAS:
+        components.pop(name, None)
     app.openapi_schema = schema
     return schema
 

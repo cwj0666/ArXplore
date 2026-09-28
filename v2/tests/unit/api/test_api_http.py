@@ -115,6 +115,7 @@ class TestBootstrapAndPages:
             index = await client.get(f"/papers/{ids['main']}/")
             asset = await client.get("/assets/app.js")
             traversal = await client.get("/assets/../../secret.txt")
+            missing_asset = await client.get("/assets/missing.js")
             api = await client.get("/papers/list.json")
             post = await client.post("/somewhere")
 
@@ -122,6 +123,7 @@ class TestBootstrapAndPages:
         assert index.headers["content-type"] == "text/html; charset=utf-8"
         assert (asset.status_code, asset.text) == (200, "console.log(1)")
         assert "secret" not in traversal.text
+        assert (missing_asset.status_code, missing_asset.json()) == (404, {"error": ROUTE_NOT_FOUND_MESSAGE})
         assert api.headers["content-type"] == "application/json"
         assert post.status_code == 404
 
