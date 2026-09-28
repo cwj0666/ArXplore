@@ -9,6 +9,8 @@ from arxplore.db.repositories.pipeline_state import DEFAULT_STATE_NAME
 from arxplore.pipeline.collect import DailyPapersSource, collect_daily_papers
 
 BACKFILL_PIPELINE = "hf_daily_papers_backfill"
+BACKFILL_JOB_MODE = "backfill"
+BACKFILL_JOB_SOURCE = "backfill"
 DEFAULT_BACKFILL_BATCH_DAYS = 30
 DEFAULT_BACKFILL_LOOKBACK_DAYS = 365
 RATE_LIMIT_MARKERS = ("429", "Too Many Requests")
@@ -142,7 +144,9 @@ async def backfill_daily_papers(
             next_cursor = candidate if candidate >= oldest else None
             continue
         try:
-            collected = await collect_daily_papers(pool, source, target_date=target, enqueue_prepare=False)
+            collected = await collect_daily_papers(
+                pool, source, target_date=target, job_mode=BACKFILL_JOB_MODE, job_source=BACKFILL_JOB_SOURCE
+            )
         except Exception as exc:
             failures.append({"date": target.isoformat(), "error": str(exc)})
             stopped_reason = "rate_limited" if is_rate_limited_error(exc) else "collection_failed"

@@ -119,7 +119,7 @@ def test_failure_summaries_and_errors_are_capped() -> None:
 )
 def test_queue_status_matrix(claimed: int, successes: int, failures: int, lost: int, status: str) -> None:
     run = QueueRunResult(
-        mode="auto",
+        modes=("auto",),
         worker_id="w",
         claimed_dates=["d"] * claimed,
         successes=[{"prepared_arxiv_ids": []}] * successes,
@@ -131,7 +131,7 @@ def test_queue_status_matrix(claimed: int, successes: int, failures: int, lost: 
 
 def test_prepared_ids_come_from_successes_and_failures_once_each() -> None:
     run = QueueRunResult(
-        mode="auto",
+        modes=("auto",),
         worker_id="w",
         successes=[{"prepared_arxiv_ids": ["a", " b ", ""]}],
         failures=[{"prepared_arxiv_ids": ["b", "c"]}, {"error": "no ids"}],

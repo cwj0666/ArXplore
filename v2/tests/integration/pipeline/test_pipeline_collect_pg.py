@@ -154,7 +154,11 @@ async def test_backfill_collects_missing_days_newest_first_and_skips_existing(po
         "failures": [],
         "stopped_reason": "batch_complete",
     }
-    assert await probe.scalar("SELECT count(*) FROM prepare_jobs") == 0
+    queued = await probe.rows("SELECT mode, source, target_date, raw_revision, status FROM prepare_jobs ORDER BY id")
+    assert queued == [
+        {"mode": "backfill", "source": "backfill", "target_date": day, "raw_revision": 1, "status": "pending"}
+        for day in (date(2026, 9, 19), date(2026, 9, 17), date(2026, 9, 16))
+    ]
     state = await pipeline_state.load_pipeline_state(pool, pipeline=BACKFILL_PIPELINE)
     assert state is not None
     assert state.values == {

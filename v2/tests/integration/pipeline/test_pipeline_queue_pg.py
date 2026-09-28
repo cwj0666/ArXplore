@@ -70,7 +70,12 @@ async def test_a_paper_failure_fails_the_job_for_a_backoff_retry(pool, probe, po
         "1 of 3 paper(s) failed (success=2, failure=1); first error: RuntimeError: parser exploded on 2604.00002"
     )
     assert run.failures == [
-        {"date": "2026-04-07", "error": job["error"], "prepared_arxiv_ids": ["2604.00001", "2604.00003"]}
+        {
+            "date": "2026-04-07",
+            "mode": "auto",
+            "error": job["error"],
+            "prepared_arxiv_ids": ["2604.00001", "2604.00003"],
+        }
     ]
     assert run.prepared_arxiv_ids() == ["2604.00001", "2604.00003"]
 
@@ -96,7 +101,7 @@ async def test_a_date_level_error_fails_the_job_with_the_message(pool, probe, po
     run = await consume_prepare_queue(_context(pool, kit), pool, policy=policy, worker_id="w1")
 
     assert run.status == "failed"
-    assert run.failures == [{"date": "2026-04-07", "error": "raw store down"}]
+    assert run.failures == [{"date": "2026-04-07", "mode": "auto", "error": "raw store down"}]
     assert (await _job(probe, job_id))["error"] == "raw store down"
 
 
@@ -164,7 +169,9 @@ async def test_a_lost_claim_at_heartbeat_stops_before_any_paper(pool, probe, pol
 
     assert parser.parsed == []
     assert run.status == "claim_lost"
-    assert run.lost_claims == [{"date": "2026-04-07", "job_id": job_id, "claim_generation": 1, "stage": "heartbeat"}]
+    assert run.lost_claims == [
+        {"date": "2026-04-07", "mode": "auto", "job_id": job_id, "claim_generation": 1, "stage": "heartbeat"}
+    ]
     assert (await _job(probe, job_id))["status"] == "processing"
 
 
@@ -248,3 +255,38 @@ async def test_jobs_are_claimed_oldest_date_first_up_to_the_limit(pool, policy, 
     run = await consume_prepare_queue(_context(pool, kit), pool, policy=policy, worker_id="w1", max_jobs_per_run=1)
 
     assert run.claimed_dates == ["2026-04-07"]
+
+
+async def _seed_backfill(pool: Any, kit: Any, target_date: date, arxiv_ids: list[str]) -> int:
+    saved = await raw.save_daily_papers(pool, target_date=target_date, payload=[kit.hf_item(i) for i in arxiv_ids])
+    queued = await jobs.enqueue(
+        pool, target_date=target_date, mode="backfill", source="backfill", raw_revision=saved.revision
+    )
+    return queued.job_id
+
+
+async def test_backfill_jobs_wait_unless_their_mode_is_consumed(pool, probe, policy, kit) -> None:
+    job_id = await _seed_backfill(pool, kit, APRIL_7, ["2604.00001"])
+
+    run = await consume_prepare_queue(_context(pool, kit), pool, policy=policy, worker_id="w1")
+
+    assert run.status == "no_op"
+    assert (await _job(probe, job_id))["status"] == "pending"
+
+
+async def test_auto_jobs_are_claimed_before_older_backfill_jobs(pool, probe, policy, kit) -> None:
+    backfill_id = await _seed_backfill(pool, kit, APRIL_7, ["2604.00001"])
+    auto_id = await _seed(pool, kit, APRIL_8, ["2604.00002"])
+
+    run = await consume_prepare_queue(
+        _context(pool, kit), pool, policy=policy, worker_id="w1", modes=("auto", "backfill"), max_jobs_per_run=2
+    )
+
+    assert run.status == "success"
+    assert [(entry["date"], entry["mode"]) for entry in run.successes] == [
+        ("2026-04-08", "auto"),
+        ("2026-04-07", "backfill"),
+    ]
+    assert run.as_dict()["modes"] == ["auto", "backfill"]
+    assert (await _job(probe, auto_id))["status"] == "done"
+    assert (await _job(probe, backfill_id))["status"] == "done"

@@ -14,6 +14,7 @@ from arxplore.db.repositories import jobs
 from arxplore.domain.jobs import DEFAULT_JOB_MODE, QueuePolicy
 from arxplore.embedding import EmbeddingClient
 from arxplore.parsing.layout_client import LayoutParserClient
+from arxplore.pipeline.backfill import BACKFILL_JOB_MODE
 from arxplore.pipeline.embed import Embedder, EmbeddingBudget, embed_after_prepare
 from arxplore.pipeline.prepare.paper import HttpPdfSource, PdfFulltextParser, PrepareContext
 from arxplore.pipeline.prepare.run import consume_prepare_queue
@@ -41,6 +42,11 @@ class WorkerOptions:
     skip_embed: bool = False
     embedding: EmbeddingBudget = field(default_factory=EmbeddingBudget)
     wait_timeout_seconds: float = DEFAULT_WAIT_TIMEOUT_SECONDS
+    consume_backfill: bool = False
+
+    @property
+    def modes(self) -> tuple[str, ...]:
+        return (DEFAULT_JOB_MODE, BACKFILL_JOB_MODE) if self.consume_backfill else (DEFAULT_JOB_MODE,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +71,7 @@ async def run_worker_once(runtime: WorkerRuntime, options: WorkerOptions) -> dic
         runtime.pool,
         policy=runtime.policy,
         worker_id=options.worker_id,
-        mode=DEFAULT_JOB_MODE,
+        modes=options.modes,
         max_jobs_per_run=options.max_jobs_per_run,
         max_papers=options.max_papers,
         force=options.force,

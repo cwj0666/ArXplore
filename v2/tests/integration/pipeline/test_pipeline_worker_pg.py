@@ -258,3 +258,19 @@ async def test_the_loop_waits_briefly_after_a_failure_and_not_after_a_success(po
 
     assert statuses == ["success", "failed", "no_op"]
     assert waits == [30.0]
+
+
+async def test_backfill_jobs_are_prepared_and_embedded_when_enabled(pool, probe, policy, kit, fake_openai) -> None:
+    saved = await raw.save_daily_papers(pool, target_date=APRIL_7, payload=[kit.hf_item("2604.00009")])
+    await jobs.enqueue(pool, target_date=APRIL_7, mode="backfill", source="backfill", raw_revision=saved.revision)
+    embedder = _embedder(fake_openai)
+
+    idle = await run_worker_once(_runtime(pool, policy, kit, embedder), WorkerOptions(skip_embed=True))
+    result = await run_worker_once(_runtime(pool, policy, kit, embedder), WorkerOptions(consume_backfill=True))
+    await embedder.aclose()
+
+    assert idle["status"] == "no_op"
+    assert result["status"] == "success"
+    assert result["successes"][0]["mode"] == "backfill"
+    assert result["embed"]["per_arxiv"][0]["arxiv_id"] == "2604.00009"
+    assert await _missing_embeddings(probe) == 0

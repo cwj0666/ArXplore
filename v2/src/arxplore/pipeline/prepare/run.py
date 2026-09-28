@@ -193,7 +193,7 @@ def job_heartbeat(pool: AnyPool, token: ClaimToken) -> Heartbeat:
 
 @dataclass(slots=True)
 class QueueRunResult:
-    mode: str
+    modes: tuple[str, ...]
     worker_id: str
     claimed_dates: list[str] = field(default_factory=list)
     successes: list[dict[str, Any]] = field(default_factory=list)
@@ -232,6 +232,7 @@ class QueueRunResult:
         self.lost_claims.append(
             {
                 "date": job.target_date.isoformat(),
+                "mode": job.mode,
                 "job_id": job.job_id,
                 "claim_generation": job.claim_generation,
                 "stage": stage,
@@ -242,7 +243,7 @@ class QueueRunResult:
         return {
             "stage": "consume_prepare_queue",
             "status": self.status,
-            "mode": self.mode,
+            "modes": list(self.modes),
             "worker_id": self.worker_id,
             "claimed_dates": list(self.claimed_dates),
             "claimed_count": len(self.claimed_dates),
@@ -255,10 +256,11 @@ class QueueRunResult:
         }
 
 
-def _success_entry(result: DatePrepareResult) -> dict[str, Any]:
+def _success_entry(job: ClaimedJob, result: DatePrepareResult) -> dict[str, Any]:
     counts = result.counts()
     return {
         "date": result.target_date.isoformat(),
+        "mode": job.mode,
         "saved_papers": counts["saved_papers"],
         "saved_fulltexts": counts["saved_fulltexts"],
         "saved_chunks": counts["saved_chunks"],
@@ -296,7 +298,12 @@ async def run_claimed_job(
             if not await jobs.fail(pool, token, policy=policy, error=error_summary):
                 run.record_lost_claim(job, stage="fail")
             run.failures.append(
-                {"date": target_date, "error": error_summary, "prepared_arxiv_ids": result.prepared_arxiv_ids}
+                {
+                    "date": target_date,
+                    "mode": job.mode,
+                    "error": error_summary,
+                    "prepared_arxiv_ids": result.prepared_arxiv_ids,
+                }
             )
             return
         if not await jobs.complete(pool, token, result=result.job_result()):
@@ -308,9 +315,19 @@ async def run_claimed_job(
     except Exception as exc:
         if not await jobs.fail(pool, token, policy=policy, error=str(exc)):
             run.record_lost_claim(job, stage="fail")
-        run.failures.append({"date": target_date, "error": str(exc)})
+        run.failures.append({"date": target_date, "mode": job.mode, "error": str(exc)})
         return
-    run.successes.append(_success_entry(result))
+    run.successes.append(_success_entry(job, result))
+
+
+async def claim_next_job(
+    pool: AnyPool, *, policy: QueuePolicy, modes: Sequence[str], worker_id: str
+) -> ClaimedJob | None:
+    for mode in modes:
+        job = await jobs.claim(pool, policy=policy, mode=mode, worker_id=worker_id)
+        if job is not None:
+            return job
+    return None
 
 
 async def consume_prepare_queue(
@@ -319,14 +336,14 @@ async def consume_prepare_queue(
     *,
     policy: QueuePolicy,
     worker_id: str,
-    mode: str = DEFAULT_JOB_MODE,
+    modes: Sequence[str] = (DEFAULT_JOB_MODE,),
     max_jobs_per_run: int = 1,
     max_papers: int | None = None,
     force: bool = False,
 ) -> QueueRunResult:
-    run = QueueRunResult(mode=mode, worker_id=worker_id)
+    run = QueueRunResult(modes=tuple(modes), worker_id=worker_id)
     for _ in range(max(1, max_jobs_per_run)):
-        job = await jobs.claim(pool, policy=policy, mode=mode, worker_id=worker_id)
+        job = await claim_next_job(pool, policy=policy, modes=modes, worker_id=worker_id)
         if job is None:
             break
         run.claimed_dates.append(job.target_date.isoformat())

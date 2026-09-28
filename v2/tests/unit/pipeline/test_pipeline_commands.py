@@ -41,6 +41,7 @@ def test_worker_defaults_match_the_legacy_cli(captured_worker: list[tuple[Worker
         skip_embed=False,
         embedding=EmbeddingBudget(chunks_per_round=200, max_rounds_per_paper=100, backlog_chunks=400),
         wait_timeout_seconds=120.0,
+        consume_backfill=False,
     )
 
 
@@ -76,6 +77,18 @@ def test_worker_options_are_normalized_like_the_legacy_worker(
     assert (options.max_jobs_per_run, options.max_papers, options.force, options.skip_embed) == (1, None, True, True)
     assert options.embedding == EmbeddingBudget(chunks_per_round=200, max_rounds_per_paper=100, backlog_chunks=0)
     assert options.wait_timeout_seconds == 15.0
+
+
+def test_backfill_jobs_are_consumed_when_the_setting_is_on(
+    captured_worker: list[tuple[WorkerOptions, bool]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PREPARE_BACKFILL_ENABLED", "true")
+
+    result = runner.invoke(app, ["worker"])
+
+    assert result.exit_code == 0, result.output
+    assert captured_worker[0][0].consume_backfill is True
+    assert captured_worker[0][0].modes == ("auto", "backfill")
 
 
 def test_the_new_embedding_option_names_are_accepted(captured_worker: list[tuple[WorkerOptions, bool]]) -> None:

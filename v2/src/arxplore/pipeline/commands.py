@@ -128,6 +128,7 @@ def register_worker(app: typer.Typer) -> None:
         ] = DEFAULT_WAIT_TIMEOUT_SECONDS,
     ) -> None:
         configure_logging()
+        settings = get_settings()
         options = WorkerOptions(
             worker_id=worker_id.strip() or DEFAULT_WORKER_NAME,
             max_jobs_per_run=max(1, max_jobs_per_run),
@@ -140,9 +141,10 @@ def register_worker(app: typer.Typer) -> None:
                 backlog_chunks=max(0, embed_backlog_budget),
             ),
             wait_timeout_seconds=max(0.0, wait_timeout_seconds),
+            consume_backfill=settings.prepare_backfill_enabled,
         )
         try:
-            exit_code = asyncio.run(run_worker(get_settings(), options, loop=loop))
+            exit_code = asyncio.run(run_worker(settings, options, loop=loop))
         except (MigrationError, ValueError) as exc:
             raise _fail(str(exc)) from exc
         raise typer.Exit(code=exit_code)
