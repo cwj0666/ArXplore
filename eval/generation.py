@@ -347,7 +347,7 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
 
 
 def render_readme_table(aggregates: Sequence[GenerationAggregate]) -> str:
-    """README Evaluation의 생성 품질 표와 같은 모양(전체 언어, 모드별 평균). 계산하지 않은 지표는 `-`."""
+    """docs/EVALUATION.md 생성 품질 표와 같은 모양(전체 언어, 모드별 평균). 계산하지 않은 지표는 `-`."""
     lines = [README_TABLE_HEADER, "| --- | --- | --- | --- | --- |"]
     for row in aggregates:
         if row.subset != "all":

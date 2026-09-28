@@ -31,7 +31,7 @@ def _metric_label(name: str) -> str:
 
 
 def render_readme_table(aggregates: Sequence[AggregateRow]) -> str:
-    """README Evaluation 표와 같은 모양(전체 언어, 기본 3방식)."""
+    """README·docs/EVALUATION.md 평가 표와 같은 모양(전체 언어, 기본 3방식)."""
     by_method = {row.method: row for row in aggregates if row.subset == "all"}
     lines = [README_TABLE_HEADER, "| --- | --- | --- | --- | --- | --- |"]
     for method in BASE_METHODS:

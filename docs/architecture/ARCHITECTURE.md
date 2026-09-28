@@ -281,3 +281,10 @@ LangSmith trace metadata에 쓰는 stage 이름은 다음과 같다.
 - `translation`, `rag_answer`, `analyze_paper_detail`, `paper_detail_document`는 `build_analysis_trace_config`의 허용 목록에만 있고 현재 이 stage로 trace를 남기는 호출 경로는 없다
 
 적재·큐 상태는 PostgreSQL에서 직접 확인한다. 예: `SELECT status, count(*) FROM prepare_jobs GROUP BY status;`, `SELECT count(*) FROM paper_chunks c LEFT JOIN paper_embeddings e ON e.chunk_id = c.id WHERE e.chunk_id IS NULL;`
+
+## 12. 기술적 결정과 트레이드오프
+
+- **PostgreSQL 단일 저장소**: raw payload(JSONB)·파이프라인 상태, 정제 데이터, 벡터, 작업 큐, AI 결과 캐시를 한 DB에 둡니다. raw 저장과 prepare 작업 등록을 한 트랜잭션으로 묶을 수 있고, 별도 메시지 브로커 없이 `SKIP LOCKED`와 `LISTEN/NOTIFY`로 큐를 만들 수 있어 운영할 대상이 줄어듭니다. 대신 벡터 인덱스와 FTS 튜닝을 직접 챙겨야 하고, 규모가 커지면 분리를 검토해야 합니다.
+- **서버/로컬 worker 분리**: 서버는 항상 켜진 수집·저장만 맡고, GPU가 필요한 파싱은 로컬 worker가 서버 DB에 직접 적재합니다. 서버에 GPU가 없어도 되지만, 로컬 worker가 꺼져 있으면 수집분이 처리되지 않고 Tailscale 연결에 의존합니다.
+- **3단 파서 폴백**: HURIDOCS 레이아웃 분석이 섹션 구조를 가장 잘 살리지만 GPU 컨테이너와 긴 처리 시간이 필요합니다. 실패하면 pypdf, 그것도 실패하면 초록으로 내려가 최소한의 청크는 남깁니다. 폴백 결과가 기존 PDF 본문을 덮지 않도록 막아 두었습니다.
+- **AI 결과 캐시 키**: 개요는 `arxiv_id` 단독 기본키(모델은 기록용), 상세 요약은 `(arxiv_id, model)` 유일 제약입니다. 모든 방문자가 캐시를 공유하므로 같은 논문을 다시 열 때 LLM을 부르지 않습니다. 대신 프롬프트를 바꿔도 기존 캐시를 무효화할 버전 정보가 없고, 한 방문자가 만든 결과를 모두가 봅니다.
