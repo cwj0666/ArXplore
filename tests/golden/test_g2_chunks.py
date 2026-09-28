@@ -5,9 +5,13 @@ import pytest
 from tests.golden import g2_chunks
 from tests.golden.store import diff, format_problems, read_golden, resolve_golden
 
-GOLDEN_FILE = resolve_golden(g2_chunks.GOLDEN_PATH)
-GOLDEN = read_golden(GOLDEN_FILE) if GOLDEN_FILE.is_file() else {"papers": {}}
+ORIGINAL_FILE = g2_chunks.GOLDEN_PATH
+ORIGINAL = read_golden(ORIGINAL_FILE) if ORIGINAL_FILE.is_file() else {"papers": {}}
+GOLDEN_FILE = resolve_golden(ORIGINAL_FILE)
+GOLDEN = ORIGINAL if GOLDEN_FILE == ORIGINAL_FILE else read_golden(GOLDEN_FILE)
 PAPER_IDS = sorted(GOLDEN["papers"])
+CORPUS_PAPERS = 275
+CORPUS_CHUNKS = 16010
 
 
 @pytest.fixture(scope="module")
@@ -27,16 +31,28 @@ def _first_difference(expected: list[dict[str, Any]], actual: list[dict[str, Any
     return None if len(expected) == len(actual) else min(len(expected), len(actual))
 
 
-def test_golden_covers_the_corpus():
+def test_original_golden_covers_the_corpus():
+    assert ORIGINAL.get("format") == g2_chunks.FORMAT
+    assert len(ORIGINAL["papers"]) == CORPUS_PAPERS
+    assert sum(len(entry["chunks"]) for entry in ORIGINAL["papers"].values()) == CORPUS_CHUNKS
+
+
+def test_original_golden_matches_the_database_chunks(database_chunks):
+    original_ids = sorted(ORIGINAL["papers"])
+    assert sorted(database_chunks) == original_ids
+    problems = [
+        arxiv_id for arxiv_id in original_ids if ORIGINAL["papers"][arxiv_id]["chunks"] != database_chunks[arxiv_id]
+    ]
+    assert not problems, f"original golden differs from paper_chunks for {len(problems)} papers: {problems[:10]}"
+
+
+def test_golden_in_use_covers_every_paper_with_the_same_inputs():
     assert GOLDEN.get("format") == g2_chunks.FORMAT
-    assert len(PAPER_IDS) == 275
-    assert sum(len(entry["chunks"]) for entry in GOLDEN["papers"].values()) == 16010
-
-
-def test_golden_matches_the_database_chunks(database_chunks):
-    assert sorted(database_chunks) == PAPER_IDS
-    problems = [arxiv_id for arxiv_id in PAPER_IDS if GOLDEN["papers"][arxiv_id]["chunks"] != database_chunks[arxiv_id]]
-    assert not problems, f"golden differs from paper_chunks for {len(problems)} papers: {problems[:10]}"
+    assert PAPER_IDS == sorted(ORIGINAL["papers"])
+    assert [arxiv_id for arxiv_id in PAPER_IDS if not GOLDEN["papers"][arxiv_id]["chunks"]] == []
+    assert {arxiv_id: GOLDEN["papers"][arxiv_id]["input_sha256"] for arxiv_id in PAPER_IDS} == {
+        arxiv_id: ORIGINAL["papers"][arxiv_id]["input_sha256"] for arxiv_id in PAPER_IDS
+    }
 
 
 @pytest.mark.parametrize("arxiv_id", PAPER_IDS)
