@@ -6,6 +6,7 @@ from fastapi import Request
 from arxplore.api.errors import RateLimitExceededError
 from arxplore.api.ratelimit import DETAIL_SCOPE, LLM_SCOPE, RateLimiter
 from arxplore.api.security import TrustedOrigins, check_csrf, client_ip
+from arxplore.api.services.arxiv_cache import CachedArxivSearch
 from arxplore.api.services.chat import ChatService
 from arxplore.api.services.detail import ArxivSearch
 from arxplore.api.services.generation import GenerationService
@@ -25,6 +26,8 @@ class ApiServices:
 
     async def reset_state(self) -> None:
         await self.rate_limiter.reset()
+        if isinstance(self.arxiv, CachedArxivSearch):
+            self.arxiv.clear()
 
 
 def get_services(request: Request) -> ApiServices:

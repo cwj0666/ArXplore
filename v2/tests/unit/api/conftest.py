@@ -15,6 +15,7 @@ import pytest
 from arxplore.api.app import build_services, create_app
 from arxplore.api.dependencies import ApiServices
 from arxplore.api.ratelimit import MemoryCounterStore, RateLimiter
+from arxplore.api.services.arxiv_cache import CachedArxivSearch
 from arxplore.config import AppSettings, RetrievalMode
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import AiOverview, DetailedSummary, Paper, PaperFulltext
@@ -266,7 +267,7 @@ class Harness:
             settings,
             store=self.store,
             retriever=self.retriever,
-            arxiv=self.arxiv,
+            arxiv=CachedArxivSearch(self.arxiv),
             rate_limiter=rate_limiter,
             chat_models=ChatModelFactory.from_settings(settings),
             tracer=Tracer.disabled(),

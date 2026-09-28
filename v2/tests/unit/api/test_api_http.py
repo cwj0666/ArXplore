@@ -305,6 +305,27 @@ class TestListAndDetail:
             "relation_score": 0.0,
         }
 
+    async def test_external_search_results_are_reused_across_detail_requests(
+        self, harness: Any, ids: dict[str, str]
+    ) -> None:
+        harness.arxiv.papers = [ArxivPaper(arxiv_id="2609.90001", title="Fake External", abstract="x")]
+
+        async with harness.client() as client:
+            first = await client.get(f"/papers/{ids['main']}/detail.json")
+            second = await client.get(f"/papers/{ids['main']}/detail.json")
+
+        assert first.json() == second.json()
+        assert len(harness.arxiv.queries) == 1
+
+    async def test_failed_external_searches_are_retried(self, harness: Any, ids: dict[str, str]) -> None:
+        harness.arxiv.error = ConnectionError("arxiv down")
+
+        async with harness.client() as client:
+            await client.get(f"/papers/{ids['main']}/detail.json")
+            await client.get(f"/papers/{ids['main']}/detail.json")
+
+        assert len(harness.arxiv.queries) == 2
+
     async def test_detail_not_found_and_errors(self, harness: Any) -> None:
         async with harness.client() as client:
             missing = await client.get("/papers/2609.99999/detail.json")

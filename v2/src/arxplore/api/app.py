@@ -32,6 +32,7 @@ from arxplore.api.security import (
     TrustedHostMiddleware,
     TrustedOrigins,
 )
+from arxplore.api.services.arxiv_cache import CachedArxivSearch
 from arxplore.api.services.chat import ChatService
 from arxplore.api.services.detail import ArxivSearch
 from arxplore.api.services.generation import GenerationService
@@ -122,7 +123,7 @@ async def open_services(settings: AppSettings) -> AsyncIterator[ApiServices]:
                 settings,
                 store=PostgresPaperStore(pool),
                 retriever=Retriever(pool, embedder, RetrievalConfig.from_settings(settings)),
-                arxiv=arxiv,
+                arxiv=CachedArxivSearch(arxiv),
                 rate_limiter=rate_limiter,
             )
         finally:

@@ -42,3 +42,11 @@
 - 옛 구현은 개요·핵심 포인트·상세 요약 체인에 runtime을 넘기지 않아 운영에서도 `runtime:dev`로 기록했다. 이제 다섯 stage(`paper_overview`, `paper_key_findings`, `summary`, `paper_chat`, `agent_chat`) 모두 `RUNTIME` 설정을 해석한 값(`development`→`dev`, `prod`→`production`, 모르는 값→`dev`)을 태그 `runtime:`과 메타데이터 `runtime`에 쓴다.
 - v2 추적 모듈에는 제품 경로의 다섯 stage만 있다. 옛 허용 목록에만 있던 `translation`, `rag_answer`, `paper_detail_document`, `analyze_paper_detail`은 옮기지 않았다. 파이프라인 stage는 P3 파이프라인 이식에서 다룬다.
 - G5·G4 차이: 없음. 추적은 가짜 서버 요청 본문에 들어가지 않고 골든 실행에서는 꺼져 있다.
+
+## F24: 외부 arXiv 검색 async와 결과 캐시
+
+- 상세 요청 안의 arXiv 관련 논문 검색은 이식 단계부터 `httpx.AsyncClient`로 돈다(`arxplore.sources.arxiv`, 0530057 이전 커밋). 옛 구현처럼 요청 스레드를 막지 않는다. URL, 파라미터, 8초 타임아웃, 1회 시도는 옛 값 그대로다.
+- F24는 결과 캐시를 더한다. 키는 (질의, max_results)이고 성공한 결과만 1시간 보관한다. 최대 512개이며 오래 안 쓴 것부터 버린다. 실패는 캐시하지 않아 다음 요청이 다시 시도한다.
+- 같은 키로 동시에 들어온 요청은 검색 1회를 함께 기다린다. 한 요청이 끊겨도 공유 검색은 끝까지 돈다.
+- 골든 하네스의 `reset_state`가 시나리오마다 캐시를 비운다.
+- G5·G4 차이: 없음. 외부 검색을 하는 두 시나리오(`detail_external_related`, `detail_external_failure`)는 요청이 1번씩이다.
