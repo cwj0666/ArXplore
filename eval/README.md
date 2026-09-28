@@ -22,6 +22,8 @@ retriever 코드는 수정하지 않고, 공개 함수(`search_paper_contexts*`)
 | `eval/fusion_sweep.py` | 융합 설정 가족, 재생 채점, ko/en 쌍 클러스터 단위 반복 층화 CV, 1-SE 선택, 클러스터 paired bootstrap, 리포트 |
 | `scripts/eval_dump_candidates.py` | 질의별 융합 입력과 제품 hybrid 결과 기록 → `eval/cache/candidates_<timestamp>.jsonl.gz` (DB + 키) |
 | `scripts/eval_fusion_sweep.py` | 캐시로 `gate`(재생 = 제품) / `sweep`(설정 비교) → `eval/results/fusion_<timestamp>.{md,csv}` (DB·키 불필요) |
+| `eval/latency.py` | hybrid 지연 A/B(채널 순차 vs 병렬): 계측 래퍼, 쌍 교대 실행, 질의별 중앙값 차이의 ko/en 쌍 클러스터 bootstrap, 반복 간 동일성 기준선 |
+| `scripts/eval_hybrid_latency.py` | 지연 A/B 실행 → `eval/results/latency_<timestamp>.{md,csv}` (DB + 키, 임베딩만 호출) |
 
 단위 테스트(`tests/unit/test_eval_metrics.py`, `tests/unit/test_eval_runner.py`, `tests/unit/test_eval_generation.py`,
 `tests/unit/test_eval_cases.py`)는 가짜 retriever·생성 함수·점수기로 전 과정을 돌리며 DB·API 키가 필요 없습니다.
