@@ -6,7 +6,7 @@
 
 작업을 시작하기 전에 아래 문서를 먼저 읽는다.
 
-1. `README.md` (주요 기능, 검색 요약, 알려진 한계 요약). 상세 수치와 한계 전체는 `docs/EVALUATION.md`
+1. `README.md` (Features, Architecture, Evaluation 요약). 상세 수치와 알려진 한계는 `docs/EVALUATION.md`
 2. `docs/architecture/ARCHITECTURE.md`
 3. `docs/management/ROLES.md`
 4. `docs/management/WORKFLOW.md`
