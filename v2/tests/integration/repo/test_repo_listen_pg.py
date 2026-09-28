@@ -133,3 +133,20 @@ async def test_job_listener_uses_the_settings_and_role(repo_database, probe) -> 
 
     assert application_name == "arxplore-worker-listener"
     assert received == ["auto:2026-04-07"]
+
+
+async def test_a_cancelled_wait_leaves_the_listener_usable(listener, probe) -> None:
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(listener.wait(10.0), timeout=0.2)
+    await _notify(probe, "auto:2026-04-07")
+    assert await listener.wait(5.0) == ["auto:2026-04-07"]
+
+    waiting = asyncio.create_task(listener.wait(10.0))
+    await asyncio.sleep(0.1)
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+
+    assert listener.connected
+    await _notify(probe, "auto:2026-04-08")
+    assert await listener.wait(5.0) == ["auto:2026-04-08"]
