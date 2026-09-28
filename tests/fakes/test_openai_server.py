@@ -436,3 +436,18 @@ def test_cli_serves_requests():
     assert base_url.startswith("http://127.0.0.1:")
     assert base_url.endswith("/v1")
     assert completion.choices[0].message.content == expected_reply("cli")
+
+
+def test_strict_embedding_table_rejects_unknown_inputs_and_records_every_input(server):
+    vectors = EmbeddingVectors({embedding_key("known"): [1.0, 0.0]}, strict=True)
+    server.embedding_handler = vectors
+    client = make_client(server)
+
+    known = client.embeddings.create(model="text-embedding-3-large", input="known", dimensions=2)
+    with pytest.raises(openai.BadRequestError):
+        client.embeddings.create(model="text-embedding-3-large", input=["known", "unknown"], dimensions=2)
+
+    assert known.data[0].embedding == [1.0, 0.0]
+    assert vectors.inputs == ["known", "known", "unknown"]
+    [error] = server.errors
+    assert (error.path, error.status) == (EMBEDDINGS_PATH, 400)

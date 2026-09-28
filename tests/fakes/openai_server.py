@@ -373,9 +373,11 @@ def write_embedding_table(
 
 
 class EmbeddingVectors:
-    def __init__(self, table: Mapping[str, Sequence[float]] | None = None) -> None:
+    def __init__(self, table: Mapping[str, Sequence[float]] | None = None, *, strict: bool = False) -> None:
         self.table = dict(table or {})
+        self.strict = strict
         self.table_hits = 0
+        self.inputs: list[Any] = []
         self._lock = threading.Lock()
 
     def __call__(self, request: Mapping[str, Any]) -> list[list[float]]:
@@ -383,8 +385,12 @@ class EmbeddingVectors:
         vectors: list[list[float]] = []
         for item in embedding_inputs(request):
             key = embedding_key(item)
+            with self._lock:
+                self.inputs.append(item)
             stored = self.table.get(key)
             if stored is None:
+                if self.strict:
+                    raise FakeHTTPError(400, f"no stored vector for input {key[:12]}", record_error=True)
                 vectors.append(deterministic_unit_vector(key, dimensions))
                 continue
             if len(stored) != dimensions:

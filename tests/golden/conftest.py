@@ -1,14 +1,14 @@
-import socket
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests.golden import environment
 from tests.golden.adapters import AdapterUnavailable, implementation_name, load_parser_adapter
+from tests.golden.environment import loopback_only
 from tests.golden.store import GOLDEN_ROOT
-
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -18,26 +18,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.golden)
 
 
-def _reject_non_loopback(address: Any) -> None:
-    if isinstance(address, tuple) and address and address[0] not in LOOPBACK_HOSTS:
-        raise RuntimeError(f"golden tests may only open loopback connections, not {address!r}")
-
-
 @pytest.fixture(autouse=True)
-def loopback_only_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    original_connect = socket.socket.connect
-    original_connect_ex = socket.socket.connect_ex
-
-    def connect(sock: socket.socket, address: Any) -> None:
-        _reject_non_loopback(address)
-        return original_connect(sock, address)
-
-    def connect_ex(sock: socket.socket, address: Any) -> int:
-        _reject_non_loopback(address)
-        return original_connect_ex(sock, address)
-
-    monkeypatch.setattr(socket.socket, "connect", connect)
-    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+def loopback_only_network() -> Iterator[None]:
+    with loopback_only():
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -56,3 +40,19 @@ def require_input() -> Callable[[Path, str], Path]:
         return path
 
     return check
+
+
+@pytest.fixture(scope="session")
+def golden_database_url() -> str:
+    url = environment.database_url()
+    if not environment.database_reachable(url):
+        pytest.skip(f"golden database unreachable: {url} (set {environment.DATABASE_URL_ENV})")
+    return url
+
+
+@pytest.fixture(scope="session")
+def golden_pg_options() -> str:
+    options = environment.READ_ONLY_OPTION
+    if os.environ.get(environment.EXACT_SEARCH_ENV, "").strip():
+        options = f"{options} {environment.EXACT_SEARCH_OPTION}"
+    return options
