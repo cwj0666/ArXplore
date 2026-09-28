@@ -249,19 +249,20 @@ def _as_float(value: float | Decimal | None) -> float:
 
 def lexical_hit_from_row(query: str, row: Mapping[str, Any]) -> RetrievalHit:
     paper_title = str(row["paper_title"] or "")
+    paper_abstract = str(row["paper_abstract"] or "")
     chunk_text = str(row["chunk_text"] or "")
     return RetrievalHit(
         chunk_id=int(row["chunk_id"]),
         arxiv_id=str(row["arxiv_id"]),
         chunk_index=int(row["chunk_index"]),
         paper_title=paper_title,
-        paper_abstract="",
+        paper_abstract=paper_abstract,
         chunk_text=chunk_text,
         section_title=str(row["section_title"] or ""),
         content_role=str(row["content_role"] or ""),
         method="lexical",
         score=_as_float(row["score"]),
-        snippet=build_search_snippet(query, chunk_text, str(row["paper_abstract"] or ""), paper_title),
+        snippet=build_search_snippet(query, chunk_text, paper_abstract, paper_title),
         lexical=LexicalScores(
             fts_score=_as_float(row["fts_score"]),
             ilike_bonus=_as_float(row["ilike_bonus"]),

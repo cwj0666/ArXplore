@@ -1,7 +1,14 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
-from arxplore.domain.retrieval import ChannelFusion, FusionScores, RetrievalChannel, RetrievalHit
+from arxplore.domain.retrieval import (
+    ChannelFusion,
+    FusionScores,
+    LexicalScores,
+    RetrievalChannel,
+    RetrievalHit,
+    VectorScores,
+)
 
 LEXICAL_WEIGHT = 0.35
 
@@ -26,12 +33,30 @@ def fusion_lexical_hits(lexical: Sequence[RetrievalHit], vector: Sequence[Retrie
 class _FusedEntry:
     first: RetrievalHit
     snippet: str
+    paper_abstract: str
     score: float = 0.0
     channels: dict[RetrievalChannel, ChannelFusion] = field(default_factory=dict)
+    lexical: LexicalScores | None = None
+    vector: VectorScores | None = None
+
+    def add(self, channel: RetrievalChannel, hit: RetrievalHit) -> None:
+        self.paper_abstract = self.paper_abstract or hit.paper_abstract
+        if channel == "lexical":
+            self.lexical = hit.lexical
+        else:
+            self.vector = hit.vector
 
     def fused_hit(self) -> RetrievalHit:
-        fusion = FusionScores(lexical=self.channels.get("lexical"), vector=self.channels.get("vector"))
-        return replace(self.first, method="hybrid", score=self.score, snippet=self.snippet, fusion=fusion)
+        return replace(
+            self.first,
+            method="hybrid",
+            score=self.score,
+            snippet=self.snippet,
+            paper_abstract=self.paper_abstract,
+            lexical=self.lexical,
+            vector=self.vector,
+            fusion=FusionScores(lexical=self.channels.get("lexical"), vector=self.channels.get("vector")),
+        )
 
 
 def fuse_hybrid_hits(
@@ -52,7 +77,10 @@ def fuse_hybrid_hits(
         for index, hit in enumerate(hits):
             entry = entries.get(hit.chunk_id)
             if entry is None:
-                entry = entries[hit.chunk_id] = _FusedEntry(first=hit, snippet=hit.snippet)
+                entry = entries[hit.chunk_id] = _FusedEntry(
+                    first=hit, snippet=hit.snippet, paper_abstract=hit.paper_abstract
+                )
+            entry.add(channel, hit)
             entry.channels[channel] = ChannelFusion(
                 rank=index + 1,
                 score=hit.score,

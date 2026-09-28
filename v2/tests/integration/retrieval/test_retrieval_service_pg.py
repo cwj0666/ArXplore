@@ -92,8 +92,12 @@ async def test_hybrid_is_used_when_an_embedder_is_available(seeder, retrieval_po
     assert embedder.calls == [["diffusion transformer"]]
     assert [context.hit.method for context in result.contexts] == ["hybrid"] * len(result.contexts)
     assert result.contexts[0].hit.chunk_id == ids[("2601.00001", 0)]
-    assert result.contexts[0].hit.fusion is not None
-    assert result.contexts[0].hit.fusion.matched_methods == ("lexical", "vector")
+    top = result.contexts[0].hit
+    assert top.fusion is not None
+    assert top.fusion.matched_methods == ("lexical", "vector")
+    assert top.lexical is not None
+    assert top.vector is not None
+    assert top.paper_abstract == "We scale latent diffusion with transformer backbones."
     assert [observation.result for observation in observations] == [result]
 
 

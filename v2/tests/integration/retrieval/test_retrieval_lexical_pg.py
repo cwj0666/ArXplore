@@ -138,6 +138,7 @@ async def test_lexical_candidates_come_from_the_generated_columns(seeder, retrie
     assert [hit.arxiv_id for hit in results] == ["2601.00001", "2601.00001"]
     assert results[0].chunk_id == ids[("2601.00001", 0)]
     assert results[0].score > results[1].score
+    assert results[0].paper_abstract == "We scale latent diffusion with transformer backbones."
     assert results[0].lexical is not None
     assert {field.name for field in fields(results[0].lexical)} == LEXICAL_BREAKDOWN_FIELDS
     assert results[0].lexical.strict_match is True

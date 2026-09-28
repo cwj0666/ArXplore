@@ -166,3 +166,32 @@ class TestConvexFusion:
         fused = fuse_hybrid_hits(same_paper, vector)
 
         assert _ids(apply_paper_diversity(fused, limit=3)) == [4, 3, 10]
+
+
+class TestMergedHitFields:
+    def test_a_hit_found_by_both_channels_keeps_both_score_breakdowns(self, make_hit) -> None:
+        lexical = [make_hit(1, score=1.5, abstract="")]
+        vector = [make_hit(1, method="vector", score=0.9, abstract="We scale latent diffusion.")]
+
+        merged = fuse_hybrid_hits(lexical, vector)[0]
+
+        assert merged.lexical == lexical[0].lexical
+        assert merged.vector == vector[0].vector
+        assert merged.paper_abstract == "We scale latent diffusion."
+
+    def test_the_lexical_abstract_is_kept_when_present(self, make_hit) -> None:
+        lexical = [make_hit(1, score=1.5, abstract="Lexical row abstract.")]
+        vector = [make_hit(1, method="vector", score=0.9, abstract="Vector row abstract.")]
+
+        assert fuse_hybrid_hits(lexical, vector)[0].paper_abstract == "Lexical row abstract."
+
+    def test_single_channel_hits_carry_only_their_own_scores(self, make_hit) -> None:
+        lexical = [make_hit(1, score=1.5)]
+        vector = [make_hit(2, method="vector", score=0.9)]
+
+        fused = {hit.chunk_id: hit for hit in fuse_hybrid_hits(lexical, vector)}
+
+        assert fused[1].lexical is not None
+        assert fused[1].vector is None
+        assert fused[2].lexical is None
+        assert fused[2].vector is not None
