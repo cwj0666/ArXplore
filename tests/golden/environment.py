@@ -66,20 +66,23 @@ def database_reachable(url: str, timeout: float = 1.0) -> bool:
         return False
 
 
-def connect(url: str) -> Any:
+def connect(url: str, *, options: str | None = None) -> Any:
+    extra = {"options": options} if options else {}
     try:
         import psycopg
     except ModuleNotFoundError:
         import psycopg2
 
-        connection = psycopg2.connect(url)
+        connection = psycopg2.connect(url, **extra)
         connection.autocommit = True
         return connection
-    return psycopg.connect(url, autocommit=True)
+    return psycopg.connect(url, autocommit=True, **extra)
 
 
-def query_rows(url: str, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
-    connection = connect(url)
+def query_rows(
+    url: str, sql: str, params: tuple[Any, ...] = (), *, options: str | None = READ_ONLY_OPTION
+) -> list[tuple[Any, ...]]:
+    connection = connect(url, options=options)
     try:
         cursor = connection.cursor()
         cursor.execute(sql, params)
