@@ -5,7 +5,9 @@ from psycopg import AsyncCursor, sql
 from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 
-from arxplore.db.pool import AnyPool, ConnectionSource, use_connection
+from arxplore.config import AppSettings
+from arxplore.db.listen import ChannelListener
+from arxplore.db.pool import AnyPool, ConnectionSource, settings_conninfo, use_connection
 from arxplore.domain.jobs import (
     DEFAULT_JOB_MODE,
     DEFAULT_JOB_SOURCE,
@@ -22,6 +24,7 @@ from arxplore.domain.jobs import (
 )
 
 JOB_CHANNEL = "arxplore_prepare_jobs"
+LISTENER_ROLE = "worker-listener"
 
 _ENQUEUE_KEEP_STATE = (
     "(prepare_jobs.status = 'processing' "
@@ -396,3 +399,12 @@ async def requeue_failed(
         RequeuedJob(job_id=int(row["id"]), target_date=row["target_date"], attempt_count=int(row["attempt_count"] or 0))
         for row in rows
     ]
+
+
+def job_listener(settings: AppSettings, *, role: str = LISTENER_ROLE) -> ChannelListener:
+    return ChannelListener(
+        settings_conninfo(settings),
+        JOB_CHANNEL,
+        role=role,
+        connect_timeout=settings.postgres_connect_timeout,
+    )
