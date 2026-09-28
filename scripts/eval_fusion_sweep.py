@@ -89,7 +89,8 @@ def run_gate(queries, *, k: int, config=None) -> bool:
         print(f"  replayed: {item.replayed}", file=sys.stderr)
     if mismatches:
         print(
-            f"게이트 실패: 기록 시점 설정 재생이 live hybrid와 다른 질의 {len(mismatches)}/{len(queries)}개", file=sys.stderr
+            f"게이트 실패: 기록 시점 설정 재생이 live hybrid와 다른 질의 {len(mismatches)}/{len(queries)}개",
+            file=sys.stderr,
         )
         return False
     print(f"게이트 통과: 기록 시점 설정 재생이 live hybrid와 {len(queries)}개 질의 모두 같습니다.", file=sys.stderr)
