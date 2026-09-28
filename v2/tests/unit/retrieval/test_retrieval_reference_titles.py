@@ -4,14 +4,11 @@ import re
 
 import pytest
 
-from arxplore.parsing.roles import is_references_section_title
-from arxplore.retrieval.lexical import (
-    REFERENCES_SECTION_TITLE_SQL_REGEX,
-    REFERENCES_TITLE_PATTERN,
-    ascii_case_insensitive,
-)
+from arxplore.parsing.roles import is_references_section_title, references_section_title_sql_regex
+from arxplore.retrieval.lexical import build_lexical_candidates_query
 
-SQL_RULE = re.compile(REFERENCES_SECTION_TITLE_SQL_REGEX)
+SQL_REGEX = references_section_title_sql_regex()
+SQL_RULE = re.compile(SQL_REGEX)
 
 REFERENCE_TITLES = [
     "References",
@@ -90,11 +87,14 @@ def test_sql_rule_agrees_with_the_chunk_role_rule() -> None:
     assert disagreements == []
 
 
-def test_case_folding_leaves_escapes_alone() -> None:
-    assert ascii_case_insensitive(r"works\s+cited") == r"[Ww][Oo][Rr][Kk][Ss]\s+[Cc][Ii][Tt][Ee][Dd]"
-    assert re.fullmatch(ascii_case_insensitive(REFERENCES_TITLE_PATTERN), "REFERENCES AND notes")
-
-
 def test_the_rule_can_be_inlined_in_a_sql_string_literal() -> None:
-    assert "'" not in REFERENCES_SECTION_TITLE_SQL_REGEX
-    assert "%" not in REFERENCES_SECTION_TITLE_SQL_REGEX
+    assert "'" not in SQL_REGEX
+    assert "%" not in SQL_REGEX
+
+
+@pytest.mark.parametrize("arxiv_id", [None, "2401.00001"])
+def test_lexical_sql_penalizes_titles_with_the_chunk_role_rule(arxiv_id: str | None) -> None:
+    built = build_lexical_candidates_query("attention", limit=5, arxiv_id=arxiv_id)
+
+    assert built is not None
+    assert f"WHEN section_title ~ '{SQL_REGEX}' THEN -0.08" in built[0]

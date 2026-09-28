@@ -3,12 +3,8 @@ from dataclasses import fields
 
 import pytest
 
-from arxplore.parsing.roles import is_references_section_title
-from arxplore.retrieval.lexical import (
-    REFERENCES_SECTION_TITLE_SQL_REGEX,
-    build_lexical_candidates_query,
-    fetch_lexical_candidates,
-)
+from arxplore.parsing.roles import is_references_section_title, references_section_title_sql_regex
+from arxplore.retrieval.lexical import build_lexical_candidates_query, fetch_lexical_candidates
 from arxplore.retrieval.service import Retriever
 
 pytestmark = pytest.mark.integration
@@ -277,7 +273,7 @@ async def test_postgres_evaluates_the_title_rule_like_python(seeder) -> None:
     rows = await seeder.execute(
         "SELECT title, title ~ %s AS matched FROM unnest(%s::text[]) WITH ORDINALITY AS t(title, position) "
         "ORDER BY position",
-        (REFERENCES_SECTION_TITLE_SQL_REGEX, titles),
+        (references_section_title_sql_regex(), titles),
     )
 
     assert [row["matched"] for row in rows] == [is_references_section_title(title) for title in titles]

@@ -8,7 +8,12 @@ from psycopg.rows import dict_row
 
 from arxplore.db.pool import ConnectionSource, use_connection
 from arxplore.domain.retrieval import LexicalScores, RetrievalHit
-from arxplore.parsing.roles import FRONT_MATTER_ROLE, REFERENCES_ROLE, is_references_section_title
+from arxplore.parsing.roles import (
+    FRONT_MATTER_ROLE,
+    REFERENCES_ROLE,
+    is_references_section_title,
+    references_section_title_sql_regex,
+)
 from arxplore.retrieval.query import reference_intent_requested, requested_section_intents, section_intent_bonus
 from arxplore.retrieval.signals import looks_outline_like_text, looks_reference_like_text
 from arxplore.retrieval.snippet import build_search_snippet
@@ -19,22 +24,9 @@ MIN_PARTIAL_MATCH_POOL = 500
 PARTIAL_MATCH_POOL_PER_RESULT = 20
 FILTERED_CONTENT_ROLES = frozenset({REFERENCES_ROLE, FRONT_MATTER_ROLE})
 
-SECTION_NUMBER_PREFIX_PATTERN = r"(?:\d+(?:\.\d+)*[.)]?|[IVXLC]+[.)]?|[IVXLCivxlc]+[.)])"
-REFERENCES_TITLE_PATTERN = r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?"
-
 _LIKE_SPECIAL_CHARACTERS = re.compile(r"([\\%_])")
 _FTS_SEPARATORS = re.compile(r"[-/]+")
-_UNESCAPED_LOWERCASE_LETTER = re.compile(r"(?<!\\)[a-z]")
-
-
-def ascii_case_insensitive(pattern: str) -> str:
-    return _UNESCAPED_LOWERCASE_LETTER.sub(lambda match: f"[{match.group().upper()}{match.group()}]", pattern)
-
-
-REFERENCES_SECTION_TITLE_SQL_REGEX = (
-    rf"\A\s*(?:{SECTION_NUMBER_PREFIX_PATTERN}\s+)?[\s.:]*"
-    rf"{ascii_case_insensitive(REFERENCES_TITLE_PATTERN)}[\s.:]*\Z"
-)
+_REFERENCES_SECTION_TITLE_SQL_REGEX = references_section_title_sql_regex()
 
 _QUERY_TERMS_SQL = r"""
     SELECT
@@ -192,7 +184,7 @@ def build_lexical_candidates_query(
                 END AS section_boost,
                 CASE
                     WHEN section_title ILIKE '%%Table of Contents%%' THEN -0.12
-                    WHEN section_title ~ '{REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
+                    WHEN section_title ~ '{_REFERENCES_SECTION_TITLE_SQL_REGEX}' THEN -0.08
                     WHEN section_title = 'Front Matter' THEN -0.03
                     ELSE 0
                 END AS structural_adjustment

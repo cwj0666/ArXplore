@@ -13,12 +13,12 @@ G1 차이는 0건이다. 그래서 F05 커밋에는 변형 파일이 없다.
 - 기준 규칙은 청크 역할을 정하는 `arxplore.parsing.roles.is_references_section_title`이다. 검색의 Python 쪽(lexical 필터, vector rerank 감점)은 이미 이 함수를 쓴다.
 - 바뀐 것은 lexical SQL의 structural_adjustment(-0.08) 조건이다.
   - 옛 조건은 `section_title ~* '<정규식>'`이었다. 대소문자를 무시해서 구두점 없는 소문자 로마 숫자(`iv references`)와 로마 숫자 글자로만 된 단어(`Civil References`, `cl Bibliography`)도 번호로 보고 참고문헌 제목으로 판정했다.
-  - 새 조건은 `section_title ~ '<정규식>'`이다. 번호 접두어는 대소문자를 구분하고(대문자 로마 숫자는 구두점 선택, 소문자가 섞이면 `.` 또는 `)` 필수), 제목 단어만 `[Rr][Ee]…` 꼴로 대소문자를 무시한다. 정규식은 `lexical.REFERENCES_SECTION_TITLE_SQL_REGEX` 하나이고 Python `re`와 PostgreSQL에서 같은 뜻으로 읽힌다.
+  - 새 조건은 `section_title ~ '<정규식>'`이다. 번호 접두어는 대소문자를 구분하고(대문자 로마 숫자는 구두점 선택, 소문자가 섞이면 `.` 또는 `)` 필수), 제목 단어만 `[Rr][Ee]…` 꼴로 대소문자를 무시한다. 정규식은 `arxplore.parsing.roles.references_section_title_sql_regex()` 하나다(a02125a부터 roles에서 정의하고 lexical은 import한다). Python `re`와 PostgreSQL에서 같은 뜻으로 읽히고, `is_references_section_title`도 이 정규식으로 판정한다.
 - 확인
   - 골든 DB의 서로 다른 섹션 제목 4,855개와 합성 제목을 합친 379,877개에서 Python 함수, 새 정규식(Python `re`), 새 정규식(PostgreSQL `~`)의 판정이 모두 같았다.
   - 같은 제목 중 옛 SQL 판정이 Python 함수와 다른 것은 6,930개였고 모두 합성 제목이다.
   - 골든 DB 제목 중 SQL 판정이 바뀌는 것은 0개다. 그래서 점수와 순위가 바뀌는 청크가 없다.
-- 남는 차이는 유니코드 경계뿐이다. Python의 `str.split()`·`re.IGNORECASE`와 PostgreSQL의 `\s`·`\d` 분류가 다른 문자(줄바꿈 없는 공백 U+00A0, 비ASCII 숫자, 점 없는 i 등)를 쓴 제목은 판정이 갈릴 수 있다. 코퍼스에는 없다.
+- 남는 차이는 유니코드 경계뿐이다. Python과 PostgreSQL의 `\s`·`\d` 분류가 다른 문자(줄바꿈 없는 공백 U+00A0, 비ASCII 숫자 등)를 쓴 제목은 판정이 갈릴 수 있다. 코퍼스에는 없다. 대소문자 접기 차이(İ, ı, ſ)는 roles가 같은 정규식으로 판정하면서 없어졌다.
 
 ## F06: hybrid 병합 항목의 필드 누락
 
