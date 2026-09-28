@@ -33,6 +33,11 @@ async def _chunk_ids(probe: Any, arxiv_id: str = ARXIV_ID) -> list[int]:
     return [row["id"] for row in rows]
 
 
+async def pool_execute(pool: Any, query: str, params: tuple[Any, ...]) -> None:
+    async with pool.connection() as connection:
+        await connection.execute(query, params)
+
+
 async def test_first_prepare_saves_paper_fulltext_chunks_then_the_hash(pool, probe, kit) -> None:
     outcome = await prepare_paper(_candidate(kit), _context(pool, kit))
 
@@ -56,12 +61,39 @@ async def test_first_prepare_saves_paper_fulltext_chunks_then_the_hash(pool, pro
     assert stored["quality_metrics"]["parse_source"] == "layout_pdf"
 
 
+@pytest.mark.parametrize("new_source", ["layout_pdf", "pdf", "fallback_abstract"])
+async def test_a_final_layout_fulltext_skips_download_and_parse(pool, probe, kit, new_source) -> None:
+    first = await prepare_paper(_candidate(kit), _context(pool, kit))
+    ids_before = await _chunk_ids(probe)
+    parser = kit.FakeParser(source=new_source)
+    pdfs = kit.FakePdfSource()
+
+    outcome = await prepare_paper(_candidate(kit, upvotes=40), _context(pool, kit, parser, pdfs))
+
+    assert (outcome.skipped_unchanged, outcome.parse_skipped) == (True, True)
+    assert (pdfs.requested, parser.parsed) == ([], [])
+    assert (outcome.saved_fulltext, outcome.saved_chunks) == (0, 0)
+    assert (outcome.chunk_count, outcome.content_hash) == (first.chunk_count, first.content_hash)
+    assert outcome.as_dict()["parse_skipped"] is True
+    assert await _state(pool) == ("layout_pdf", first.content_hash, first.chunk_count)
+    assert await _chunk_ids(probe) == ids_before
+    assert await probe.scalar("SELECT upvotes FROM papers WHERE arxiv_id = %s", (ARXIV_ID,)) == 40
+
+
 @pytest.mark.parametrize(
-    "existing_source,new_source",
-    [("layout_pdf", "fallback_abstract"), ("pdf", "fallback_abstract"), ("layout_pdf", "pdf")],
+    "existing_source,new_source,clear_hash",
+    [
+        ("pdf", "fallback_abstract", False),
+        ("layout_pdf", "pdf", True),
+        ("layout_pdf", "fallback_abstract", True),
+    ],
 )
-async def test_lower_ranked_source_keeps_the_stored_fulltext(pool, probe, kit, existing_source, new_source) -> None:
+async def test_lower_ranked_source_keeps_the_stored_fulltext(
+    pool, probe, kit, existing_source, new_source, clear_hash
+) -> None:
     first = await prepare_paper(_candidate(kit), _context(pool, kit, kit.FakeParser(source=existing_source)))
+    if clear_hash:
+        await pool_execute(pool, "UPDATE paper_fulltexts SET content_hash = NULL WHERE arxiv_id = %s", (ARXIV_ID,))
     ids_before = await _chunk_ids(probe)
     lower_parser = kit.FakeParser(source=new_source)
     pdfs = kit.FakePdfSource(missing={ARXIV_ID} if new_source == "fallback_abstract" else set())
@@ -69,12 +101,25 @@ async def test_lower_ranked_source_keeps_the_stored_fulltext(pool, probe, kit, e
     outcome = await prepare_paper(_candidate(kit, upvotes=40), _context(pool, kit, lower_parser, pdfs))
 
     assert outcome.skipped_lower_rank_overwrite is True
+    assert outcome.parse_skipped is False
     assert outcome.existing_fulltext_source == existing_source
     assert (outcome.saved_fulltext, outcome.saved_chunks) == (0, 0)
     assert outcome.chunk_count == first.chunk_count
-    assert await _state(pool) == (existing_source, first.content_hash, first.chunk_count)
+    expected_hash = None if clear_hash else first.content_hash
+    assert await _state(pool) == (existing_source, expected_hash, first.chunk_count)
     assert await _chunk_ids(probe) == ids_before
     assert await probe.scalar("SELECT upvotes FROM papers WHERE arxiv_id = %s", (ARXIV_ID,)) == 40
+
+
+async def test_an_unchanged_lower_source_is_parsed_again_but_not_rewritten(pool, kit) -> None:
+    await prepare_paper(_candidate(kit), _context(pool, kit, kit.FakeParser(source="pdf")))
+    parser = kit.FakeParser(source="pdf")
+    pdfs = kit.FakePdfSource()
+
+    outcome = await prepare_paper(_candidate(kit), _context(pool, kit, parser, pdfs))
+
+    assert (outcome.skipped_unchanged, outcome.parse_skipped) == (True, False)
+    assert len(pdfs.requested) == len(parser.parsed) == 1
 
 
 async def test_lower_ranked_source_is_saved_when_no_chunks_are_stored(pool, kit) -> None:
@@ -87,11 +132,6 @@ async def test_lower_ranked_source_is_saved_when_no_chunks_are_stored(pool, kit)
     assert outcome.skipped_lower_rank_overwrite is False
     assert (outcome.saved_fulltext, outcome.saved_chunks > 0) == (1, True)
     assert (await _state(pool) or ("", None, 0))[0] == "pdf"
-
-
-async def pool_execute(pool: Any, query: str, params: tuple[Any, ...]) -> None:
-    async with pool.connection() as connection:
-        await connection.execute(query, params)
 
 
 async def test_force_overwrites_with_a_lower_ranked_source(pool, kit) -> None:
@@ -110,7 +150,7 @@ async def test_unchanged_content_skips_fulltext_and_chunk_writes(pool, probe, ki
 
     second = await prepare_paper(_candidate(kit), _context(pool, kit))
 
-    assert second.skipped_unchanged is True
+    assert (second.skipped_unchanged, second.parse_skipped) == (True, True)
     assert (second.saved_fulltext, second.saved_chunks) == (0, 0)
     assert second.chunk_count == first.chunk_count
     assert await probe.scalar("SELECT updated_at FROM paper_fulltexts WHERE arxiv_id = %s", (ARXIV_ID,)) == (
@@ -132,25 +172,40 @@ async def test_force_rewrites_unchanged_content_but_keeps_identical_chunk_ids(po
     assert await _chunk_ids(probe) == ids_before
 
 
-async def test_same_hash_from_a_different_source_is_rewritten(pool, kit) -> None:
+async def test_a_lower_source_is_parsed_again_and_upgraded(pool, kit) -> None:
     await prepare_paper(_candidate(kit), _context(pool, kit, kit.FakeParser(source="pdf")))
+    parser = kit.FakeParser(source="layout_pdf")
 
-    outcome = await prepare_paper(_candidate(kit), _context(pool, kit, kit.FakeParser(source="layout_pdf")))
+    outcome = await prepare_paper(_candidate(kit), _context(pool, kit, parser))
 
+    assert len(parser.parsed) == 1
     assert outcome.skipped_unchanged is False
     assert outcome.saved_fulltext == 1
     assert (await _state(pool) or ("", None, 0))[0] == "layout_pdf"
 
 
-async def test_changed_text_replaces_chunks_and_their_embeddings(pool, probe, kit) -> None:
-    await prepare_paper(_candidate(kit), _context(pool, kit))
+@pytest.mark.parametrize("source,force", [("pdf", False), ("layout_pdf", True)])
+async def test_changed_text_replaces_chunks_and_their_embeddings(pool, probe, kit, source, force) -> None:
+    await prepare_paper(_candidate(kit), _context(pool, kit, kit.FakeParser(source=source)))
     ids_before = await _chunk_ids(probe)
+    changed = kit.FakeParser(
+        source=source, sections_by_id={ARXIV_ID: kit.body_sections(ARXIV_ID, extra=" A new sentence.")}
+    )
+
+    outcome = await prepare_paper(_candidate(kit), _context(pool, kit, changed), force=force)
+
+    assert outcome.saved_chunks > 0
+    assert set(await _chunk_ids(probe)).isdisjoint(ids_before)
+
+
+async def test_a_final_layout_fulltext_ignores_parser_changes_until_forced(pool, probe, kit) -> None:
+    first = await prepare_paper(_candidate(kit), _context(pool, kit))
     changed = kit.FakeParser(sections_by_id={ARXIV_ID: kit.body_sections(ARXIV_ID, extra=" A new sentence.")})
 
     outcome = await prepare_paper(_candidate(kit), _context(pool, kit, changed))
 
-    assert outcome.saved_chunks > 0
-    assert set(await _chunk_ids(probe)).isdisjoint(ids_before)
+    assert outcome.parse_skipped is True
+    assert await _state(pool) == ("layout_pdf", first.content_hash, first.chunk_count)
 
 
 async def test_chunk_write_failure_leaves_the_hash_unset_so_the_retry_rewrites(pool, kit, monkeypatch) -> None:

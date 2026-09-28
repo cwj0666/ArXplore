@@ -9,6 +9,7 @@ from arxplore.pipeline.prepare.policy import (
     SaveDecision,
     compute_content_hash,
     decide_fulltext_save,
+    fulltext_is_final,
     fulltext_source_rank,
     rebuild_text_from_sections,
     repair_abstract_with_metadata,
@@ -159,3 +160,19 @@ def test_unchanged_content_needs_the_same_source_hash_and_stored_chunks() -> Non
         decide_fulltext_save(_state("layout_pdf", HASH), source="layout_pdf", content_hash=HASH, force=True)
         is SaveDecision.SAVE
     )
+
+
+@pytest.mark.parametrize(
+    "state,force,final",
+    [
+        (FulltextState(source="layout_pdf", content_hash="h", chunk_count=3), False, True),
+        (FulltextState(source="layout_pdf", content_hash="h", chunk_count=3), True, False),
+        (FulltextState(source="layout_pdf", content_hash=None, chunk_count=3), False, False),
+        (FulltextState(source="layout_pdf", content_hash="h", chunk_count=0), False, False),
+        (FulltextState(source="pdf", content_hash="h", chunk_count=3), False, False),
+        (FulltextState(source="fallback_abstract", content_hash="h", chunk_count=1), False, False),
+        (None, False, False),
+    ],
+)
+def test_only_a_complete_layout_fulltext_is_final(state: FulltextState | None, force: bool, final: bool) -> None:
+    assert fulltext_is_final(state, force=force) is final

@@ -17,6 +17,7 @@ from arxplore.pipeline.prepare.policy import (
     SaveDecision,
     compute_content_hash,
     decide_fulltext_save,
+    fulltext_is_final,
     repair_abstract_with_metadata,
     strip_result_surrogates,
 )
@@ -86,7 +87,7 @@ class PaperOutcome:
     text_length: Any
     saved_fulltext: int
     saved_chunks: int
-    content_hash: str
+    content_hash: str | None
     artifacts: JsonObject = field(default_factory=dict)
     parser_metadata: JsonObject = field(default_factory=dict)
     quality_metrics: JsonObject = field(default_factory=dict)
@@ -95,6 +96,7 @@ class PaperOutcome:
     existing_fulltext_source: str | None = None
     skipped_unchanged: bool = False
     chunks_unchanged: bool = False
+    parse_skipped: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -121,6 +123,8 @@ class PaperOutcome:
             result["skipped_unchanged"] = True
         if self.chunks_unchanged:
             result["chunks_unchanged"] = True
+        if self.parse_skipped:
+            result["parse_skipped"] = True
         return result
 
 
@@ -134,6 +138,25 @@ async def prepare_paper(candidate: PrepareCandidate, context: PrepareContext, *,
         raise ValueError(EMPTY_CANDIDATE_MESSAGE)
     db = context.db
     paper = candidate.to_upsert()
+
+    stored = await fulltexts.get_fulltext_state(db, arxiv_id)
+    if stored is not None and fulltext_is_final(stored, force=force):
+        await papers.save_paper(db, paper)
+        return PaperOutcome(
+            arxiv_id=arxiv_id,
+            title=candidate.title,
+            primary_category=candidate.primary_category,
+            chunk_count=stored.chunk_count,
+            fulltext_source=stored.source,
+            fallback_used=False,
+            section_count=None,
+            text_length=None,
+            saved_fulltext=0,
+            saved_chunks=0,
+            content_hash=stored.content_hash,
+            skipped_unchanged=True,
+            parse_skipped=True,
+        )
 
     pdf_content = await context.pdfs.fetch(candidate.pdf_url)
     parsed = await context.parser.parse(pdf_content, fallback_text=candidate.abstract)

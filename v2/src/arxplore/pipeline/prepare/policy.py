@@ -13,6 +13,7 @@ from arxplore.text import collapse_whitespace, strip_surrogates
 
 FULLTEXT_SOURCE_RANK: Mapping[str, int] = {LAYOUT_SOURCE: 3, PYPDF_SOURCE: 2, FALLBACK_SOURCE: 1}
 UNRANKED_SOURCE = 0
+TOP_SOURCE_RANK = max(FULLTEXT_SOURCE_RANK.values())
 ABSTRACT_SECTION_KEY = "abstract"
 UNTITLED_SECTION_TITLES = frozenset({"", FRONT_MATTER_TITLE, FULL_TEXT_TITLE})
 SECTION_TEXT_KEYS = ("title", "text")
@@ -100,3 +101,13 @@ def decide_fulltext_save(
     if existing.source == source and existing.content_hash == content_hash and has_chunks:
         return SaveDecision.SKIP_UNCHANGED
     return SaveDecision.SAVE
+
+
+def fulltext_is_final(existing: FulltextState | None, *, force: bool) -> bool:
+    if force or existing is None:
+        return False
+    return (
+        fulltext_source_rank(existing.source) == TOP_SOURCE_RANK
+        and existing.chunk_count > 0
+        and existing.content_hash is not None
+    )
