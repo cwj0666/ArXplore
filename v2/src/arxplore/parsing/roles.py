@@ -10,11 +10,9 @@ BODY_ROLE = "body"
 FIGURE_CAPTION_ROLE = "figure_caption"
 TABLE_LIKE_ROLE = "table_like"
 
-_SECTION_NUMBER_PREFIX = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?|[IVXLC]+[.)]?|(?i:[ivxlc]+)[.)])\s+")
-_REFERENCES_TITLE = re.compile(
-    r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?",
-    re.IGNORECASE,
-)
+SECTION_NUMBER_PREFIX_PATTERN = r"(?:\d+(?:\.\d+)*[.)]?|[IVXLC]+[.)]?|[IVXLCivxlc]+[.)])"
+REFERENCES_TITLE_PATTERN = r"(?:references?|bibliography|works\s+cited|literature\s+cited)(?:\s+and\s+notes)?"
+_UNESCAPED_LOWERCASE_LETTER = re.compile(r"(?<!\\)[a-z]")
 
 _BODY_SECTION_KEYWORDS = (
     "introduction",
@@ -66,11 +64,22 @@ _TABLE_OR_FIGURE_MENTION = re.compile(r"\b(?:Table|Figure)\s+\d+\b")
 _CAPITALIZED_WORD = re.compile(r"\b[A-Z][A-Za-z-]{2,}\b")
 
 
+def ascii_case_insensitive(pattern: str) -> str:
+    return _UNESCAPED_LOWERCASE_LETTER.sub(lambda match: f"[{match.group().upper()}{match.group()}]", pattern)
+
+
+def references_section_title_sql_regex() -> str:
+    return (
+        rf"\A\s*(?:{SECTION_NUMBER_PREFIX_PATTERN}\s+)?[\s.:]*"
+        rf"{ascii_case_insensitive(REFERENCES_TITLE_PATTERN)}[\s.:]*\Z"
+    )
+
+
+_REFERENCES_SECTION_TITLE = re.compile(references_section_title_sql_regex())
+
+
 def is_references_section_title(title: str) -> bool:
-    normalized = collapse_whitespace(str(title or ""))
-    normalized = _SECTION_NUMBER_PREFIX.sub("", normalized, count=1)
-    normalized = normalized.strip(" .:")
-    return bool(_REFERENCES_TITLE.fullmatch(normalized))
+    return _REFERENCES_SECTION_TITLE.search(str(title or "")) is not None
 
 
 def section_role(section_title: str) -> str:

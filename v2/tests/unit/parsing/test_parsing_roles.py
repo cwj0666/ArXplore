@@ -1,11 +1,17 @@
+import re
+
 import pytest
 
 from arxplore.parsing.roles import (
+    REFERENCES_TITLE_PATTERN,
+    SECTION_NUMBER_PREFIX_PATTERN,
+    ascii_case_insensitive,
     chunk_role,
     is_references_section_title,
     looks_like_body_chunk,
     looks_like_reference_chunk,
     looks_like_table_like_chunk,
+    references_section_title_sql_regex,
     refined_chunk_role,
     section_role,
 )
@@ -53,6 +59,54 @@ def test_is_references_section_title_ignores_letter_prefixes():
     assert is_references_section_title(" references. ")
     assert not is_references_section_title("A References")
     assert not is_references_section_title("Mix References")
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("IV References", True),
+        ("IV. REFERENCES", True),
+        ("iv. References", True),
+        ("iii) references", True),
+        ("iv references", False),
+        ("Civil References", False),
+        ("cl Bibliography", False),
+        ("7\nReferences", True),
+        ("1 . References", True),
+        ("References and Notes", True),
+        ("works  cited", True),
+        ("1.References", False),
+        ("References 1", False),
+        ("\u0130. References", False),
+        ("Reference\u017f", False),
+    ],
+)
+def test_section_number_prefixes_are_case_sensitive_and_title_words_ascii_case_insensitive(title, expected):
+    assert is_references_section_title(title) is expected
+
+
+def test_the_python_rule_is_the_sql_regex():
+    sql_rule = re.compile(references_section_title_sql_regex())
+    titles = ["References", "7 References", "IV. REFERENCES", "iv references", "3.2 Reference Model", "", "  :. "]
+
+    assert [sql_rule.search(title) is not None for title in titles] == [
+        is_references_section_title(title) for title in titles
+    ]
+    assert SECTION_NUMBER_PREFIX_PATTERN in references_section_title_sql_regex()
+    assert ascii_case_insensitive(REFERENCES_TITLE_PATTERN) in references_section_title_sql_regex()
+
+
+def test_the_sql_regex_can_be_inlined_in_a_sql_string_literal():
+    regex = references_section_title_sql_regex()
+
+    assert "'" not in regex
+    assert "%" not in regex
+    assert regex.isascii()
+
+
+def test_ascii_case_insensitive_leaves_escapes_alone():
+    assert ascii_case_insensitive(r"works\s+cited") == r"[Ww][Oo][Rr][Kk][Ss]\s+[Cc][Ii][Tt][Ee][Dd]"
+    assert re.fullmatch(ascii_case_insensitive(REFERENCES_TITLE_PATTERN), "REFERENCES AND notes")
 
 
 def test_chunk_role_follows_non_body_section_roles():
