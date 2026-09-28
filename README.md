@@ -46,8 +46,6 @@ flowchart LR
 - 서버는 수집과 저장을 맡고, GPU가 필요한 PDF 파싱은 로컬 worker가 처리해 서버 DB에 적재합니다.
 - 재처리는 멱등하게 동작해 같은 내용이면 청크와 임베딩을 그대로 유지합니다.
 
-자세한 구조는 [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)에 있습니다.
-
 ## Tech Stack
 
 | 영역 | 기술 |
@@ -61,7 +59,9 @@ flowchart LR
 
 ## Evaluation
 
-논문 275편과 평가 질의 111개로 측정했습니다.
+평가 데이터: 논문 275편, 질의 111개
+
+**검색 품질**
 
 | 검색 방식 | Hit@1 | Hit@10 | MRR@10 |
 | --- | --- | --- | --- |
@@ -69,15 +69,14 @@ flowchart LR
 | 벡터 검색 | 0.748 | 0.883 | 0.789 |
 | **하이브리드** | **0.766** | **0.883** | **0.805** |
 
+**답변 품질 (RAGAS)**
+
 | 답변 모드 | Faithfulness | Answer Relevancy |
 | --- | --- | --- |
 | AI 어시스턴트 | 0.865 | 0.667 |
 | 논문 챗 | 0.913 | 0.563 |
 
-- 하이브리드 검색은 두 채널을 병렬로 실행해 p50 282ms로 응답합니다.
-- 답변 품질은 RAGAS로 채점했고, 검색 결과에 없는 링크를 만든 답변은 없었습니다.
-
-측정 방법과 상세 결과는 [EVALUATION.md](./docs/EVALUATION.md)에 있습니다.
+**응답 지연**: 하이브리드 검색 p50 282ms (전문·벡터 검색 병렬 실행)
 
 ## Getting Started
 
@@ -92,8 +91,6 @@ docker compose --profile local-db up -d --build    # http://localhost
 pytest tests/unit
 cd frontend && npm ci && npm run typecheck && npm run build
 ```
-
-원격 서버 모드, compose 프로필, CI 구성은 [SETUP.md](./docs/SETUP.md)에 있습니다.
 
 ## Project Structure
 
@@ -114,21 +111,14 @@ docs/               아키텍처, 평가, 실행 문서와 worklog
 | 문서 | 내용 |
 | --- | --- |
 | [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) | 런타임 구성, 모듈 구조, 테이블 스키마, 기술적 결정 |
-| [EVALUATION.md](./docs/EVALUATION.md) | 검색·답변 품질, 응답 지연, 로드맵 |
+| [EVALUATION.md](./docs/EVALUATION.md) | 검색·답변 품질, 응답 지연, 측정 방법 |
 | [SETUP.md](./docs/SETUP.md) | 실행 방법, compose 프로필, 테스트와 CI |
 | [Worklog](./docs/worklog/README.md) | 설계 결정 기록과 [트러블슈팅](./docs/worklog/TROUBLESHOOTING.md) |
 | [eval/README.md](./eval/README.md) | 평가 하니스 사용법과 지표 정의 |
 
-## Roadmap
-
-- 한국어 질의용 전문 검색
-- 수식·표 파싱 GPU 가속
-- 파싱 전 중복 논문 건너뛰기
-- ASGI 전환과 TLS 배포
-
 ## Team
 
-SK네트웍스 AI 캠프 팀 프로젝트(2026.03–04)로 시작해, 이후 개인 프로젝트로 고도화하고 있습니다.
+SK네트웍스 AI 캠프 팀 프로젝트입니다.
 
 | 이름 | 역할 |
 | --- | --- |

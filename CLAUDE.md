@@ -234,7 +234,7 @@ Vite 프록시는 `frontend/vite.config.ts`에서 `arxplore-django:8001`로 포�
 
 ## Reference Docs
 
-1. `README.md` — 소개 화면, Features, Architecture, Tech Stack, Evaluation 요약, Getting Started, Roadmap, Team. 단서·측정 조건·한계는 README에 쓰지 않고 `docs/EVALUATION.md`와 worklog에 둔다
+1. `README.md` — 소개 화면, Features, Architecture, Tech Stack, Evaluation 요약, Getting Started, Team. 현재 상태만 쓰고, 로드맵·단서·측정 조건·한계·날짜·근거 링크는 README에 쓰지 않고 `docs/EVALUATION.md`와 worklog에 둔다
 2. `docs/architecture/ARCHITECTURE.md` — 시스템 구조, DB 스키마, 큐 동작, 기술적 결정과 트레이드오프
    - `docs/EVALUATION.md` — 검색·생성 평가 상세, 지연, 알려진 한계와 로드맵 전체
    - `docs/SETUP.md` — 실행 방법, compose 프로필, 운영 기본값, 테스트와 CI
