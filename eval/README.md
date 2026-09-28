@@ -21,7 +21,7 @@ retriever 코드는 수정하지 않고, 공개 함수(`search_paper_contexts*`)
 | `eval/candidate_cache.py` | hybrid 융합 입력 캐시(gzip JSONL) 형식·기록·재생·게이트 |
 | `eval/fusion_sweep.py` | 융합 설정 가족, 재생 채점, ko/en 쌍 클러스터 단위 반복 층화 CV, 1-SE 선택, 클러스터 paired bootstrap, 리포트 |
 | `scripts/eval_dump_candidates.py` | 질의별 융합 입력과 제품 hybrid 결과 기록 → `eval/cache/candidates_<timestamp>.jsonl.gz` (DB + 키) |
-| `scripts/eval_fusion_sweep.py` | 캐시로 `gate`(재생 = 제품) / `sweep`(설정 비교) → `eval/results/fusion_<timestamp>.{md,csv}` (DB·키 불필요) |
+| `scripts/eval_fusion_sweep.py` | 캐시로 `gate`(재생 = 제품) / `sweep`(설정 비교) / `convex`(점수 convex combination 비교) → `eval/results/fusion_<timestamp>.{md,csv}` (DB·키 불필요) |
 | `eval/latency.py` | hybrid 지연 A/B(채널 순차 vs 병렬): 계측 래퍼, 쌍 교대 실행, 질의별 중앙값 차이의 ko/en 쌍 클러스터 bootstrap, 반복 간 동일성 기준선 |
 | `scripts/eval_hybrid_latency.py` | 지연 A/B 실행 → `eval/results/latency_<timestamp>.{md,csv}` (DB + 키, 임베딩만 호출) |
 
@@ -148,12 +148,16 @@ python scripts/eval_fusion_sweep.py gate --cache eval/cache/candidates_<timestam
 
 # 3) 비교 — 게이트를 먼저 돌리고 통과할 때만 결과를 쓴다
 python scripts/eval_fusion_sweep.py sweep --cache eval/cache/candidates_<timestamp>.jsonl.gz
+
+# 4) 점수 수준 융합 비교 — sweep 설정에 convex combination 가족을 더하고 pick을 그 가족 안에서 고른다
+python scripts/eval_fusion_sweep.py convex --cache eval/cache/candidates_<timestamp>.jsonl.gz
 ```
 
 - 캐시 후보에는 `chunk_id`, `arxiv_id`, `score`, `content_role`, `section_title`, lexical `strict_match`만 남습니다. 순서가 채널 순위입니다. 머리말에 기록 커밋, k, 코퍼스 요약, 질의셋 digest, 기록 시점 기본 융합 설정이 있습니다. 질의 111개 기준 수백 KB라 결과와 함께 커밋합니다(chunk_id는 코퍼스에 묶여 있어 캐시 없이는 같은 비교를 재현할 수 없음).
 - 설정 가족: R0(vector·lexical 단독, 캐시 후보에 다양성만), F0(표준 RRF, k ∈ {10, 20, 40, 60, 100}), F1(고정 가중치 w_lex ∈ {0, 0.1, …, 1} × k), F2(confidence 선형 w_min ∈ {0.1, …, 0.9} × tau ∈ {0.2, 0.3, 0.5, 0.8} × k), C(현재 규칙), CF(현재 규칙의 방법 가중 × 품질 가중 × 교차 보너스 2^3). F1·F2는 품질 가중 on/off × 교차 보너스 {0, 0.015}와 교차합니다. REF는 비교용(부분 일치 행을 버리지 않는 C, 예전 `hybrid_plainrrf`)입니다.
 - 클러스터: id 끝의 `-ko`/`-en`만 다른 질의 쌍은 한 클러스터(`cluster_key`), 짝이 없는 질의는 혼자 한 클러스터입니다. CV는 쌍을 같은 fold에 두고 클러스터 단위로 층화(source × 쌍/lang)하며, bootstrap은 클러스터를 복원 추출하고 질의 평균을 통계량으로 씁니다. 리포트 표에 질의 수와 클러스터 수를 함께 적습니다.
 - 선택: 주 지표 논문 MRR@k. 클러스터 층화 5-fold × 10회 반복 CV로 가족별 성능(학습 fold에서 고른 설정을 남긴 fold에서 잰 값)을 내고, 선택 가능한 가족 전체에서 전체 데이터 MRR 최고 설정의 CV SE 안에 드는 설정 중 상수가 가장 적은 설정을 고릅니다(1-SE 규칙, 상수 수는 `count_parameters`). 클러스터 paired bootstrap 10,000회로 pick − C, pick − F0(k=60), pick − vector 단독, C − F0(k=60), C − vector 단독의 ΔMRR·Δhit@1 95% 구간을 전체와 manual 부분집합에서 냅니다.
+- `convex`(사전 등록 `docs/worklog/phase-4/2026-09-29_01_*.md`): 채널 점수를 정규화해 `α·φ_lex + (1−α)·φ_vec`로 합칩니다(`weighting="convex"`, α는 lexical 가중치, Bruch et al., TOIS 2023). CC는 부분 일치 행 제거를 켠 정규화 3종(per-query min-max `mm`, 이론 하한 min-max `tmm` lexical 0 / vector −1, strict 행 하한 `tmms` 0.56 / −1) × α ∈ {0, 0.05, …, 0.95}이고 선택 대상입니다. CCK는 제거를 끈 `mm`·`tmm` 보조 가족으로 보고만 합니다. 한 채널에만 나온 후보의 다른 채널 점수는 0, 상한 − 하한 ≤ 0이면 채널 후보가 모두 1.0입니다. 리포트에 규칙 (4)(pick − 표준 RRF), 정규화별 CV, α 곡선, 퇴화 수, 질의별 차이가 붙습니다. 제품 기본값은 바뀌지 않습니다.
 - R0는 hybrid 입력(채널당 `hybrid_branch_limit(k)`개)에 다양성만 적용한 순위라 제품 vector/lexical 단독 검색(저장소 요청 수가 다름)과 다를 수 있습니다. 기록 스크립트가 다른 질의 수를 참고로 출력합니다.
 - 옵션: `--seed 20260928`, `--folds 5`, `--repeats 10`, `--resamples 10000`, `--out-dir eval/results`. seed가 같으면 결과가 같습니다.
 

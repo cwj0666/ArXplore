@@ -11,9 +11,11 @@ import pytest
 from src.integrations.hybrid_fusion import (
     DEFAULT_HYBRID_FUSION,
     STANDARD_RRF_FUSION,
+    STRICT_LEXICAL_SCORE_FLOOR,
     HybridFusionConfig,
     apply_paper_diversity,
     fuse_hybrid_candidates,
+    normalize_channel_scores,
     resolve_hybrid_method_weights,
 )
 from src.integrations.paper_repository import STRICT_MATCH_BONUS
@@ -506,3 +508,138 @@ class TestStandardRrfPreset:
         fused = fuse_hybrid_candidates("policy loss", lexical, vector, STANDARD_RRF_FUSION)
 
         assert _ids(fused) == _ids(_legacy_plain_rrf([lexical, vector])) == [2, 1]
+
+
+def _convex(alpha: float, normalization: str = "minmax", **overrides) -> HybridFusionConfig:
+    return HybridFusionConfig(weighting="convex", convex_alpha=alpha, score_normalization=normalization, **overrides)
+
+
+class TestNormalizeChannelScores:
+    def test_minmax_spans_zero_to_one(self):
+        assert normalize_channel_scores([3.0, 2.0, 1.0], "minmax") == pytest.approx([1.0, 0.5, 0.0])
+
+    def test_theoretical_uses_the_floor_instead_of_the_minimum(self):
+        assert normalize_channel_scores([0.8, 0.2], "theoretical", -1.0) == pytest.approx([1.0, 1.2 / 1.8])
+        assert normalize_channel_scores([2.0, 1.0], "theoretical", 0.0) == pytest.approx([1.0, 0.5])
+
+    def test_scores_below_the_floor_stay_monotone(self):
+        normalized = normalize_channel_scores([1.0, 0.5], "theoretical", STRICT_LEXICAL_SCORE_FLOOR)
+        assert normalized[0] == 1.0 and normalized[1] < 0
+
+    @pytest.mark.parametrize("normalization", ["minmax", "theoretical"])
+    def test_single_candidate_is_degenerate_and_gets_one(self, normalization):
+        assert normalize_channel_scores([0.42], normalization, 0.0) == [1.0]
+
+    def test_all_equal_scores_get_one_under_minmax(self):
+        assert normalize_channel_scores([0.7, 0.7, 0.7], "minmax") == [1.0, 1.0, 1.0]
+
+    def test_theoretical_with_the_maximum_at_or_below_the_floor_is_degenerate(self):
+        assert normalize_channel_scores([0.3, 0.2], "theoretical", STRICT_LEXICAL_SCORE_FLOOR) == [1.0, 1.0]
+
+    def test_empty_channel(self):
+        assert normalize_channel_scores([], "minmax") == []
+
+    def test_unknown_normalization_is_rejected(self):
+        with pytest.raises(ValueError):
+            normalize_channel_scores([1.0], "zscore")
+
+    def test_strict_floor_is_the_bonus_minus_the_lowest_sql_adjustments(self):
+        assert STRICT_LEXICAL_SCORE_FLOOR == pytest.approx(STRICT_MATCH_BONUS - 0.24 - 0.08 - 0.12) == 0.56
+
+
+class TestConvexFusion:
+    def test_missing_channel_scores_count_as_zero_and_ties_break_on_method_count(self):
+        lexical = [_candidate(1, 2.0), _candidate(2, 1.0)]
+        vector = [_candidate(2, 0.9), _candidate(3, 0.5)]
+
+        fused = fuse_hybrid_candidates("policy loss", lexical, vector, _convex(0.5))
+
+        # 1: 0.5 × 1 + 0.5 × 0(결측), 2: 0.5 × 0 + 0.5 × 1, 3: 0.5 × 0(결측) + 0.5 × 0
+        assert [candidate["score"] for candidate in fused] == pytest.approx([0.5, 0.5, 0.0])
+        assert _ids(fused) == [2, 1, 3]
+
+    def test_combination_weights_each_channel_by_alpha(self):
+        lexical = [_candidate(1, 3.0), _candidate(2, 1.0)]
+        vector = [_candidate(2, 0.9), _candidate(3, 0.6), _candidate(4, 0.3)]
+
+        fused = fuse_hybrid_candidates("policy loss", lexical, vector, _convex(0.3))
+
+        by_id = {candidate["chunk_id"]: candidate["score"] for candidate in fused}
+        assert by_id == pytest.approx({1: 0.3, 2: 0.7, 3: 0.35, 4: 0.0})
+        assert _ids(fused) == [2, 3, 1, 4]
+
+    def test_theoretical_normalization_uses_the_configured_floors(self):
+        lexical = [_candidate(1, 2.0), _candidate(2, 1.0)]
+        vector = [_candidate(2, 0.5), _candidate(3, 0.2)]
+        config = _convex(0.4, "theoretical", score_floors=(0.0, -1.0))
+
+        fused = fuse_hybrid_candidates("policy loss", lexical, vector, config)
+
+        by_id = {candidate["chunk_id"]: candidate["score"] for candidate in fused}
+        assert by_id == pytest.approx({1: 0.4, 2: 0.4 * 0.5 + 0.6, 3: 0.6 * 1.2 / 1.5})
+
+    def test_empty_lexical_channel_keeps_the_vector_order(self):
+        vector = [_candidate(5, 0.9), _candidate(3, 0.7), _candidate(9, 0.2)]
+
+        fused = fuse_hybrid_candidates("policy loss", [], vector, _convex(0.3))
+
+        assert _ids(fused) == [5, 3, 9]
+        assert [candidate["score"] for candidate in fused] == pytest.approx([0.7, 0.7 * 0.5 / 0.7, 0.0])
+
+    def test_alpha_endpoints_follow_one_channel(self):
+        lexical = [_candidate(1, 2.0), _candidate(2, 1.5), _candidate(3, 1.0)]
+        vector = [_candidate(3, 0.9), _candidate(2, 0.6), _candidate(4, 0.3)]
+
+        assert _ids(fuse_hybrid_candidates("q", lexical, vector, _convex(0.0)))[:3] == [3, 2, 4]
+        assert _ids(fuse_hybrid_candidates("q", lexical, vector, _convex(1.0)))[:3] == [1, 2, 3]
+
+    def test_single_lexical_candidate_after_dropping_partial_rows_is_degenerate(self):
+        lexical = [_lexical(1, STRICT_MATCH_BONUS + 0.2, strict=True), _lexical(2, 0.9, strict=False)]
+        vector = [_candidate(3, 0.9), _candidate(4, 0.5)]
+
+        fused = fuse_hybrid_candidates("policy loss", lexical, vector, _convex(0.5))
+
+        assert _ids(fused) == [3, 1, 4]
+        assert fused[1]["score_breakdown"]["lexical_normalized_score"] == 1.0
+        assert 2 not in _ids(fused)
+
+    def test_partial_rows_join_the_normalization_when_the_filter_is_off(self):
+        lexical = [_lexical(1, STRICT_MATCH_BONUS + 0.2, strict=True), _lexical(2, 0.2, strict=False)]
+        vector = [_candidate(3, 0.9)]
+
+        fused = fuse_hybrid_candidates("policy loss", lexical, vector, _convex(0.5, drop_partial_lexical=False))
+
+        by_id = {candidate["chunk_id"]: candidate for candidate in fused}
+        assert by_id[2]["score"] == 0.0
+        assert by_id[1]["score"] == pytest.approx(0.5)
+
+    def test_rrf_only_terms_are_not_applied(self):
+        fused = fuse_hybrid_candidates("q", [_candidate(1, 2.0)], [_candidate(1, 0.9)], _convex(0.5, overlap_bonus=0.5))
+
+        assert fused[0]["score"] == pytest.approx(1.0)
+        breakdown = fused[0]["score_breakdown"]
+        assert "cross_method_overlap_bonus" not in breakdown
+        assert "lexical_rrf_score" not in breakdown and "lexical_quality_weight" not in breakdown
+        assert breakdown["lexical_normalized_score"] == breakdown["vector_normalized_score"] == 1.0
+        assert breakdown["lexical_weight"] == breakdown["vector_weight"] == 0.5
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_convex_fields_do_not_change_rank_fusion(self, seed):
+        inputs = synthetic_fusion_case(seed)
+        tweaked = HybridFusionConfig(convex_alpha=0.9, score_normalization="theoretical", score_floors=(0.3, 0.0))
+
+        assert fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], tweaked) == (
+            fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"])
+        )
+
+    def test_product_default_is_still_the_rule_based_rrf(self):
+        assert DEFAULT_HYBRID_FUSION.weighting == "rules"
+        assert DEFAULT_HYBRID_FUSION == HybridFusionConfig()
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"convex_alpha": 1.5}, {"convex_alpha": -0.1}, {"score_normalization": "zscore"}],
+    )
+    def test_invalid_convex_config_is_rejected(self, overrides):
+        with pytest.raises(ValueError):
+            HybridFusionConfig(weighting="convex", **overrides)

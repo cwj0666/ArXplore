@@ -8,11 +8,21 @@ DB·임베딩 호출이 없으므로 같은 입력이면 같은 출력이다.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from src.integrations.paper_repository import STRICT_MATCH_BONUS
 
-WEIGHTING_MODES = ("rules", "static", "confidence_linear")
+WEIGHTING_MODES = ("rules", "static", "confidence_linear", "convex")
+SCORE_NORMALIZATIONS = ("minmax", "theoretical")
+# convex 융합의 theoretical min-max 하한(Bruch et al., TOIS 2023의 φ_tmm). 근거: docs/worklog/phase-4/2026-09-29_01_*.md
+# lexical: SQL이 score > 0.01인 행만 남기고 그 뒤 보너스는 0 이상이라 전달되는 점수는 모두 0보다 크다.
+LEXICAL_SCORE_FLOOR = 0.0
+# strict 행만의 lexical infimum: STRICT_MATCH_BONUS + ts_rank_cd(≥ 0) + ilike(≥ 0) + content_role 최솟값(references −0.24,
+# toc는 이미 제외) + section_boost 최솟값(−0.08) + structural 최솟값(−0.12). `build_lexical_candidates_query` 참고.
+STRICT_LEXICAL_SCORE_FLOOR = round(STRICT_MATCH_BONUS - 0.24 - 0.08 - 0.12, 6)
+# vector: 코사인 유사도의 infimum. 채널 점수에 더해지는 가산 보정은 무시한다(하한이 상수면 정규화는 단조 affine이다).
+VECTOR_SCORE_FLOOR = -1.0
 _QUERY_STOPWORDS = frozenset({"the", "and", "for", "with", "from", "that", "this"})
 
 
@@ -26,6 +36,9 @@ class HybridFusionConfig:
     - `rules`: 질의 토큰 수, lexical 1위 confidence, 상위 N개 겹침으로 곱셈 보정한 뒤 하한을 둔다(현재 제품 규칙).
     - `static`: `static_weights`(lexical, vector)를 그대로 쓴다. (1, 1)이면 표준 RRF 가중치다.
     - `confidence_linear`: `w_lex = w_min + (1 - w_min) × clip(conf / tau, 0, 1)`, `w_vec = 1`. conf는 lexical 1위 confidence.
+    - `convex`: 순위가 아니라 점수를 합친다. `α × φ_lex + (1 − α) × φ_vec`이고 α는 `convex_alpha`(lexical 쪽 가중치)다.
+      φ는 `score_normalization`(`normalize_channel_scores`)이고, 한 채널에만 나온 후보의 다른 채널 φ는 0이다.
+      rank_constant·교차 보너스·품질 가중·방법 가중은 쓰지 않는다. 평가 전용이며 제품 기본값이 아니다.
 
     `drop_partial_lexical`이 켜져 있으면 vector 결과가 있을 때 lexical 부분 일치 행(`strict_match`가 False)을 뺀다.
     """
@@ -48,10 +61,20 @@ class HybridFusionConfig:
     quality_weight: bool = True
     # (lexical confidence 상한(미만), 품질 가중). 모든 상한 이상이면 1.0.
     quality_tiers: tuple[tuple[float, float], ...] = ((0.2, 0.2), (0.3, 0.4), (0.5, 0.65), (0.8, 0.85))
+    convex_alpha: float = 0.5
+    score_normalization: str = "minmax"
+    # theoretical 정규화의 (lexical, vector) 하한.
+    score_floors: tuple[float, float] = (LEXICAL_SCORE_FLOOR, VECTOR_SCORE_FLOOR)
 
     def __post_init__(self) -> None:
         if self.weighting not in WEIGHTING_MODES:
             raise ValueError(f"weighting must be one of {WEIGHTING_MODES}, got {self.weighting!r}")
+        if self.score_normalization not in SCORE_NORMALIZATIONS:
+            raise ValueError(
+                f"score_normalization must be one of {SCORE_NORMALIZATIONS}, got {self.score_normalization!r}"
+            )
+        if not 0.0 <= self.convex_alpha <= 1.0:
+            raise ValueError(f"convex_alpha must be within [0, 1], got {self.convex_alpha}")
         if self.rank_constant <= 0:
             raise ValueError(f"rank_constant must be > 0, got {self.rank_constant}")
         if self.weighting == "confidence_linear" and self.confidence_tau <= 0:
@@ -89,6 +112,44 @@ def lexical_confidence(candidate: dict) -> float:
     if not strict_match:
         return 0.0
     return score - STRICT_MATCH_BONUS
+
+
+def channel_score_range(scores: Sequence[float], normalization: str, floor: float) -> tuple[float, float]:
+    """정규화 기준 (하한, 상한). minmax는 (최솟값, 최댓값), theoretical은 (`floor`, 최댓값). 빈 목록은 (0, 0)."""
+    if not scores:
+        return 0.0, 0.0
+    high = max(scores)
+    if normalization == "minmax":
+        return min(scores), high
+    if normalization == "theoretical":
+        return floor, high
+    raise ValueError(f"unknown normalization {normalization!r}; choose from {SCORE_NORMALIZATIONS}")
+
+
+def normalize_channel_scores(scores: Sequence[float], normalization: str, floor: float = 0.0) -> list[float]:
+    """한 채널 후보 점수를 `(s − 하한) / (상한 − 하한)`으로 정규화한다(`channel_score_range`).
+
+    상한 − 하한이 0 이하(후보 1개, 전부 동점, 하한 이하 최댓값)면 퇴화로 보고 모두 1.0을 준다. 채널 최상위 후보가
+    theoretical 정규화에서 받는 값과 같다. theoretical은 하한보다 낮은 점수에 음수를 줄 수 있다(단조성은 유지).
+    """
+    low, high = channel_score_range(scores, normalization, floor)
+    span = high - low
+    if span <= 0:
+        return [1.0 for _ in scores]
+    return [(score - low) / span for score in scores]
+
+
+def fusion_lexical_candidates(
+    lexical_candidates: list[dict], vector_candidates: list[dict], config: HybridFusionConfig = DEFAULT_HYBRID_FUSION
+) -> list[dict]:
+    """융합에 실제로 들어가는 lexical 후보. `drop_partial_lexical`이 켜져 있고 vector 결과가 있으면 부분 일치 행을 뺀다."""
+    if vector_candidates and config.drop_partial_lexical:
+        return [
+            candidate
+            for candidate in lexical_candidates
+            if (candidate.get("score_breakdown") or {}).get("strict_match") is not False
+        ]
+    return lexical_candidates
 
 
 def resolve_hybrid_method_weights(
@@ -147,19 +208,28 @@ def fuse_hybrid_candidates(
     vector_candidates: list[dict],
     config: HybridFusionConfig = DEFAULT_HYBRID_FUSION,
 ) -> list[dict]:
-    """lexical/vector 결과를 reciprocal rank fusion으로 병합해 점수 순으로 정렬한다. 논문 다양성은 적용하지 않는다.
+    """lexical/vector 결과를 reciprocal rank fusion(`convex`면 정규화 점수의 볼록 결합)으로 병합해 점수 순으로 정렬한다.
+    논문 다양성은 적용하지 않는다.
 
     `config.drop_partial_lexical`이 켜져 있고 vector 결과가 있으면 lexical 결과 중 일부 lexeme만 일치한 행
     (`strict_match`가 False)은 융합에서 뺀다. vector 결과가 없으면 lexical 결과를 모두 쓴다.
     동점은 일치한 채널 수, chunk_id 순으로 내림차순이다. chunk_id가 없는 후보는 서로 합치지 않는다.
     """
-    if vector_candidates and config.drop_partial_lexical:
-        lexical_candidates = [
-            candidate
-            for candidate in lexical_candidates
-            if (candidate.get("score_breakdown") or {}).get("strict_match") is not False
-        ]
-    method_weights = resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates, config)
+    lexical_candidates = fusion_lexical_candidates(lexical_candidates, vector_candidates, config)
+    convex = config.weighting == "convex"
+    if convex:
+        method_weights = {"lexical": config.convex_alpha, "vector": 1.0 - config.convex_alpha}
+        normalized = {
+            method: normalize_channel_scores(
+                [to_float(candidate.get("score")) for candidate in candidates], config.score_normalization, floor
+            )
+            for method, candidates, floor in (
+                ("lexical", lexical_candidates, config.score_floors[0]),
+                ("vector", vector_candidates, config.score_floors[1]),
+            )
+        }
+    else:
+        method_weights = resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates, config)
     merged: dict[int, dict] = {}
     fallback_key_seed = -1
 
@@ -183,22 +253,28 @@ def fuse_hybrid_candidates(
             )
 
             rank = index + 1
-            quality_weight = hybrid_quality_weight(method, candidate, config)
-            rrf_score = (method_weights[method] * quality_weight) / (config.rank_constant + rank)
             method_score = to_float(candidate.get("score"))
             method_breakdown = dict(candidate.get("score_breakdown") or {})
 
             if method not in entry["matched_methods"]:
                 entry["matched_methods"].append(method)
 
-            entry["score"] = to_float(entry.get("score")) + rrf_score
+            breakdown = entry["score_breakdown"]
+            breakdown[f"{method}_rank"] = rank
+            if convex:
+                contribution = method_weights[method] * normalized[method][index]
+                breakdown[f"{method}_normalized_score"] = normalized[method][index]
+            else:
+                quality_weight = hybrid_quality_weight(method, candidate, config)
+                contribution = (method_weights[method] * quality_weight) / (config.rank_constant + rank)
+                breakdown[f"{method}_rrf_score"] = contribution
+            breakdown[f"{method}_score"] = method_score
+            breakdown[f"{method}_weight"] = method_weights[method]
+            if not convex:
+                breakdown[f"{method}_quality_weight"] = quality_weight
+            breakdown[f"{method}_score_breakdown"] = method_breakdown
+            entry["score"] = to_float(entry.get("score")) + contribution
             entry["similarity_score"] = entry["score"]
-            entry["score_breakdown"][f"{method}_rank"] = rank
-            entry["score_breakdown"][f"{method}_rrf_score"] = rrf_score
-            entry["score_breakdown"][f"{method}_score"] = method_score
-            entry["score_breakdown"][f"{method}_weight"] = method_weights[method]
-            entry["score_breakdown"][f"{method}_quality_weight"] = quality_weight
-            entry["score_breakdown"][f"{method}_score_breakdown"] = method_breakdown
 
             if method == "vector" and "lexical" not in entry["matched_methods"]:
                 entry["snippet"] = candidate.get("snippet") or entry.get("snippet")
@@ -206,7 +282,7 @@ def fuse_hybrid_candidates(
                 entry["snippet"] = candidate.get("snippet") or entry.get("snippet")
 
     merged_candidates = list(merged.values())
-    for candidate in merged_candidates:
+    for candidate in [] if convex else merged_candidates:
         overlap_bonus = config.overlap_bonus if len(candidate.get("matched_methods") or []) > 1 else 0.0
         if overlap_bonus > 0:
             candidate["score"] = to_float(candidate.get("score")) + overlap_bonus

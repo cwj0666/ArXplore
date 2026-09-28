@@ -24,6 +24,9 @@ from eval.candidate_cache import (
 )
 from eval.dataset import EvalQuery
 from eval.fusion_sweep import (
+    CONVEX,
+    CONVEX_ALPHAS,
+    CONVEX_KEEP,
     CURRENT,
     PLAIN_RRF_K60,
     VECTOR_ONLY,
@@ -31,21 +34,27 @@ from eval.fusion_sweep import (
     Selection,
     SweepSpec,
     bootstrap_draws,
+    build_convex_specs,
     build_specs,
     cluster_key,
     cluster_strata,
     clusters_of,
+    convex_groups,
     count_parameters,
     cross_validate,
+    degenerate_normalizations,
     fold_plan,
     paired_bootstrap,
+    paper_rank,
     pre_registered_decision,
+    query_differences,
+    render_convex_sections,
     run_sweep,
     select_one_se,
     stratified_folds,
 )
 from eval.runner import run_query
-from src.integrations.hybrid_fusion import DEFAULT_HYBRID_FUSION, HybridFusionConfig
+from src.integrations.hybrid_fusion import DEFAULT_HYBRID_FUSION, STRICT_LEXICAL_SCORE_FLOOR, HybridFusionConfig
 from tests.unit.test_eval_runner import _load_script, _real_retriever
 from tests.unit.test_retrieval_fusion import _retriever, synthetic_fusion_case
 
@@ -549,3 +558,184 @@ class TestDumpCandidatesScript:
         assert client.embed_texts(["a"]) == client.embed_texts(["a"]) == [[1.0]]
         client.embed_texts(["bb"])
         assert calls == [["a"], ["bb"]]
+
+
+class TestConvexSpecs:
+    def test_families_grid_and_names(self):
+        specs = build_convex_specs()
+        assert Counter(spec.family for spec in specs) == {CONVEX: 60, CONVEX_KEEP: 40}
+        names = {spec.name for spec in specs}
+        assert len(names) == len(specs)
+        assert not names & {spec.name for spec in build_specs()}
+        assert CONVEX_ALPHAS[0] == 0.0 and CONVEX_ALPHAS[-1] == 0.95 and len(CONVEX_ALPHAS) == 20
+        assert all(spec.config.convex_alpha < 1.0 for spec in specs)
+
+    def test_primary_family_drops_partial_rows_and_is_the_only_selectable_one(self):
+        for spec in build_convex_specs():
+            assert spec.config.weighting == "convex"
+            assert spec.config.drop_partial_lexical == (spec.family == CONVEX)
+            assert spec.selectable == (spec.family == CONVEX)
+            assert spec.n_params == 1
+
+    def test_normalization_floors(self):
+        by_name = {spec.name: spec.config for spec in build_convex_specs()}
+        assert by_name["CC_mm_a0.20"].score_normalization == "minmax"
+        assert by_name["CC_tmm_a0.20"].score_normalization == "theoretical"
+        assert by_name["CC_tmm_a0.20"].score_floors == (0.0, -1.0)
+        assert by_name["CC_tmms_a0.20"].score_floors == (STRICT_LEXICAL_SCORE_FLOOR, -1.0)
+        assert "CCK_tmms_a0.20" not in by_name
+
+    def test_groups_split_by_normalization(self):
+        groups = convex_groups(build_convex_specs())
+        assert list(groups) == ["CC_mm", "CC_tmm", "CC_tmms", "CCK_mm", "CCK_tmm"]
+        assert {len(members) for members in groups.values()} == {20}
+
+    def test_convex_config_counts_one_parameter(self):
+        assert count_parameters(HybridFusionConfig(weighting="convex", convex_alpha=0.3)) == 1
+
+
+class TestRrfCheck:
+    SELECTION = Selection("CC_mm_a0.30", 0.8, 0.02, 0.78, "CC_mm_a0.30", 0.8, ("CC_mm_a0.30",))
+
+    @pytest.mark.parametrize(
+        ("low", "high", "expected"),
+        [(0.01, 0.03, "재현했다"), (-0.03, -0.01, "반대다"), (-0.01, 0.02, "재현하지 못했다")],
+    )
+    def test_rule_four_reads_the_pick_against_standard_rrf(self, low, high, expected):
+        comparisons = [
+            _bootstrap("pick − C", "all", -0.01, 0.02),
+            _bootstrap("pick − C", "manual", -0.02, 0.03),
+            _bootstrap("pick − F0(k=60)", "all", low, high),
+        ]
+        lines = pre_registered_decision(self.SELECTION, comparisons, primary="mrr@10", rrf_check=True)
+        assert lines[0].startswith("규칙 (1)")
+        assert lines[-1].startswith("규칙 (4)") and expected in lines[-1]
+        assert not any(
+            line.startswith("규칙 (4)")
+            for line in pre_registered_decision(self.SELECTION, comparisons, primary="mrr@10")
+        )
+
+
+def _convex_run(queries: list[CachedQuery]):
+    specs = _small_specs() + build_convex_specs()
+    return run_sweep(
+        queries,
+        k=5,
+        specs=specs,
+        n_folds=3,
+        repeats=2,
+        n_resamples=100,
+        selectable_families=(CONVEX,),
+        cv_groups=convex_groups(specs),
+        rrf_check=True,
+    )
+
+
+class TestConvexSweep:
+    def test_pick_comes_from_the_convex_family(self):
+        queries = [_synthetic_cached(seed) for seed in range(30)]
+        report = _convex_run(queries)
+
+        assert report.selection.pick.startswith("CC_")
+        assert set(report.selection.within) <= {spec.name for spec in build_convex_specs() if spec.family == CONVEX}
+        assert {"CC", "CCK", "CC_mm", "CC_tmm", "CC_tmms", "CCK_mm", "CCK_tmm"} <= set(report.cv)
+        assert report.selectable_families == (CONVEX,)
+        assert report.decision[-1].startswith("규칙 (4)")
+
+    def test_cv_group_names_must_not_shadow_families(self):
+        queries = [_synthetic_cached(seed) for seed in range(12)]
+        with pytest.raises(ValueError):
+            run_sweep(
+                queries, k=5, specs=_small_specs(), n_folds=3, repeats=1, n_resamples=10, cv_groups={"C": [CURRENT]}
+            )
+
+    def test_query_differences_and_ranks_agree_with_the_metrics(self):
+        queries = [_synthetic_cached(seed) for seed in range(30)]
+        report = _convex_run(queries)
+        pick = report.selection.pick
+
+        differences = query_differences(report, pick, CURRENT)
+        changed = {
+            left.query_id
+            for left, right in zip(report.results[pick], report.results[CURRENT], strict=True)
+            if left.paper_metrics["mrr@5"] != right.paper_metrics["mrr@5"]
+        }
+        assert {item.query_id for item in differences} == changed
+        assert query_differences(report, CURRENT, CURRENT) == []
+        for row in report.results[CURRENT]:
+            rank = paper_rank(row)
+            assert (rank is None) == (row.paper_metrics["mrr@5"] == 0)
+            if rank is not None:
+                assert row.paper_metrics["mrr@5"] == pytest.approx(1 / rank)
+
+    def test_degenerate_counts(self):
+        vector = (
+            {"chunk_id": 3, "arxiv_id": "a", "score": 0.9, "score_breakdown": {}},
+            {"chunk_id": 4, "arxiv_id": "b", "score": 0.5, "score_breakdown": {}},
+        )
+        single = {"chunk_id": 1, "arxiv_id": "c", "score": 1.2, "score_breakdown": {"strict_match": True}}
+        partial = {"chunk_id": 2, "arxiv_id": "d", "score": 0.4, "score_breakdown": {"strict_match": False}}
+        base = _synthetic_cached(0)
+        queries = [
+            replace(base, lexical=(single, partial), vector=vector),
+            replace(base, lexical=(partial,), vector=vector),
+        ]
+        by_name = {spec.name: spec.config for spec in build_convex_specs()}
+
+        assert degenerate_normalizations(queries, by_name["CC_mm_a0.30"]) == {
+            "lexical": 1,
+            "vector": 0,
+            "empty_lexical": 1,
+        }
+        assert degenerate_normalizations(queries, by_name["CC_tmm_a0.30"])["lexical"] == 0
+        assert degenerate_normalizations(queries, by_name["CCK_mm_a0.30"]) == {
+            "lexical": 1,
+            "vector": 0,
+            "empty_lexical": 0,
+        }
+
+    def test_convex_sections_render(self):
+        queries = [_synthetic_cached(seed) for seed in range(30)]
+        report = _convex_run(queries)
+
+        text = render_convex_sections(report, queries, watch_queries=["q003", "missing"], focus_query="q004")
+
+        for heading in (
+            "## Convex combination 요약",
+            "## 정규화별 하위 가족 교차검증",
+            "## α 곡선",
+            "## 퇴화 정규화",
+            "## 질의별 차이: pick",
+            "## 기준선에서 hybrid와 vector가 갈린 질의",
+            "## q004: CC 설정별 정답 논문 순위",
+        ):
+            assert heading in text
+        assert "| missing |" not in text
+        assert (
+            render_convex_sections(
+                run_sweep(queries, k=5, specs=_small_specs(), n_folds=3, repeats=1, n_resamples=10), queries
+            )
+            == ""
+        )
+
+
+class TestConvexScript:
+    def test_convex_command_writes_the_convex_report(self, tmp_path, monkeypatch):
+        script = _load_script("eval_fusion_sweep")
+        monkeypatch.setattr(script, "build_specs", _small_specs)
+        good, _, _ = _roundtrip(tmp_path, [_synthetic_cached(seed) for seed in range(15)])
+        out_dir = tmp_path / "results"
+
+        code = script.main(
+            ["convex", "--cache", str(good), "--out-dir", str(out_dir), "--repeats", "2", "--resamples", "100"]
+        )
+
+        assert code == 0
+        markdown = next(out_dir.glob("fusion_*.md")).read_text(encoding="utf-8")
+        assert markdown.startswith("# Convex combination fusion sweep")
+        assert "## Convex combination 요약" in markdown and "사전 등록: docs/worklog/phase-4/2026-09-29_01" in markdown
+        assert "규칙 (4)" in markdown
+        rows = next(out_dir.glob("fusion_*.csv")).read_text(encoding="utf-8").splitlines()
+        assert len(rows) == 1 + len(_small_specs()) + 100
+        header = rows[0].split(",")
+        assert {"alpha", "normalization", "score_floors"} <= set(header)
