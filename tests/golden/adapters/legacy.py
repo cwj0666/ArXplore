@@ -26,6 +26,19 @@ def _as_parsed(result: FulltextParseResult) -> ParsedPdf:
     }
 
 
+class _ReplayLayoutClient:
+    def __init__(self, payload: list[Any]) -> None:
+        self._payload = payload
+
+    def is_configured(self) -> bool:
+        return True
+
+    def analyze_pdf_bytes(self, content: bytes, **options: Any) -> list[dict[str, Any]]:
+        from src.integrations.layout_parser_client import LayoutParserClient
+
+        return [LayoutParserClient._normalize_segment(segment) for segment in self._payload]
+
+
 class LegacyParserAdapter:
     def __init__(self) -> None:
         self._parser = FulltextParser()
@@ -49,6 +62,11 @@ class LegacyParserAdapter:
 
     def summarize_chunks(self, chunks: list[dict[str, Any]]) -> dict[str, Any]:
         return self._parser.summarize_chunks(chunks)
+
+    def parse_layout_response(self, payload: list[Any]) -> ParsedPdf | None:
+        parser = FulltextParser(layout_parser_client=_ReplayLayoutClient(payload))
+        result = parser._parse_with_layout_parser(b"%PDF-replayed-layout-response")
+        return None if result is None else _as_parsed(result)
 
     def _from_extracted_text(self, text: str) -> ParsedPdf:
         parser = self._parser

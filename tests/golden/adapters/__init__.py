@@ -34,6 +34,8 @@ class ParserAdapter(Protocol):
 
     def summarize_chunks(self, chunks: list[dict[str, Any]]) -> dict[str, Any]: ...
 
+    def parse_layout_response(self, payload: list[Any]) -> ParsedPdf | None: ...
+
 
 @dataclass(frozen=True)
 class HttpResult:
