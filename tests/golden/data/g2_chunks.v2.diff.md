@@ -41,3 +41,39 @@
 1. 2609.05824 청크 1 → 2. 원본의 청크 2는 청크 1이 끝난 자리(1,883자)에서 시작해 겹침이 없었다. 이제 청크 2는 `These results suggest that skill routing should be treated not only as relevance ranking, …`로 시작한다. 청크 1의 마지막 131자와 겹치고, 시작은 문장 시작이다.
 2. 2609.05571 원본 청크 30 → 31. 원본은 청크 30의 끝(3,850자)과 청크 31의 시작(4,032자) 사이 182자 `indexing instead reduces corpus-level redundancy; … mixed downstream effects.`를 건너뛰었다. 소문자로 시작하는 조각이라 다음 문장으로 넘긴 것이다. 이제 이 텍스트는 새 청크 32(3,551~4,770자) 안에 들어 있다.
 3. 2608.27875 청크 4. 범위 안에 문장 시작이 없어 단어 시작에 맞췄다. 청크가 `inference dy- namics, motivating hybrid compression methods …`로 시작하고, 앞 청크의 `… mismatched with real long-context` 뒤를 잇는다.
+
+## F02: 청크 앞부분을 지우던 규칙 제거
+
+청크 텍스트는 이제 섹션 원문 구간 `[char_start, char_end)`를 strip한 것 그대로다. 없앤 규칙은 다음과 같다.
+- 짧은 첫 문장 삭제: 6단어 이하의 첫 문장 뒤에 대문자 문장이 오면 첫 문장을 지우고 청크 전체의 공백을 한 칸으로 압축했다. 번호 제목 뒤에 본문 시작어가 오면 제목 부분을 지우는 분기도 같은 함수였다.
+- bullet 앞부분 삭제: 앞 220자 안에 `• `가 있고 그 앞이 평범한 글자뿐이면 bullet까지 지웠다.
+- 앞머리 `,;:)]}` 삭제
+- 흡수 구분자: 같은 섹션 안에서 흡수할 때 사이 공백을 `\n`으로 바꾸던 것을 원문 구간 그대로 둔다. 제목만 같고 섹션이 다른 흡수는 예전처럼 `\n`으로 잇는다.
+
+F01 결과에서 규칙이 작동한 청크(16,797개 중)
+| 규칙 | 청크 | 지워진 글자 |
+| --- | --- | --- |
+| 짧은 첫 문장 삭제 | 1,105 | 25,226자 |
+| 번호 제목 앞부분 삭제 | 20 | 918자 |
+| bullet 앞부분 삭제 | 275 | 14,816자(공백 제외) |
+| 앞머리 구두점 삭제 | 176 | 179자 |
+
+| 항목 | F01 | F02 |
+| --- | --- | --- |
+| 청크 수 | 16,797 | 16,807 |
+| 평균 청크 길이 | 1,547.6자 | 1,549.6자 |
+| 1,800자 초과 청크 | 9,380 | 9,423 |
+| 160자 미만 청크 | 90 | 89 |
+| 겹침(같은 섹션 이웃 쌍) | 10,095쌍, 평균 199.8 | 10,105쌍, 평균 199.9 |
+| token_count 합계 | 6,492,365 | 6,504,616 |
+
+- 새 md5 청크는 1,858개다.
+- 청크 수가 바뀐 논문은 12편이다. 새 내용의 앞부분이 남으면서 흡수 판정이 달라졌다.
+- 청크가 완전히 같은 논문은 3편이다.
+- 공백만 바뀐 청크는 264개다(흡수 구분자).
+- 역할 분포(F01 → F02): body 12,299 → 12,276, references 2,951 → 2,962, table_like 948 → 959, figure_caption 219 → 231, front_matter 305 → 304
+
+예시 3개
+1. 2608.15380 청크 12. F01은 `With no impair- ment, the publisher sustains 30.0 Hz …`로 시작했다. F02는 지워졌던 `Table II gives the baseline measurements. `가 앞에 남는다.
+2. 2608.30597 청크 4. F01은 bullet 뒤 `We evaluate PLC-DPO across models, …`부터 시작했다. F02는 그 앞의 `They leave less explicit the case where a pair is preference-uninformative rather than merely clean or flipped, and therefore should avoid induc-` 문단과 `• `가 남는다.
+3. 2608.30597 청크 3. F01은 `2024 ). These objective-level advances …`로 시작했다. F02는 앞머리 `, `가 남는다.

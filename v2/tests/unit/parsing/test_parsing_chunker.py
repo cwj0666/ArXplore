@@ -11,6 +11,7 @@ from arxplore.parsing.chunker import (
     starts_mid_sentence,
     summarize_chunks,
 )
+from arxplore.parsing.cleaner import normalize_text
 
 BODY_PARAGRAPH = (
     "We study how preference data shapes the alignment of large language models. "
@@ -162,31 +163,72 @@ def test_chunk_length_can_exceed_max_chars_by_the_lookahead():
     assert max(len(chunk["chunk_text"]) for chunk in chunks) > DEFAULT_MAX_CHARS
 
 
-def test_a_short_tail_is_absorbed_into_the_previous_chunk_with_a_newline():
+def test_a_short_tail_is_absorbed_into_the_previous_chunk():
     text = BODY_PARAGRAPH[:2001] + "and a short tail"
 
     chunks = build_chunks(text, [section("2 Method", text)])
 
     assert len(chunks) == 1
-    assert chunks[0]["chunk_text"].endswith("large language models.\nand a short tail")
-    assert chunks[0]["chunk_text"].count("Our approach") == text.count("Our approach")
+    assert chunks[0]["chunk_text"] == text.strip()
     assert chunks[0]["metadata"]["char_end"] == len(text)
 
 
-def test_a_short_first_sentence_is_dropped_and_whitespace_collapsed():
+def test_a_short_first_sentence_is_kept():
     text = "Results are strong. The model improves accuracy on every benchmark.\nWe also report more."
 
     chunks = build_chunks(text, [section("4 Experiments", text)])
 
-    assert chunks[0]["chunk_text"] == "The model improves accuracy on every benchmark. We also report more."
+    assert chunks[0]["chunk_text"] == text
 
 
-def test_text_before_an_early_bullet_is_dropped():
+def test_text_before_an_early_bullet_is_kept():
     text = "Our contributions are: • A new benchmark. • A new model."
 
     chunks = build_chunks(text, [section("1 Introduction", text)])
 
-    assert chunks[0]["chunk_text"] == "A new benchmark. • A new model."
+    assert chunks[0]["chunk_text"] == text
+
+
+def test_leading_punctuation_is_kept():
+    text = "), and the rest of the sentence continues here."
+
+    assert build_chunks(text, [section("1 Introduction", text)])[0]["chunk_text"] == text
+
+
+def lossy_prone_section(seed: int) -> str:
+    rng = random.Random(seed)
+    openings = [
+        "Results are strong. ",
+        "Our contributions are: • A new benchmark. • A new model. ",
+        "), and a dangling clause. ",
+        "3.2 Training Details We train the model for ten epochs. ",
+        "Setup. ",
+    ]
+    parts = []
+    for index in range(60):
+        parts.append(rng.choice(openings) if index % 3 == 0 else "")
+        parts.append(random_prose(seed * 100 + index, 3))
+        parts.append(rng.choice([" ", "\n", "\n\n"]))
+    return "".join(parts).strip()
+
+
+def test_chunks_are_exact_source_spans_that_rebuild_each_section():
+    sections = [section(f"{index} Section", lossy_prone_section(index)) for index in range(1, 6)]
+
+    chunks = build_chunks("body", sections)
+
+    for section_index, source in enumerate(sections):
+        section_text = normalize_text(source["text"])
+        section_chunks = [chunk for chunk in chunks if chunk["metadata"]["section_index"] == section_index]
+        rebuilt = ""
+        covered = 0
+        for chunk in section_chunks:
+            start, end = chunk["metadata"]["char_start"], chunk["metadata"]["char_end"]
+            assert chunk["chunk_text"] == section_text[start:end].strip()
+            assert start <= covered
+            rebuilt += section_text[covered:end]
+            covered = end
+        assert rebuilt == section_text
 
 
 def test_small_max_chars_is_raised_to_the_minimum():

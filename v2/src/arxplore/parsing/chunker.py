@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from arxplore.parsing.cleaner import normalize_chunk_opening, normalize_text, strip_inline_heading_prefix
+from arxplore.parsing.cleaner import normalize_text
 from arxplore.parsing.models import Chunk, ChunkMetadata, ChunkSummary
 from arxplore.parsing.roles import BODY_ROLE, REFERENCES_ROLE, TABLE_LIKE_ROLE, chunk_role, refined_chunk_role
 from arxplore.parsing.sections import FRONT_MATTER_TITLE, FULL_TEXT_TITLE
@@ -149,10 +149,6 @@ def _next_chunk_start(text: str, *, start: int, end: int, overlap_chars: int) ->
     return min(candidates, key=lambda position: (abs(position - target), position))
 
 
-def _clean_chunk_text(candidate: str) -> str:
-    return normalize_chunk_opening(strip_inline_heading_prefix(candidate.strip()))
-
-
 def _should_absorb(drafts: Sequence[_ChunkDraft], new: _ChunkDraft) -> bool:
     if not drafts:
         return False
@@ -172,11 +168,11 @@ def _should_absorb(drafts: Sequence[_ChunkDraft], new: _ChunkDraft) -> bool:
     )
 
 
-def _absorb(previous: _ChunkDraft, new: _ChunkDraft) -> None:
-    previous_text = previous.text.rstrip()
-    new_text = new.text.lstrip()
-    separator = "\n" if previous_text and not previous_text.endswith("\n") else ""
-    previous.text = f"{previous_text}{separator}{new_text}".strip()
+def _absorb(previous: _ChunkDraft, new: _ChunkDraft, section_text: str) -> None:
+    if previous.section_index == new.section_index:
+        previous.text = section_text[previous.char_start : new.char_end].strip()
+    else:
+        previous.text = f"{previous.text.rstrip()}\n{new.text.lstrip()}".strip()
     previous.char_end = new.char_end
     previous.ends_mid_sentence = new.ends_mid_sentence
 
@@ -196,7 +192,7 @@ def _chunk_section(
         end = _chunk_end(section_text, start, max_chars)
         previous_end = drafts[-1].char_end if drafts and drafts[-1].section_index == section_index else start
         new_start = max(start, previous_end)
-        new_text = _clean_chunk_text(section_text[new_start:end])
+        new_text = section_text[new_start:end].strip()
         if new_text:
             new_content = _ChunkDraft(
                 chunk_index=len(drafts),
@@ -211,9 +207,9 @@ def _chunk_section(
                 ends_mid_sentence=ends_mid_sentence(section_text, end),
             )
             if _should_absorb(drafts, new_content):
-                _absorb(drafts[-1], new_content)
+                _absorb(drafts[-1], new_content, section_text)
             else:
-                chunk_text = new_text if new_start == start else _clean_chunk_text(section_text[start:end])
+                chunk_text = new_text if new_start == start else section_text[start:end].strip()
                 drafts.append(
                     _ChunkDraft(
                         chunk_index=len(drafts),

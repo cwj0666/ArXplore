@@ -4,10 +4,8 @@ from arxplore.parsing.cleaner import (
     collapse_whitespace,
     find_inline_heading_split,
     looks_like_toc_line,
-    normalize_chunk_opening,
     normalize_heading_like_text,
     normalize_text,
-    strip_inline_heading_prefix,
 )
 
 
@@ -96,25 +94,6 @@ def test_find_inline_heading_split_detects_a_numbered_heading_before_a_body_star
 )
 def test_find_inline_heading_split_ignores_body_sentences(text):
     assert find_inline_heading_split(text) is None
-
-
-def test_strip_inline_heading_prefix_drops_a_short_first_sentence_and_collapses_whitespace():
-    assert strip_inline_heading_prefix("Results are strong. The model\nimproves.") == "The model improves."
-
-
-def test_normalize_chunk_opening_drops_text_before_an_early_bullet():
-    assert normalize_chunk_opening("Our contributions are: • A new benchmark") == "A new benchmark"
-
-
-def test_normalize_chunk_opening_drops_leading_closing_punctuation():
-    assert normalize_chunk_opening(" ), and the rest") == "and the rest"
-
-
-def test_normalize_chunk_opening_keeps_a_bullet_after_a_sentence():
-    text = "We list the results below, which matter. • First item"
-
-    assert normalize_chunk_opening(text) == "First item"
-    assert normalize_chunk_opening("Results (%) • First") == "Results (%) • First"
 
 
 @pytest.mark.parametrize(

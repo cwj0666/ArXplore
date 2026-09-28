@@ -45,8 +45,6 @@ _SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([:;,.!?])")
 
 _SHORT_TITLE_PREFIX = re.compile(r"^(?P<head>[A-Z0-9][A-Za-z0-9/+&' -]{2,48}\.)\s*(?P<rest>[A-Z].+)$")
 _NUMBERED_LINE_OPENING = re.compile(r"^\d+(?:\.\d+)+(?:[.)])?\s+")
-_BULLET_PREFIX = re.compile(r"[\s,.;:()\[\]0-9A-Za-z&'\-\u2013/]+")
-_LEADING_CLOSING_PUNCTUATION = re.compile(r"^[,;:)\]\}]+\s*")
 
 _TOC_TITLES = frozenset({"contents", "table of contents"})
 _TOC_DOT_LEADER = re.compile(r"(?:\. ?){6,}\d+$")
@@ -140,25 +138,6 @@ def find_inline_heading_split(text: str) -> tuple[str, str] | None:
             continue
         return head, rest
     return None
-
-
-def strip_inline_heading_prefix(text: str) -> str:
-    split = find_inline_heading_split(text)
-    if split is not None:
-        return split[1]
-    return text
-
-
-def normalize_chunk_opening(text: str) -> str:
-    compact = text.lstrip()
-    if not compact:
-        return compact
-    bullet_index = compact.find("• ")
-    if bullet_index != -1 and bullet_index <= 220:
-        prefix = compact[:bullet_index]
-        if _BULLET_PREFIX.fullmatch(prefix or " "):
-            compact = compact[bullet_index + 2 :].lstrip()
-    return _LEADING_CLOSING_PUNCTUATION.sub("", compact)
 
 
 def looks_like_toc_line(line: str) -> bool:
