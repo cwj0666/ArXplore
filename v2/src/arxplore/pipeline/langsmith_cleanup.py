@@ -8,7 +8,7 @@ from langsmith import Client
 from arxplore.config import AppSettings
 
 DEFAULT_RETENTION_DAYS = 14
-DISABLED_MESSAGE = "LangSmith tracing is not enabled. Check LANGSMITH_API_KEY / LANGSMITH_TRACING."
+SKIPPED_WITHOUT_KEY = "no_langsmith_api_key"
 
 
 class RunStore(Protocol):
@@ -30,8 +30,8 @@ class LangSmithRunStore:
         response.raise_for_status()
 
 
-def langsmith_enabled(settings: AppSettings) -> bool:
-    return bool(settings.langsmith_tracing and settings.langsmith_api_key)
+def has_api_key(settings: AppSettings) -> bool:
+    return bool((settings.langsmith_api_key or "").strip())
 
 
 def run_store_from_settings(settings: AppSettings) -> RunStore:
@@ -59,16 +59,16 @@ def _run_user(run: Any) -> Any:
 
 
 def iter_expired_runs(runs: Iterable[Any], *, cutoff: datetime, user: str | None, limit: int | None) -> Iterator[Any]:
-    inspected = 0
+    matched = 0
     for run in runs:
-        if limit is not None and inspected >= limit:
+        if limit is not None and matched >= limit:
             break
-        inspected += 1
         started_at = _started_at(run)
         if started_at is None or started_at >= cutoff:
             continue
         if user and _run_user(run) != user:
             continue
+        matched += 1
         yield run
 
 
@@ -90,11 +90,25 @@ def cleanup_langsmith_runs(
 ) -> dict[str, Any]:
     if options.days < 1:
         raise ValueError("days는 1 이상이어야 합니다.")
-    if not langsmith_enabled(settings):
-        raise RuntimeError(DISABLED_MESSAGE)
     project_name = options.project_name or settings.langsmith_project
-    run_store = store or run_store_from_settings(settings)
     cutoff = (now or datetime.now(UTC)) - timedelta(days=options.days)
+    if not has_api_key(settings):
+        return {
+            "stage": "cleanup_langsmith",
+            "status": "skipped",
+            "reason": SKIPPED_WITHOUT_KEY,
+            "project_name": project_name,
+            "days": options.days,
+            "cutoff": cutoff.isoformat(),
+            "user": options.user,
+            "limit": options.limit,
+            "dry_run": options.dry_run,
+            "matched_count": 0,
+            "deleted_count": 0,
+            "deleted_run_ids": [],
+            "matched_runs": [],
+        }
+    run_store = store or run_store_from_settings(settings)
     matched = list(
         iter_expired_runs(
             run_store.list_runs(project_name=project_name),

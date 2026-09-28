@@ -74,13 +74,21 @@ def test_dry_run_deletes_nothing() -> None:
     assert (result["matched_count"], result["deleted_count"], result["dry_run"]) == (1, 0, True)
 
 
-def test_limit_counts_inspected_runs() -> None:
-    store = FakeStore([_run("new-1", 1), _run("new-2", 2), _run("old-1", 20), _run("old-2", 21)])
+def test_limit_counts_runs_to_delete() -> None:
+    store = FakeStore([_run("new-1", 1), _run("old-1", 20), _run("new-2", 2), _run("old-2", 21), _run("old-3", 22)])
 
-    result = cleanup_langsmith_runs(ENABLED, CleanupOptions(limit=3), store=store, now=NOW)
+    result = cleanup_langsmith_runs(ENABLED, CleanupOptions(limit=2), store=store, now=NOW)
 
-    assert store.deleted == ["old-1"]
-    assert result["limit"] == 3
+    assert store.deleted == ["old-1", "old-2"]
+    assert (result["limit"], result["matched_count"]) == (2, 2)
+
+
+def test_limit_counts_only_runs_of_the_requested_user() -> None:
+    store = FakeStore([_run("theirs", 30, user="you"), _run("mine-1", 30, user="me"), _run("mine-2", 31, user="me")])
+
+    cleanup_langsmith_runs(ENABLED, CleanupOptions(user="me", limit=1), store=store, now=NOW)
+
+    assert store.deleted == ["mine-1"]
 
 
 def test_days_below_one_are_rejected_first() -> None:
@@ -88,10 +96,27 @@ def test_days_below_one_are_rejected_first() -> None:
         cleanup_langsmith_runs(AppSettings.model_validate({}), CleanupOptions(days=0), store=FakeStore([]), now=NOW)
 
 
-@pytest.mark.parametrize(
-    "values",
-    [{}, {"LANGSMITH_API_KEY": "ls-key", "LANGSMITH_TRACING": "false"}],
-)
-def test_disabled_langsmith_raises(values: dict[str, str]) -> None:
-    with pytest.raises(RuntimeError, match="LangSmith tracing is not enabled"):
-        cleanup_langsmith_runs(AppSettings.model_validate(values), CleanupOptions(), store=FakeStore([]), now=NOW)
+@pytest.mark.parametrize("values", [{}, {"LANGSMITH_API_KEY": "  "}, {"LANGSMITH_TRACING": "false"}])
+def test_without_an_api_key_the_cleanup_is_skipped(values: dict[str, str]) -> None:
+    store = FakeStore([_run("old", 30)])
+
+    result = cleanup_langsmith_runs(AppSettings.model_validate(values), CleanupOptions(), store=store, now=NOW)
+
+    assert store.projects == []
+    assert store.deleted == []
+    assert (result["status"], result["reason"], result["matched_count"], result["deleted_count"]) == (
+        "skipped",
+        "no_langsmith_api_key",
+        0,
+        0,
+    )
+
+
+def test_a_key_is_enough_even_when_tracing_is_off() -> None:
+    store = FakeStore([_run("old", 30)])
+    settings = AppSettings.model_validate({"LANGSMITH_API_KEY": "ls-key", "LANGSMITH_TRACING": "false"})
+
+    result = cleanup_langsmith_runs(settings, CleanupOptions(), store=store, now=NOW)
+
+    assert result["status"] == "success"
+    assert store.deleted == ["old"]
