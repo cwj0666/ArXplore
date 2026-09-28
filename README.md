@@ -1,6 +1,6 @@
 # ArXplore
 
-[![CI](https://github.com/SKNETWORKS-FAMILY-AICAMP/ArXplore/actions/workflows/ci.yml/badge.svg)](https://github.com/SKNETWORKS-FAMILY-AICAMP/ArXplore/actions/workflows/ci.yml)
+[![CI](https://github.com/cwj0666/ArXplore/actions/workflows/ci.yml/badge.svg)](https://github.com/cwj0666/ArXplore/actions/workflows/ci.yml)
 
 Hugging Face Daily Papers에 올라오는 AI 논문을 매일 수집하고, PDF를 파싱·청킹해 PostgreSQL에 적재한 뒤, 논문 목록 탐색 · 한국어 개요와 상세 요약 · LangGraph 에이전트 채팅으로 읽을 수 있게 만든 논문 탐색 서비스입니다.
 
