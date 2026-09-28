@@ -11,6 +11,7 @@ from arxplore.parsing.pdf_text import (
     parse_pdf_bytes,
     parse_pdf_text,
     should_merge_lines,
+    split_camel_case,
     split_inline_heading_line,
     text_from_pages,
 )
@@ -83,6 +84,36 @@ def test_looks_like_running_header_footer():
     assert looks_like_running_header_footer("We train 12")
     assert not looks_like_running_header_footer("The loss drops to 0.5.")
     assert not looks_like_running_header_footer("Abbreviations 12")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("ChatGPT with PyTorch", "Chat GPT with Py Torch"),
+        ("RelatedWork and AblationStudy", "Related Work and Ablation Study"),
+        ("arXiv GitHub LiDAR ModelScope DeepSeek HuggingFace", "arXiv GitHub LiDAR ModelScope DeepSeek HuggingFace"),
+        ("myGitHub and DeepSeekGitHub", "my GitHub and DeepSeek GitHub"),
+        ("Hugging Face and ar Xiv keep their spaces", "Hugging Face and ar Xiv keep their spaces"),
+        ("arXivs and iPhone", "ar Xivs and i Phone"),
+        ("lower case and UPPER CASE", "lower case and UPPER CASE"),
+    ],
+)
+def test_split_camel_case_separates_glued_words_except_known_names(text, expected):
+    assert split_camel_case(text) == expected
+
+
+def test_text_from_pages_splits_words_that_pypdf_glued_together():
+    text = text_from_pages(["2 RelatedWork\nWe review priorWork on arXiv and GitHub."])
+
+    assert text == "2 Related Work\nWe review prior Work on arXiv and GitHub."
+    assert text_from_pages([text]) == text
+
+
+def test_glued_pypdf_headings_still_become_sections():
+    result = parse_pdf_text(text_from_pages(["2 RelatedWork\nWe review prior work.\n3 MainResults\nWe win."]))
+
+    assert result is not None
+    assert [section["title"] for section in result.sections] == ["2 Related Work", "3 Main Results"]
 
 
 def test_text_from_pages_joins_non_empty_pages_with_blank_lines():

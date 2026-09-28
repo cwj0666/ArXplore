@@ -22,6 +22,19 @@ _BULLET_PAGE_NUMBER_END = re.compile(r"•\d{1,3}$")
 _PAGE_NUMBER_BULLET_TITLE = re.compile(r"\d+•[A-Z][A-Za-z .'-]+")
 _TITLE_WITH_PAGE_NUMBER = re.compile(r"[A-Z][A-Za-z0-9:,\-\u2013' ]{8,100}\d{1,3}$")
 _SENTENCE_END = (".", "?", "!", ":", ";")
+_CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z])(?=[A-Z][A-Za-z-]{2,})")
+_SPLIT_MARK = "\x00"
+UNSPLIT_BRAND_NAMES = (
+    ("ar", "Xiv"),
+    ("Li", "DAR"),
+    ("Git", "Hub"),
+    ("Hugging", "Face"),
+    ("Model", "Scope"),
+    ("Deep", "Seek"),
+)
+_UNSPLIT_BRANDS = tuple(
+    (re.compile(rf"\b{head}{_SPLIT_MARK}{tail}\b"), f"{head}{tail}") for head, tail in UNSPLIT_BRAND_NAMES
+)
 
 
 def looks_like_running_header_footer(line: str) -> bool:
@@ -107,9 +120,16 @@ def normalize_page_text(text: str) -> str:
     return "\n".join(stitched_lines).strip()
 
 
+def split_camel_case(text: str) -> str:
+    marked = _CAMEL_CASE_BOUNDARY.sub(_SPLIT_MARK, text.replace(_SPLIT_MARK, " "))
+    for pattern, brand in _UNSPLIT_BRANDS:
+        marked = pattern.sub(brand, marked)
+    return marked.replace(_SPLIT_MARK, " ")
+
+
 def text_from_pages(page_texts: Iterable[str]) -> str:
     pages = [normalized for normalized in map(normalize_page_text, page_texts) if normalized]
-    return normalize_text("\n\n".join(pages))
+    return split_camel_case(normalize_text("\n\n".join(pages)))
 
 
 def extract_page_texts(content: bytes) -> list[str]:

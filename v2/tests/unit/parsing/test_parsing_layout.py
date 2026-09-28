@@ -73,6 +73,15 @@ def test_build_layout_text_sorts_by_page_then_top_then_left():
     assert build_layout_text(segments) == "left column.\nright column.\nnext page."
 
 
+def test_build_layout_text_keeps_camel_case_names():
+    segments = [
+        segment("ChatGPT and PyTorch on arXiv.", "Text", top=1.0),
+        segment("RelatedWork", "Section header", top=2.0),
+    ]
+
+    assert build_layout_text(segments) == "ChatGPT and PyTorch on arXiv.\nRelatedWork"
+
+
 def test_extract_layout_artifacts_pairs_tables_and_figures_with_the_nearest_caption_on_the_page():
     segments = [
         *SMALL_DOCUMENT,

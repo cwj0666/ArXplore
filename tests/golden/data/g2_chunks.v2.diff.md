@@ -106,7 +106,7 @@ F01 결과에서 규칙이 작동한 청크(16,797개 중)
 ## F04: `normalize_text` 멱등화, camelCase 분리 제거
 
 - 한 번의 정리 과정(NUL, 줄끝 하이픈, 쪽번호 머리글·바닥글, 공백, 빈 줄)을 결과가 바뀌지 않을 때까지 되풀이한다. 따라서 두 번 적용한 결과가 한 번 적용한 결과와 같다. 연속된 러닝 헤더나 탭 때문에 첫 번째 패스에서 걸리지 않던 머리글도 한 번의 호출로 지워진다.
-- camelCase 분리(`ChatGPT → Chat GPT`)를 없앴다.
+- camelCase 분리(`ChatGPT → Chat GPT`)를 공용 정규화에서 없앴다. F04 보완 뒤로는 pypdf 쪽 텍스트(`pdf_text.text_from_pages`)에서만 한 번 분리한다. G2는 저장된 sections에서 `build_chunks`로 들어오므로 F04 보완의 영향을 받지 않는다(변형 파일 그대로).
 - 분리를 되돌리던 브랜드 복원 6개(`ar Xiv`, `Li DAR`, `Git Hub`, `Hugging Face`, `Model Scope`, `Deep Seek`)도 없앴다. G3의 pypdf 5.4·6.19 추출과 HURIDOCS 응답 어디에도 분리된 형태가 없었다. 원문의 `Hugging Face`는 이제 그대로 남는다.
 
 G2 입력은 옛 정규화를 세 번 거쳐 저장된 sections라 변화가 작다.

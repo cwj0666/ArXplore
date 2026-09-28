@@ -64,3 +64,4 @@
   - 2609.16034: `2.6 Step Audio Music Tokenizer` → `2.6 StepAudio Music Tokenizer`
   - 2609.09143: `C.4 Loss-VQA Performance on Text VQA` → `… on TextVQA`
 - HURIDOCS 텍스트에는 단어 사이 공백이 있어 pypdf 경로(2609.12397)에서 본 붙은 단어 문제는 생기지 않는다.
+- F04 보완(camelCase 분리를 pypdf 쪽 텍스트에만 남김)은 layout 경로를 거치지 않아 이 변형은 바뀌지 않는다.

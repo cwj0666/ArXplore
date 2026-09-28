@@ -70,6 +70,12 @@ def test_text_without_sections_becomes_a_full_text_section():
     assert [(chunk["section_title"], chunk["chunk_text"]) for chunk in chunks] == [("Full Text", "A short paper body.")]
 
 
+def test_chunk_text_keeps_camel_case_names():
+    text = "ChatGPT and PyTorch are used with DeepSeek models."
+
+    assert build_chunks(text, [section("1 Introduction", text)])[0]["chunk_text"] == text
+
+
 def test_chunks_are_built_from_sections_only():
     chunks = build_chunks("ignored body", [section("", "Section text."), section("Empty", "  ")])
 
