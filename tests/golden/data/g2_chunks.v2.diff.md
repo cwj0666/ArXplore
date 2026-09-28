@@ -102,3 +102,20 @@ F01 결과에서 규칙이 작동한 청크(16,797개 중)
 1. 2609.05661 청크 4. F02에서 가장 긴 2,361자 청크였다(섹션 2의 1,629~3,990자, 흡수로 길어짐). F03에서는 청크 4(1,629~3,196자, 1,566자)와 청크 5(2,933~3,990자, 1,057자)로 나뉘고 263자가 겹친다.
 2. 2609.07154 청크 4(섹션 `2.2 The Student distillation`). F02에서는 0~1,998자(1,997자)였다. 1,800자를 넘어 `Table 1: Teacher composition of the distillation set, … Counts are post -filter, i.e.`까지 들어갔다. F03에서는 1,800자 안의 마지막 문장 경계인 1,754자(`… escalated to the senior with its clip tools.`)에서 끝나고, 다음 청크가 1,497자부터 이어진다.
 3. 2608.30597 청크 5. 알고리즘 의사코드 구간이라 900~1,800자 안에 문장 경계가 없다. 그래서 공백 경계에서 끝나고(1,796자), 다음 청크는 `16: else 17: γ t ← min( γ max , Schedule …` 앞 200자 근처의 단어 시작에서 이어진다.
+
+## F04: `normalize_text` 멱등화, camelCase 분리 제거
+
+- 한 번의 정리 과정(NUL, 줄끝 하이픈, 쪽번호 머리글·바닥글, 공백, 빈 줄)을 결과가 바뀌지 않을 때까지 되풀이한다. 따라서 두 번 적용한 결과가 한 번 적용한 결과와 같다. 연속된 러닝 헤더나 탭 때문에 첫 번째 패스에서 걸리지 않던 머리글도 한 번의 호출로 지워진다.
+- camelCase 분리(`ChatGPT → Chat GPT`)를 없앴다.
+- 분리를 되돌리던 브랜드 복원 6개(`ar Xiv`, `Li DAR`, `Git Hub`, `Hugging Face`, `Model Scope`, `Deep Seek`)도 없앴다. G3의 pypdf 5.4·6.19 추출과 HURIDOCS 응답 어디에도 분리된 형태가 없었다. 원문의 `Hugging Face`는 이제 그대로 남는다.
+
+G2 입력은 옛 정규화를 세 번 거쳐 저장된 sections라 변화가 작다.
+- 청크 수(18,337), 경계, 역할 분포는 F03과 같다.
+- 텍스트가 바뀐 청크는 12편 14개이고 모두 공백만 빠졌다.
+- 모두 Abstract 청크다. prepare가 소문자로 시작하는 Abstract를 HF 메타데이터 원문으로 바꿔 저장하는데, 그 원문은 정규화를 거치지 않았다. 옛 `build_chunks`가 여기서 camelCase를 쪼갰다.
+- token_count 합계는 6,581,619 → 6,581,610이다.
+
+예시 3개
+1. 2608.27875 청크 1: `we propose Hy Quant, an efficient hybrid quantization` → `we propose HyQuant, …`
+2. 2609.10895 청크 2: `React Human thus offers both a fine-grained …` → `ReactHuman thus offers …`
+3. 2609.15051 청크 1: `gains of 11.5\% on Math Vision and 11.1\% on MMMU-Pro.` → `… on MathVision and …`

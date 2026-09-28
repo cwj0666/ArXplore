@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from arxplore.parsing.cleaner import (
@@ -31,23 +33,56 @@ def test_normalize_text_compresses_horizontal_whitespace_and_blank_lines():
     assert normalize_text("  a\t\tb   c\n\n\n\nd  ") == "a b c\n\nd"
 
 
-def test_normalize_text_splits_camel_case_words():
-    assert normalize_text("ChatGPT, LangChain and PyTorch") == "Chat GPT, Lang Chain and Py Torch"
+def test_normalize_text_keeps_camel_case_words():
+    assert normalize_text("ChatGPT, LangChain, PyTorch and iPhone") == "ChatGPT, LangChain, PyTorch and iPhone"
 
 
-def test_normalize_text_restores_brand_names_after_splitting():
+def test_normalize_text_keeps_brand_names_as_written():
     text = "arXiv GitHub LiDAR ModelScope DeepSeek HuggingFace Hugging Face"
 
-    assert normalize_text(text) == "arXiv GitHub LiDAR ModelScope DeepSeek HuggingFace HuggingFace"
+    assert normalize_text(text) == text
 
 
-def test_normalize_text_removes_only_every_other_consecutive_running_header_per_pass():
-    text = "Body one\nLarge Language Models 12\nLarge Language Models 13\nBody two"
+def test_normalize_text_removes_consecutive_running_headers_in_one_call():
+    text = "Body one\nLarge Language Models 12\nLarge Language Models 13\nLarge Language Models 14\nBody two"
 
-    once = normalize_text(text)
+    assert normalize_text(text) == "Body one\nBody two"
 
-    assert once == "Body one\nLarge Language Models 13\nBody two"
-    assert normalize_text(once) == "Body one\nBody two"
+
+def test_normalize_text_removes_a_header_that_only_fits_after_whitespace_is_compressed():
+    header = "Proceedings\tof\tthe\tConference 12"
+
+    assert normalize_text(f"Body one\n{header}\nBody two") == "Body one\nBody two"
+
+
+def random_page_like_text(rng: random.Random) -> str:
+    pieces = [
+        "\n",
+        "\n\n",
+        "\n\n\n",
+        " ",
+        "\t",
+        "\x00",
+        "exam-\nple ",
+        "\n12•Conference Header\n",
+        "\nShort Title•13\n",
+        "\nLarge Language Models 14\n",
+        "\nA Study Of Things 7\n",
+        "Body sentence here. ",
+        "word ",
+        "3",
+        "Header",
+    ]
+    return "".join(rng.choice(pieces) for _ in range(rng.randint(0, 40)))
+
+
+def test_normalize_text_is_idempotent():
+    rng = random.Random(4)
+    for _ in range(5000):
+        text = random_page_like_text(rng)
+        once = normalize_text(text)
+
+        assert normalize_text(once) == once
 
 
 def test_collapse_whitespace():
