@@ -226,7 +226,7 @@ prepare 단계의 보호 장치:
 
 | 경로 | 제품 사용 | 구현 |
 | --- | --- | --- |
-| hybrid | 기본 경로(`RETRIEVAL_MODE=hybrid`이고 질의 임베딩 키가 있을 때) | lexical + vector를 RRF(k=60)와 방법별·후보 품질 가중치로 합침. vector 결과가 있으면 lexical의 부분 일치(`strict_match=False`) 행은 빼고 합친다 |
+| hybrid | 기본 경로(`RETRIEVAL_MODE=hybrid`이고 질의 임베딩 키가 있을 때) | 두 채널의 점수를 질의마다 min-max 정규화해 0.35 × lexical + 0.65 × vector로 합침(convex combination, `DEFAULT_HYBRID_FUSION`). 한 채널에만 나온 후보의 다른 채널 점수는 0이다. vector 결과가 있으면 lexical의 부분 일치(`strict_match=False`) 행은 빼고 합친다. 2026-09-29까지의 가중 RRF 규칙은 `LEGACY_RULES_FUSION`으로 남아 있다 |
 | lexical | 폴백(키 없음, 임베딩 호출 `OpenAIError`, `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector + `websearch_to_tsquery`/`plainto_tsquery` `ts_rank_cd`(strict 일치) 또는 OR 질의 × lexeme coverage(부분 일치), ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌 유사 텍스트 필터, 논문 다양성, 인접 청크 병합 |
 | vector | hybrid 구성 요소 | `paper_embeddings` 코사인 거리, 섹션·`content_role` 감점 후 rerank, `VECTOR_MIN_SIMILARITY` 하한 |
 

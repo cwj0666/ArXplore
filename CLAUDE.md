@@ -158,7 +158,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 구현: `src/integrations/paper_retriever.py`
 - **Lexical** — PostgreSQL 전문 검색(`english` 설정). 제목·초록·청크 tsvector 생성 컬럼 + GIN 인덱스. 한국어 질의는 거의 맞지 않는다
 - **Vector** — pgvector 코사인 거리 (text-embedding-3-large, 1536 dims), HNSW 인덱스, `VECTOR_MIN_SIMILARITY`로 하한 설정
-- **Hybrid** — reciprocal rank fusion(k=60) + content-role reranking
+- **Hybrid** — 채널 점수 per-query min-max 정규화의 convex combination(0.35·lexical + 0.65·vector, `DEFAULT_HYBRID_FUSION`, `src/integrations/hybrid_fusion.py`). vector 결과가 있으면 lexical 부분 일치 행 제외. 사전 등록 비교 규칙 (1) + 사용자 결정으로 2026-09-29 채택했고 vector 단독 대비 이득은 유의하지 않다. 예전 가중 RRF 규칙은 `LEGACY_RULES_FUSION`(ablation `hybrid_rules`)
 - DB 연결은 `src/integrations/db.py` 풀(프로세스당 `POSTGRES_POOL_MAX`, 기본 8)
 
 오프라인 평가 하니스: `eval/`, `scripts/eval_build_queries.py`, `scripts/eval_retrieval.py`.

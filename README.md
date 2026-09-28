@@ -72,7 +72,7 @@ flowchart TD
 
 | 경로 | 상태 | 내용 |
 | --- | --- | --- |
-| hybrid | **제품 경로** (`RETRIEVAL_MODE=hybrid`, 기본값) | lexical과 vector 결과를 RRF(k=60)와 방법별 가중치로 합칩니다. 질의 임베딩 키(서버 `OPENAI_API_KEY`)가 있을 때만 씁니다. |
+| hybrid | **제품 경로** (`RETRIEVAL_MODE=hybrid`, 기본값) | 두 채널의 점수를 질의마다 min-max 정규화해 0.35 × lexical + 0.65 × vector로 합칩니다(convex combination). vector 결과가 있으면 lexical 부분 일치 행은 뺍니다. 질의 임베딩 키(서버 `OPENAI_API_KEY`)가 있을 때만 씁니다. |
 | lexical | **폴백 경로** (키가 없거나 임베딩 호출 실패, 또는 `RETRIEVAL_MODE=lexical`) | 제목(A)·초록(B)·청크(C) 가중 tsvector에 `websearch_to_tsquery` + `plainto_tsquery`로 `ts_rank_cd` 점수를 매기고(모든 lexeme이 맞지 않는 긴 질의는 OR 질의 순위 × lexeme coverage로 아래 등급 점수), 논문당 3청크 상한, ILIKE 보너스, 섹션·`content_role` 가중, 질의 토큰 겹침 rerank, 참고문헌처럼 보이는 텍스트 필터, 논문 다양성 보정, 인접 청크 병합을 거칩니다. |
 | vector | hybrid의 구성 요소 | `paper_embeddings` 코사인 거리(`<=>`)와 섹션·`content_role` 감점. `VECTOR_MIN_SIMILARITY`(기본 0)로 낮은 유사도를 거를 수 있습니다. |
 
@@ -192,10 +192,11 @@ GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 
 ## Evaluation
 
-검색 품질은 HF Daily Papers 14일치(2026-09-11 ~ 09-24)로 만든 코퍼스(논문 275편, 청크 16,011개, 임베딩 13,329개, 본문 source는
+검색 품질은 HF Daily Papers 14일치(2026-09-11 ~ 09-24)로 만든 코퍼스(논문 275편, 청크 16,010개, 임베딩 13,328개, 본문 source는
 모두 HURIDOCS `layout_pdf`)에서 쟀습니다. 질의 142개(known-item 57 + 청크 합성 11, 수작업 케이스 74) 중 정답 논문이 있는
-111개(ko 58 / en 53)를 k=10으로 채점한 논문 단위 결과입니다(`eval/results/20260926-103105.md`, 커밋 de56bf6 위에서 측정해
-72051ff로 기록).
+111개(ko 58 / en 53)를 k=10으로 채점한 논문 단위 결과입니다(`eval/results/20260929-005408.md`, 커밋 d73e136). 코퍼스는
+2026-09-28에 첫 재구축과 같은 조건으로 다시 만든 것이고, 청크 합성 질의 11개의 정답 청크 id는 새 코퍼스에 맞게 다시
+매핑했습니다(worklog 2026-09-28_02, 질의셋 sha256 fe0cce78a89b).
 
 **측정 조건**: 이 코퍼스는 수식·표 파싱을 끄고(`LAYOUT_PARSER_PARSE_TABLES_AND_MATH=false`) 만들었습니다. 운영 기본값(`true`)과
 다릅니다. 레이아웃·섹션·`content_role`은 HURIDOCS 결과이고, 수식은 LaTeX 대신 pdftohtml 텍스트, 표는 HTML 대신 텍스트입니다.
@@ -204,14 +205,14 @@ GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 | 검색 방식 | hit@1 | hit@5 | hit@10 | MRR@10 |
 | --- | --- | --- | --- | --- |
 | lexical | 0.514 | 0.586 | 0.649 | 0.552 |
-| vector | 0.739 | 0.865 | 0.883 | 0.785 |
-| hybrid | 0.730 | 0.865 | 0.883 | 0.787 |
+| vector | 0.748 | 0.856 | 0.883 | 0.789 |
+| hybrid | 0.766 | 0.865 | 0.883 | 0.805 |
 
-- 같은 논문 275편을 pypdf로 파싱한 첫 실측(`20260925-225658.md`, 커밋 5f9c4cd, 질의 115개)과 비교하면 hybrid hit@10 0.817→0.883, hit@1 0.704→0.730, vector hit@10 0.826→0.883, lexical hit@10 0.643→0.649입니다. 파서만 바뀐 비교는 아닙니다. 그사이 참고문헌 오판 휴리스틱(검색 단계의 lexical 필터·vector 감점)과 질의셋(청크 합성 질의 재생성, 주제 질의 라벨 교정)도 바뀌었습니다. 지연은 측정 장비가 달라 비교하지 않습니다.
-- hybrid는 hit@5·hit@10에서 vector와 같고 MRR은 0.787 대 0.785, hit@1은 0.730 대 0.739입니다. 첫 실측에서 hybrid를 기본값으로 둔 근거 중 하나였던 "영어 질의에서 lexical hit@1이 vector보다 높다"는 이번에는 성립하지 않습니다(lexical 0.717, vector 0.774). 기본값을 hybrid로 유지하는 이유는 임베딩 키가 없을 때의 lexical 폴백을 한 경로에서 관리하기 위해서이고, vector 단독 전환은 한계로 기록합니다.
-- hybrid 융합 규칙 재검증(`eval/results/fusion_20260928-130300.md`, worklog 2026-09-28_02)은 같은 논문을 다시 구축한 코퍼스(청크 16,010개)와 같은 질의 111개로 쟀습니다. 위 표와는 코퍼스와 실행이 다릅니다. MRR@10 / hit@1은 현재 가중 규칙 0.792 / 0.739, 표준 RRF(k=60, 부분 일치 필터 유지) 0.785 / 0.730, vector 단독 0.789 / 0.748, 현재 규칙에서 부분 일치 필터만 끈 경우 0.709 / 0.640입니다. 가중치와 k의 영향은 작고(가중치가 순위를 바꾼 질의는 111개 중 3개, 표준 RRF는 k 10~100에서 결과가 같음), 성능 차이는 vector 결과가 있을 때 lexical 부분 일치 행을 빼는 필터에서 나왔습니다. 예전 ablation `hybrid_plainrrf`(hit@1 0.577)는 가중치 제거와 부분 일치 행 유지가 섞인 값이라 가중치 효과로 읽지 않습니다. vector rerank를 빼면 hit@1이 0.739에서 0.730으로 내려갑니다.
+- 같은 논문 275편을 pypdf로 파싱한 첫 실측(`20260925-225658.md`, 커밋 5f9c4cd, 질의 115개)과 비교하면 hit@10은 hybrid 0.817→0.883, vector 0.826→0.883, lexical 0.643→0.649입니다. 파서만 바뀐 비교는 아닙니다. 그사이 참고문헌 오판 휴리스틱(검색 단계의 lexical 필터·vector 감점), 질의셋(청크 합성 질의 재생성, 주제 질의 라벨 교정), 코퍼스 재구축, hybrid 융합 규칙도 바뀌었습니다. 지연은 측정 장비가 달라 비교하지 않습니다.
+- hybrid는 hit@10에서 vector와 같고 MRR은 0.805 대 0.789, hit@1은 0.766 대 0.748입니다. 이 차이는 유의하지 않습니다(클러스터 paired bootstrap ΔMRR +0.016, 95% 구간 [−0.001, +0.038]). 두 방식의 순위는 111개 중 4개 질의에서만 갈립니다. 첫 실측에서 hybrid를 기본값으로 둔 근거 중 하나였던 "영어 질의에서 lexical hit@1이 vector보다 높다"는 이번에는 성립하지 않습니다(lexical 0.717, vector 0.792). 기본값을 hybrid로 유지하는 이유는 임베딩 키가 없을 때의 lexical 폴백을 한 경로에서 관리하기 위해서이고, vector 단독 전환은 한계로 기록합니다.
+- hybrid 융합은 2026-09-29에 가중 RRF 규칙(RRF k=60 + 손으로 고른 가중치, 상수 25개)에서 min-max convex combination(lexical 가중치 0.35, 상수 1개)으로 바꿨습니다. 사전 등록한 비교(`eval/results/fusion_20260929-003515.md`, worklog 2026-09-29_01~03)의 규칙 (1)이 이 설정을 가리켰고 사용자가 채택했습니다. 같은 실행의 MRR@10 / hit@1은 예전 가중 규칙(`hybrid_rules`) 0.792 / 0.739, 표준 RRF(k=60, 부분 일치 필터 유지) 0.785 / 0.730, vector 단독 0.789 / 0.748입니다. 새 규칙은 예전 규칙과 3개 질의에서 순위가 다르고 셋 다 낫습니다(각 채널의 1위가 정답 논문인데, 두 채널에 함께 나온 다른 논문 청크가 RRF 항 두 개를 받아 1위를 빼앗던 경우). 예전 규칙 대비 구간은 [+0.000, +0.031]로 0을 포함합니다. α는 같은 111개 질의로 골랐습니다(가족 CV 0.799 ± 0.037). RRF 가족 안에서는 가중치와 k의 영향이 작았고(worklog 2026-09-28_02), 부분 일치 lexical 행을 빼는 필터가 효과를 냈습니다. 예전 규칙에서 이 필터만 끄면 0.709 / 0.640입니다. ablation `hybrid_plainrrf`(hit@1 0.586)는 가중치 제거와 부분 일치 행 유지가 섞인 값이라 가중치 효과로 읽지 않습니다. vector rerank를 빼면 vector hit@1이 0.748에서 0.730으로 내려갑니다.
 - 청크 단위(청크 합성 질의 11건)에서 hybrid chunk hit@5는 0.636(첫 실측은 다른 질의 15건에서 0.533), lexical은 0.273입니다. 참고문헌 휴리스틱을 고친 뒤에는 lexical 필터를 빼도(`lexical_nofilter`) 청크 hit@5가 0.273 그대로라, 첫 실측에서 필터가 정답 청크를 걸러 내던 현상은 보이지 않습니다. 논문 다양성 보정을 빼도(`hybrid_nodiv`) 0.636 그대로입니다. 정답 청크가 6~10위에 있는 경우는 없습니다(hybrid chunk hit@5 = hit@10).
-- 주제 질의는 조건에 맞는 논문 전부를 정답으로 두도록 라벨을 고친 뒤 질의 형태 관점(query_form 12건) hit@10이 lexical 0.667, vector 0.917, hybrid 0.917입니다(첫 실측 0.333 / 0.250 / 0.167은 라벨 오류). 정답 집합이 커서 recall@10은 0.326~0.522로 낮으므로 이 관점에서는 hit@k만 읽습니다.
+- 주제 질의는 조건에 맞는 논문 전부를 정답으로 두도록 라벨을 고친 뒤 질의 형태 관점(query_form 12건) hit@10이 lexical 0.667, vector 0.917, hybrid 0.917입니다(첫 실측 0.333 / 0.250 / 0.167은 라벨 오류). 정답 집합이 커서 recall@10은 0.326~0.529로 낮으므로 이 관점에서는 hit@k만 읽습니다.
 - 약한 부분집합은 한국어 lexical(hit@10 0.466), 언어 관점(10건, vector·hybrid hit@10 0.400), 다논문 관점(6건, vector·hybrid hit@10 0.500, 첫 실측 hybrid 0.667)입니다. 세 방식 모두 상위 10개 안의 참고문헌·목차 청크 비율(noise@10)은 0입니다.
 
 **검색 지연**: hybrid는 lexical 경로와 vector 경로(질의 임베딩 → 벡터 SQL)를 동시에 실행합니다(커밋 ba2e6a3). 병렬화 전 순차 실행과 같은 조건에서 번갈아 잰 결과입니다(`eval/results/latency_20260928-151847.md`). 조건은 로컬 WSL2(i7-13650HX), 같은 머신의 PostgreSQL 16 + pgvector 0.8.6(재구축 코퍼스 덤프 복원), 연결 풀 8, 질의 111개, 워밍업 1회 + 3회 반복, 질의마다 순서 교대, 임베딩 API 왕복 포함, 단일 클라이언트입니다.
@@ -222,9 +223,9 @@ GitHub Actions(`.github/workflows/ci.yml`) 잡 구성:
 | 제품 경로 `retrieve_contexts` (limit 5) | 390 / 669 | 235 / 448 | −25.6% [−28.3, −23.0] |
 
 - 같은 임베딩을 넣으면 111개 질의 모두 결과가 같습니다. 단계별 중앙값은 임베딩 149ms, lexical SQL 약 235ms, vector SQL 57ms이고, 한국어 질의는 lexical SQL이 약 10ms라 줄어드는 폭이 작습니다(ko p50 246→228ms, en 604→381ms). 같은 조건의 대조군은 lexical 단독 160 / 383ms, vector 단독 198 / 263ms입니다.
-- 위 품질 표의 측정(`20260926-103105.md`)은 다른 장비(GPU 파드)에서 순차 코드로 잰 것이라 지연을 이 값과 비교하지 않습니다. 동시 요청 부하와 원격 DB에서의 지연은 재지 않았습니다.
+- 이 A/B는 가중 RRF 규칙 시점(2026-09-28)에 쟀습니다. 2026-09-29의 융합 규칙 변경은 두 채널을 같은 방식으로 병렬 실행하고 채널 결과를 합치는 계산만 바꾸므로 다시 재지 않았고, 위 값을 그대로 씁니다. 품질 표 실행(`20260929-005408.md`)의 지연 열은 교대 측정이 아니라 이 비교에 쓰지 않습니다. 동시 요청 부하와 원격 DB에서의 지연은 재지 않았습니다.
 
-평가 하니스는 [`eval/`](./eval/README.md)에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
+평가 하니스는 [`eval/`](./eval/README.md)에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF, 예전 가중 RRF 규칙)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
 
 ```bash
 python scripts/eval_build_queries.py                     # 표본·프롬프트 확인 (dry-run, LLM 미호출)
@@ -270,7 +271,7 @@ python scripts/eval_generation.py --answers eval/results/answers_<timestamp>.jso
 - **평가 규모**: 275편·질의 111개의 단일 실행이라 HNSW 효과와 운영 규모 지연, 지표의 분산을 말할 수 없습니다. 청크 합성 질의는 어휘 겹침 필터를 통과한 11건뿐이라 1건이 청크 hit@5를 0.091 움직입니다. LLM이 만든 질의가 절반이라 실제 사용자 질의보다 코퍼스 문장과 어휘 겹침이 클 수 있습니다.
 - **수식·표 파싱 조건**: 현재 수치는 `LAYOUT_PARSER_PARSE_TABLES_AND_MATH=false`로 만든 코퍼스의 값입니다. 운영 기본값(`true`)의 LaTeX 수식·HTML 표가 검색에 주는 영향은 재지 않았습니다. 켜면 수식 OCR(pix2tex)과 표 OCR(RapidOCR)이 CPU에 묶여, pix2tex를 GPU로 돌려도 28쪽 논문 하나에 194초가 걸렸습니다(끄면 19초).
 - **파싱 전 중복 건너뛰기 없음**: prepare worker는 논문을 파싱한 뒤에야 `content_hash`로 변경 여부를 판단합니다. 주말에 HF Daily Papers가 금요일 목록을 반복하면 같은 논문을 다시 파싱하고(14일치 raw 375행에 고유 논문 275편), 날짜 잡을 병렬로 돌리면 같은 논문을 동시에 처리합니다.
-- **hybrid 가중치**: hybrid가 hit@10에서 vector와 같고 hit@1은 조금 낮으며, 병렬화 뒤에도 vector 단독보다 느립니다(같은 조건 p50 282 대 198ms). RRF 가중치 규칙을 다시 다듬거나 vector 단독 경로를 검토할 지점입니다.
+- **hybrid 대 vector 단독**: 융합을 min-max convex combination으로 바꾼 뒤 hybrid MRR@10이 vector 단독보다 0.016 높지만 유의하지 않고(95% 구간 [−0.001, +0.038]), 순위가 갈리는 질의는 111개 중 4개입니다. α(0.35)는 같은 질의셋으로 골랐습니다. hybrid는 병렬화 뒤에도 vector 단독보다 느립니다(같은 조건 p50 282 대 198ms). 새 질의셋으로 α를 다시 확인하거나 vector 단독 경로를 검토할 지점입니다.
 - **상세 챗 인젝션 수정 미측정**: 상세 챗 프롬프트에 사용자 메시지 속 지시를 따르지 않는 규칙을 더했지만(ce24d57) `sf-inject-embedded`의 재측정은 하지 않았습니다.
 - **한국어 lexical**: FTS 설정이 `english`라 임베딩 키가 없는 lexical 폴백에서는 한국어 질문이 거의 맞지 않습니다.
 - **ASGI 전환**: 지금은 gunicorn gthread(워커 4 × 스레드 8)라 SSE 스트림 하나가 스레드 하나를 오래 점유합니다.
