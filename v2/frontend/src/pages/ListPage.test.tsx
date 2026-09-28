@@ -107,9 +107,13 @@ describe("ListPage", () => {
     expect(router.state.location.search).toBe(`?q=${encodeURIComponent("그래프 RAG")}`);
   });
 
-  it("shows the empty and error states", async () => {
+  it("tells an empty search apart from an empty collection", async () => {
     stubList(0);
-    renderRoute("/", ListPage, "/?q=nothing");
+    const { unmount } = renderRoute("/", ListPage, "/?q=nothing");
+    expect(await screen.findByText("검색 결과가 없습니다.")).toBeInTheDocument();
+    unmount();
+
+    renderRoute("/", ListPage, "/");
     expect(await screen.findByText("수집된 논문이 없습니다.")).toBeInTheDocument();
   });
 

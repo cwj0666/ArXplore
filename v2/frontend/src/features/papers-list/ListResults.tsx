@@ -35,7 +35,11 @@ export function ListResults({ params, listQuery, onSortChange }: ListResultsProp
   }
 
   if (data.total_items === 0) {
-    return <div className={styles.noPapers}>수집된 논문이 없습니다.</div>;
+    return (
+      <div className={styles.noPapers}>
+        {data.query ? "검색 결과가 없습니다." : "수집된 논문이 없습니다."}
+      </div>
+    );
   }
 
   return (
