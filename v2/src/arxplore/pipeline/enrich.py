@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -12,6 +13,8 @@ from arxplore.sources.arxiv_metadata import fetch_arxiv_metadata
 
 DEFAULT_ENRICH_MAX_PAPERS = 30
 SAMPLE_LIMIT = 5
+LOOKUP_RETRY_BASE_DELAY = timedelta(days=1)
+LOOKUP_RETRY_MAX_DELAY = timedelta(days=30)
 
 
 def merge_enriched(existing: EnrichmentCandidate, enriched: ArxivPaper) -> PaperUpsert:
@@ -96,11 +99,15 @@ async def enrich_papers_metadata(
         return _soft_failure("timed_out", candidates, limit, exc)
 
     result = EnrichResult(status="success", candidate_count=len(candidates), max_papers=limit)
+    found: list[str] = []
+    missing: list[str] = []
     for paper in candidates:
         enriched = metadata.get(paper.arxiv_id)
         if enriched is None:
             result.skipped_count += 1
+            missing.append(paper.arxiv_id)
             continue
+        found.append(paper.arxiv_id)
         merged = merge_enriched(paper, enriched)
         await papers.save_paper(pool, merged)
         result.updated_count += 1
@@ -113,4 +120,11 @@ async def enrich_papers_metadata(
                     "pdf_url": merged.pdf_url,
                 }
             )
+    await papers.record_arxiv_lookups(
+        pool,
+        found=found,
+        missing=missing,
+        base_delay=LOOKUP_RETRY_BASE_DELAY,
+        max_delay=LOOKUP_RETRY_MAX_DELAY,
+    )
     return result

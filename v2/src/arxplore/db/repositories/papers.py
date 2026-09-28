@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+from datetime import timedelta
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -64,12 +66,35 @@ SELECT arxiv_id, title, authors, abstract, primary_category, categories, pdf_url
        published_at, updated_at, upvotes, github_url, github_stars, citation_count, source
 FROM papers
 WHERE
-    primary_category IS NULL
-    OR categories = '[]'::jsonb
-    OR source = 'hf_daily_papers_raw'
+    (
+        primary_category IS NULL
+        OR categories = '[]'::jsonb
+        OR source = 'hf_daily_papers_raw'
+    )
+    AND (arxiv_lookup_retry_at IS NULL OR arxiv_lookup_retry_at <= NOW())
 ORDER BY COALESCE(published_at, updated_at_utc) DESC
 LIMIT %s
 """
+
+RECORD_ARXIV_LOOKUP_HITS_SQL = """
+UPDATE papers
+SET arxiv_lookup_at = NOW(), arxiv_lookup_misses = 0, arxiv_lookup_retry_at = NULL
+WHERE arxiv_id = ANY(%s)
+"""
+
+RECORD_ARXIV_LOOKUP_MISSES_SQL = """
+UPDATE papers
+SET
+    arxiv_lookup_at = NOW(),
+    arxiv_lookup_misses = arxiv_lookup_misses + 1,
+    arxiv_lookup_retry_at = NOW() + LEAST(
+        %(max_delay)s::interval,
+        %(base_delay)s::interval * power(2, LEAST(arxiv_lookup_misses, %(max_exponent)s))
+    )
+WHERE arxiv_id = ANY(%(arxiv_ids)s)
+"""
+
+ARXIV_LOOKUP_MAX_EXPONENT = 16
 
 GET_PAPER_SQL = """
 SELECT arxiv_id, title, authors, abstract, primary_category, categories, pdf_url,
@@ -150,3 +175,26 @@ async def list_papers_missing_arxiv_metadata(db: ConnectionSource, *, limit: int
         await cursor.execute(LIST_PAPERS_MISSING_ARXIV_METADATA_SQL, (max(1, limit),))
         rows = await cursor.fetchall()
     return [EnrichmentCandidate(**_paper_fields(row), source=row["source"] or DEFAULT_PAPER_SOURCE) for row in rows]
+
+
+async def record_arxiv_lookups(
+    db: ConnectionSource,
+    *,
+    found: Sequence[str],
+    missing: Sequence[str],
+    base_delay: timedelta,
+    max_delay: timedelta,
+) -> None:
+    async with use_connection(db) as connection, connection.cursor() as cursor:
+        if found:
+            await cursor.execute(RECORD_ARXIV_LOOKUP_HITS_SQL, (list(found),))
+        if missing:
+            await cursor.execute(
+                RECORD_ARXIV_LOOKUP_MISSES_SQL,
+                {
+                    "arxiv_ids": list(missing),
+                    "base_delay": base_delay,
+                    "max_delay": max_delay,
+                    "max_exponent": ARXIV_LOOKUP_MAX_EXPONENT,
+                },
+            )

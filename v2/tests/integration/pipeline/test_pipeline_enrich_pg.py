@@ -207,3 +207,79 @@ async def test_a_second_enrich_refreshes_an_enriched_row(pool, probe) -> None:
     row = await probe.row(ENRICHED_COLUMNS, ("2609.00001",))
     assert row is not None
     assert (row["title"], row["categories"]) == ("arXiv title 2609.00001", ["cs.LG", "cs.AI"])
+
+
+LOOKUP_COLUMNS = """
+    SELECT arxiv_lookup_misses AS misses,
+           arxiv_lookup_at IS NOT NULL AS looked_up,
+           EXTRACT(EPOCH FROM (arxiv_lookup_retry_at - NOW())) / 86400 AS retry_in_days
+    FROM papers WHERE arxiv_id = %s
+"""
+
+
+def _queried_ids(route: Any) -> list[str]:
+    return [
+        arxiv_id
+        for call in route.calls
+        for arxiv_id in parse_qs(urlsplit(str(call.request.url)).query)["id_list"][0].split(",")
+    ]
+
+
+@respx.mock
+async def test_a_paper_arxiv_does_not_know_waits_before_the_next_lookup(pool, probe) -> None:
+    await _hf_paper(pool, "2609.00001", day=10)
+    await _hf_paper(pool, "2609.00002", day=11)
+    route = respx.get(ARXIV_URL).mock(side_effect=lambda request: _feed(request, {"2609.00002"}))
+
+    await enrich_papers_metadata(pool, _client(), batch_size=25)
+    missed = await probe.row(LOOKUP_COLUMNS, ("2609.00001",))
+    found = await probe.row(LOOKUP_COLUMNS, ("2609.00002",))
+    second = await enrich_papers_metadata(pool, _client(), batch_size=25)
+
+    assert missed is not None and (missed["misses"], missed["looked_up"]) == (1, True)
+    assert 0.99 < float(missed["retry_in_days"]) <= 1.0
+    assert found is not None and (found["misses"], found["looked_up"], found["retry_in_days"]) == (0, True, None)
+    assert second.candidate_count == 0
+    assert _queried_ids(route) == ["2609.00002", "2609.00001"]
+
+
+@respx.mock
+async def test_the_wait_doubles_per_miss_up_to_thirty_days(pool, probe) -> None:
+    await _hf_paper(pool, "2609.00001", day=10)
+    respx.get(ARXIV_URL).mock(side_effect=lambda request: _feed(request, set()))
+    waits = []
+    for _ in range(7):
+        await probe.execute("UPDATE papers SET arxiv_lookup_retry_at = NOW() - INTERVAL '1 minute'")
+        await enrich_papers_metadata(pool, _client(), batch_size=25)
+        row = await probe.row(LOOKUP_COLUMNS, ("2609.00001",))
+        assert row is not None
+        waits.append(round(float(row["retry_in_days"])))
+
+    assert waits == [1, 2, 4, 8, 16, 30, 30]
+    assert await probe.scalar("SELECT arxiv_lookup_misses FROM papers") == 7
+
+
+@respx.mock
+async def test_a_found_paper_clears_its_earlier_misses(pool, probe) -> None:
+    await _hf_paper(pool, "2609.00001", day=10)
+    await probe.execute(
+        "UPDATE papers SET arxiv_lookup_misses = 4, arxiv_lookup_retry_at = NOW() - INTERVAL '1 minute'"
+    )
+    respx.get(ARXIV_URL).mock(side_effect=lambda request: _feed(request, {"2609.00001"}))
+
+    await enrich_papers_metadata(pool, _client(), batch_size=25)
+
+    row = await probe.row(LOOKUP_COLUMNS, ("2609.00001",))
+    assert row is not None and (row["misses"], row["retry_in_days"]) == (0, None)
+
+
+@respx.mock
+async def test_a_soft_failure_records_no_lookup(pool, probe) -> None:
+    await _hf_paper(pool, "2609.00001", day=10)
+    respx.get(ARXIV_URL).mock(side_effect=[httpx.Response(429)] * 4)
+
+    result = await enrich_papers_metadata(pool, _client(), batch_size=25)
+
+    assert result.status == "rate_limited"
+    row = await probe.row(LOOKUP_COLUMNS, ("2609.00001",))
+    assert row is not None and (row["misses"], row["looked_up"]) == (0, False)
