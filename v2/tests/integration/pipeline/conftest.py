@@ -24,6 +24,7 @@ PIPELINE_TABLES = (
     "raw_daily_papers",
     "pipeline_state",
     "prepare_jobs",
+    "scheduler_runs",
 )
 
 CLEAR_TABLES_SQL = """
@@ -31,8 +32,10 @@ DELETE FROM papers;
 DELETE FROM raw_daily_papers;
 DELETE FROM pipeline_state;
 DELETE FROM prepare_jobs;
+DELETE FROM scheduler_runs;
 ALTER SEQUENCE paper_chunks_id_seq RESTART;
 ALTER SEQUENCE prepare_jobs_id_seq RESTART;
+ALTER SEQUENCE scheduler_runs_id_seq RESTART;
 """
 
 FAKE_SERVER_RELATIVE_PATH = Path("tests/fakes/openai_server.py")
