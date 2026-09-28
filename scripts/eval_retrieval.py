@@ -51,7 +51,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--methods", default="lexical,vector,hybrid", help="쉼표 구분. 사용 가능: " + ", ".join(METHODS)
     )
-    parser.add_argument("--ablations", default="", help="쉼표 구분: nodiv, nofilter, norerank, plainrrf 또는 all")
+    parser.add_argument(
+        "--ablations", default="", help="쉼표 구분: nodiv, nofilter, norerank, plainrrf, rules 또는 all"
+    )
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--adjacency-window", type=int, default=1, help="제품 경로와 같은 문맥 창(지연 측정에 포함)")
     parser.add_argument("--limit", type=int, default=None, help="파일 순서대로 앞 N개 질의만 실행")

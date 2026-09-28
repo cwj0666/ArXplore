@@ -6,7 +6,8 @@
 
 `capture_query`는 `PaperRetriever.hybrid_fusion_inputs`(제품 hybrid 경로가 융합에 넘기는 입력 그대로)와 제품
 `search_paper_chunks_by_hybrid` 결과를 함께 기록한다. `replay`는 저장한 후보에 `fuse_hybrid_candidates` →
-`apply_paper_diversity`를 적용하고, `gate`는 기본 설정 재생이 기록한 제품 결과와 같은지 본다.
+`apply_paper_diversity`를 적용하고, `gate`는 기록 시점의 제품 설정(머리말 `fusion_default`, `recorded_fusion_config`)으로
+재생한 순위가 기록한 제품 결과와 같은지 본다. 제품 기본값이 바뀐 뒤에도 예전 캐시의 게이트가 그대로 성립한다.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import gzip
 import hashlib
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +162,23 @@ def cache_digest(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
 
 
+def _as_tuple(value: Any) -> Any:
+    return tuple(_as_tuple(item) for item in value) if isinstance(value, list) else value
+
+
+def recorded_fusion_config(header: dict[str, Any]) -> HybridFusionConfig:
+    """머리말의 `fusion_default`(기록 시점 `asdict(DEFAULT_HYBRID_FUSION)`)를 설정으로 되돌린다. 없는 필드는 지금 기본값을
+    쓰므로, 필드가 늘기 전 캐시(예: 2026-09-28, 가중 RRF 규칙)도 그때 설정 그대로 복원된다. 머리말에 없으면 지금 기본값."""
+    recorded = header.get("fusion_default")
+    if not recorded:
+        return DEFAULT_HYBRID_FUSION
+    known = {item.name for item in fields(HybridFusionConfig)}
+    unknown = sorted(set(recorded) - known)
+    if unknown:
+        raise CacheError(f"머리말 fusion_default에 알 수 없는 필드가 있습니다: {unknown}")
+    return HybridFusionConfig(**{name: _as_tuple(value) for name, value in recorded.items()})
+
+
 def replay(cached: CachedQuery, *, k: int, channel: str = "hybrid", config: HybridFusionConfig | None = None) -> list:
     """저장한 후보로 한 채널의 최종 순위를 다시 만든다. hybrid는 융합 → 다양성, vector/lexical은 다양성만."""
     if channel == "hybrid":
@@ -187,17 +205,20 @@ def _ids(hits: Sequence[dict]) -> list[tuple[Any, str]]:
     return [(hit.get("chunk_id"), str(hit.get("arxiv_id") or "")) for hit in hits]
 
 
-def compare_live(queries: Sequence[CachedQuery], *, k: int, channel: str = "hybrid") -> list[Mismatch]:
-    """기본 설정 재생 순위(chunk_id, arxiv_id)가 기록한 live 순위와 다른 질의. live가 없는 질의도 불일치로 센다."""
+def compare_live(
+    queries: Sequence[CachedQuery], *, k: int, channel: str = "hybrid", config: HybridFusionConfig | None = None
+) -> list[Mismatch]:
+    """`config`(없으면 기본 설정) 재생 순위(chunk_id, arxiv_id)가 기록한 live 순위와 다른 질의. live가 없는 질의도 불일치로 센다."""
     mismatches: list[Mismatch] = []
     for cached in queries:
-        replayed = _ids(replay(cached, k=k, channel=channel))
+        replayed = _ids(replay(cached, k=k, channel=channel, config=config))
         live = _ids(cached.live.get(channel, ())) if channel in cached.live else None
         if live != replayed:
             mismatches.append(Mismatch(cached.id, channel, live or [], replayed))
     return mismatches
 
 
-def gate(queries: Sequence[CachedQuery], *, k: int) -> list[Mismatch]:
-    """재생 게이트: 기본 융합 설정 재생이 모든 질의에서 제품 hybrid 결과와 같아야 한다. 불일치 목록을 돌려준다."""
-    return compare_live(queries, k=k, channel="hybrid")
+def gate(queries: Sequence[CachedQuery], *, k: int, config: HybridFusionConfig | None = None) -> list[Mismatch]:
+    """재생 게이트: 기록 시점 제품 설정(`config`, 보통 `recorded_fusion_config(header)`. 없으면 지금 기본값) 재생이 모든
+    질의에서 기록한 제품 hybrid 결과와 같아야 한다. 불일치 목록을 돌려준다."""
+    return compare_live(queries, k=k, channel="hybrid", config=config)

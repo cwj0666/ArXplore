@@ -14,7 +14,12 @@ from typing import Any, Protocol
 
 from eval.dataset import EvalQuery
 from eval.metrics import hit_at_k, mean, mrr_at_k, percentile, recall_at_k
-from src.integrations.hybrid_fusion import STANDARD_RRF_FUSION, fuse_hybrid_candidates
+from src.integrations.hybrid_fusion import (
+    LEGACY_RULES_FUSION,
+    STANDARD_RRF_FUSION,
+    HybridFusionConfig,
+    fuse_hybrid_candidates,
+)
 from src.integrations.paper_retriever import candidate_fetch_limit, hybrid_branch_limit, normalize_search_query
 
 NOISE_ROLES = frozenset({"references", "toc", "front_matter"})
@@ -108,12 +113,21 @@ def _search_vector_norerank(retriever: Any, query: str, k: int, window: int) -> 
     return _with_contexts(retriever, _diversify(retriever, candidates, k), window)
 
 
-def _search_hybrid_plainrrf(retriever: Any, query: str, k: int, window: int) -> list[dict]:
+def _hybrid_with_config(retriever: Any, query: str, k: int, window: int, config: HybridFusionConfig) -> list[dict]:
+    """제품 hybrid와 같은 입력(`hybrid_fusion_inputs`)을 다른 융합 설정으로 합친다."""
     query, lexical, vector = retriever.hybrid_fusion_inputs(query, limit=k)
     if not query:
         return []
-    merged = fuse_hybrid_candidates(query, lexical, vector, STANDARD_RRF_FUSION)
+    merged = fuse_hybrid_candidates(query, lexical, vector, config)
     return _with_contexts(retriever, _diversify(retriever, merged, k), window)
+
+
+def _search_hybrid_plainrrf(retriever: Any, query: str, k: int, window: int) -> list[dict]:
+    return _hybrid_with_config(retriever, query, k, window, STANDARD_RRF_FUSION)
+
+
+def _search_hybrid_rules(retriever: Any, query: str, k: int, window: int) -> list[dict]:
+    return _hybrid_with_config(retriever, query, k, window, LEGACY_RULES_FUSION)
 
 
 @dataclass(frozen=True)
@@ -138,6 +152,9 @@ METHODS: dict[str, MethodSpec] = {
         ),
         MethodSpec("vector_norerank", _search_vector_norerank, True, "vector, Python 재정렬 제거(SQL 감점은 유지)"),
         MethodSpec("hybrid_plainrrf", _search_hybrid_plainrrf, True, "hybrid, 표준 RRF(STANDARD_RRF_FUSION)"),
+        MethodSpec(
+            "hybrid_rules", _search_hybrid_rules, True, "hybrid, 2026-09-29까지의 가중 RRF 규칙(LEGACY_RULES_FUSION)"
+        ),
     )
 }
 
@@ -147,6 +164,7 @@ ABLATIONS: dict[str, tuple[str, ...]] = {
     "nofilter": ("lexical_nofilter",),
     "norerank": ("vector_norerank",),
     "plainrrf": ("hybrid_plainrrf",),
+    "rules": ("hybrid_rules",),
 }
 
 

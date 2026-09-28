@@ -10,11 +10,14 @@ import pytest
 
 from src.integrations.hybrid_fusion import (
     DEFAULT_HYBRID_FUSION,
+    LEGACY_RULES_FUSION,
     STANDARD_RRF_FUSION,
     STRICT_LEXICAL_SCORE_FLOOR,
     HybridFusionConfig,
     apply_paper_diversity,
     fuse_hybrid_candidates,
+    hybrid_quality_weight,
+    lexical_confidence,
     normalize_channel_scores,
     resolve_hybrid_method_weights,
 )
@@ -46,12 +49,29 @@ def _ids(candidates: list[dict]) -> list[int]:
     return [candidate["chunk_id"] for candidate in candidates]
 
 
+def _merge_legacy(
+    query: str, lexical: list[dict], vector: list[dict], *, arxiv_id: str | None, limit: int
+) -> list[dict]:
+    """제품 병합 경로(`_merge_hybrid_candidates`)를 2026-09-29까지의 가중 RRF 규칙(`LEGACY_RULES_FUSION`)으로 부른다."""
+    return _retriever()._merge_hybrid_candidates(
+        query, lexical, vector, arxiv_id=arxiv_id, limit=limit, config=LEGACY_RULES_FUSION
+    )
+
+
+def _legacy_weights(query: str, lexical: list[dict], vector: list[dict]) -> dict[str, float]:
+    return resolve_hybrid_method_weights(query, lexical, vector, LEGACY_RULES_FUSION)
+
+
+def _legacy_quality(method: str, candidate: dict) -> float:
+    return hybrid_quality_weight(method, candidate, LEGACY_RULES_FUSION)
+
+
 class TestMergeHybridCandidates:
     def test_rrf_scores_and_both_channel_bonus(self):
         lexical = [_candidate(1, 0.9), _candidate(2, 0.6)]
         vector = [_candidate(2, 0.8), _candidate(3, 0.7)]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, vector, arxiv_id=None, limit=10)
 
         by_id = {candidate["chunk_id"]: candidate for candidate in merged}
         assert by_id[1]["score"] == pytest.approx(1.0 / (RRF_K + 1))
@@ -63,7 +83,7 @@ class TestMergeHybridCandidates:
         lexical = [_candidate(1, 0.9), _candidate(2, 0.6)]
         vector = [_candidate(2, 0.8)]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, vector, arxiv_id=None, limit=10)
         entry = next(candidate for candidate in merged if candidate["chunk_id"] == 2)
 
         assert entry["matched_methods"] == ["lexical", "vector"]
@@ -79,9 +99,7 @@ class TestMergeHybridCandidates:
         assert entry["similarity_score"] == entry["score"]
 
     def test_single_channel_hits_get_no_bonus(self):
-        merged = _retriever()._merge_hybrid_candidates(
-            "policy loss", [_candidate(1, 0.9)], [_candidate(2, 0.9)], arxiv_id=None, limit=10
-        )
+        merged = _merge_legacy("policy loss", [_candidate(1, 0.9)], [_candidate(2, 0.9)], arxiv_id=None, limit=10)
 
         assert all("cross_method_overlap_bonus" not in candidate["score_breakdown"] for candidate in merged)
 
@@ -89,7 +107,7 @@ class TestMergeHybridCandidates:
         lexical = [_candidate(1, 0.25)]
         vector = [_candidate(2, 0.5)]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, vector, arxiv_id=None, limit=10)
         by_id = {candidate["chunk_id"]: candidate for candidate in merged}
 
         assert by_id[1]["score"] == pytest.approx(0.45 * 0.75 * 0.4 / 61)
@@ -100,7 +118,7 @@ class TestMergeHybridCandidates:
         lexical = [_candidate(1, 0.9, snippet="lexical snippet")]
         vector = [_candidate(1, 0.9, snippet="vector snippet"), _candidate(2, 0.9, snippet="vector only")]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, vector, arxiv_id=None, limit=10)
         by_id = {candidate["chunk_id"]: candidate for candidate in merged}
 
         assert by_id[1]["snippet"] == "lexical snippet"
@@ -110,15 +128,13 @@ class TestMergeHybridCandidates:
         lexical = [_candidate(None, 0.9)]
         vector = [_candidate(None, 0.9)]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, vector, arxiv_id=None, limit=10)
 
         assert len(merged) == 2
         assert all(len(candidate["matched_methods"]) == 1 for candidate in merged)
 
     def test_ties_break_on_method_count_then_chunk_id(self):
-        merged = _retriever()._merge_hybrid_candidates(
-            "policy loss", [_candidate(5, 0.9)], [_candidate(7, 0.9)], arxiv_id=None, limit=10
-        )
+        merged = _merge_legacy("policy loss", [_candidate(5, 0.9)], [_candidate(7, 0.9)], arxiv_id=None, limit=10)
 
         assert merged[0]["score"] == pytest.approx(merged[1]["score"])
         assert _ids(merged) == [7, 5]
@@ -127,9 +143,7 @@ class TestMergeHybridCandidates:
         same_paper = [_candidate(i, 0.9, arxiv_id="2401.00001") for i in range(1, 5)]
         other_paper = _candidate(10, 0.9, arxiv_id="2401.00002")
 
-        merged = _retriever()._merge_hybrid_candidates(
-            "policy loss", same_paper, [*same_paper, other_paper], arxiv_id=None, limit=3
-        )
+        merged = _merge_legacy("policy loss", same_paper, [*same_paper, other_paper], arxiv_id=None, limit=3)
 
         assert _ids(merged) == [1, 2, 10]
 
@@ -157,7 +171,7 @@ class TestResolveHybridMethodWeights:
         lexical = [_candidate(1, lexical_top)]
         vector = [_candidate(1 if overlap else 99, 0.9)]
 
-        weights = _retriever()._resolve_hybrid_method_weights(query, lexical, vector)
+        weights = _legacy_weights(query, lexical, vector)
 
         assert weights["lexical"] == pytest.approx(expected_lexical)
         assert weights["vector"] == pytest.approx(expected_vector)
@@ -171,11 +185,11 @@ class TestResolveHybridMethodWeights:
 
         lexical = [_candidate(1, 0.9)]
         vector = [_candidate(1, 0.9)]
-        assert retriever._resolve_hybrid_method_weights(four, lexical, vector)["lexical"] == 1.0
-        assert retriever._resolve_hybrid_method_weights(five, lexical, vector)["lexical"] == pytest.approx(0.85)
+        assert _legacy_weights(four, lexical, vector)["lexical"] == 1.0
+        assert _legacy_weights(five, lexical, vector)["lexical"] == pytest.approx(0.85)
 
     def test_empty_lexical_channel_counts_as_zero_confidence(self):
-        weights = _retriever()._resolve_hybrid_method_weights(self.SHORT_QUERY, [], [_candidate(1, 0.9)])
+        weights = _legacy_weights(self.SHORT_QUERY, [], [_candidate(1, 0.9)])
 
         assert weights["lexical"] == pytest.approx(0.45 * 0.75)
         assert weights["vector"] == pytest.approx(1.1 * 1.08)
@@ -184,12 +198,12 @@ class TestResolveHybridMethodWeights:
         lexical = [_candidate(i, 0.35) for i in range(1, 7)]
         vector = [_candidate(i, 0.9) for i in (6, 10, 11, 12, 13)]
 
-        weights = _retriever()._resolve_hybrid_method_weights(self.SHORT_QUERY, lexical, vector)
+        weights = _legacy_weights(self.SHORT_QUERY, lexical, vector)
 
         assert weights["lexical"] == pytest.approx(0.7 * 0.75)
 
     def test_floors_are_never_reached_with_current_constants(self):
-        retriever = _retriever()
+        _retriever()
         observed_lexical: list[float] = []
         observed_vector: list[float] = []
 
@@ -200,7 +214,7 @@ class TestResolveHybridMethodWeights:
         ):
             lexical = [_candidate(1, lexical_top)] if lexical_top else []
             vector = [_candidate(1 if overlap else 99, 0.9)]
-            weights = retriever._resolve_hybrid_method_weights(query, lexical, vector)
+            weights = _legacy_weights(query, lexical, vector)
             observed_lexical.append(weights["lexical"])
             observed_vector.append(weights["vector"])
 
@@ -227,14 +241,14 @@ class TestCandidateQualityWeight:
         ],
     )
     def test_lexical_score_bands(self, score, expected):
-        assert _retriever()._candidate_hybrid_quality_weight("lexical", {"score": score}) == expected
+        assert _legacy_quality("lexical", {"score": score}) == expected
 
     @pytest.mark.parametrize("score", [0.0, 0.1, 0.9])
     def test_vector_is_always_full_weight(self, score):
-        assert _retriever()._candidate_hybrid_quality_weight("vector", {"score": score}) == 1.0
+        assert _legacy_quality("vector", {"score": score}) == 1.0
 
     def test_unparseable_score_is_treated_as_zero(self):
-        assert _retriever()._candidate_hybrid_quality_weight("lexical", {"score": "n/a"}) == 0.2
+        assert _legacy_quality("lexical", {"score": "n/a"}) == 0.2
 
 
 def _lexical(chunk_id: int, score: float, *, strict: bool, coverage: float = 1.0) -> dict:
@@ -246,33 +260,27 @@ def _lexical(chunk_id: int, score: float, *, strict: bool, coverage: float = 1.0
 
 class TestTwoTierLexicalCandidates:
     def test_strict_rows_are_weighted_without_the_tier_bonus(self):
-        retriever = _retriever()
+        _retriever()
 
-        assert retriever._lexical_confidence(_lexical(1, STRICT_MATCH_BONUS + 0.25, strict=True)) == pytest.approx(0.25)
-        assert (
-            retriever._candidate_hybrid_quality_weight("lexical", _lexical(1, STRICT_MATCH_BONUS + 0.25, strict=True))
-            == 0.4
-        )
-        assert (
-            retriever._candidate_hybrid_quality_weight("lexical", _lexical(1, STRICT_MATCH_BONUS + 0.9, strict=True))
-            == 1.0
-        )
+        assert lexical_confidence(_lexical(1, STRICT_MATCH_BONUS + 0.25, strict=True)) == pytest.approx(0.25)
+        assert _legacy_quality("lexical", _lexical(1, STRICT_MATCH_BONUS + 0.25, strict=True)) == 0.4
+        assert _legacy_quality("lexical", _lexical(1, STRICT_MATCH_BONUS + 0.9, strict=True)) == 1.0
 
     def test_partial_rows_have_zero_confidence(self):
-        retriever = _retriever()
+        _retriever()
         partial = _lexical(1, 0.87, strict=False, coverage=0.8)
 
-        assert retriever._lexical_confidence(partial) == 0.0
-        assert retriever._candidate_hybrid_quality_weight("lexical", partial) == 0.2
+        assert lexical_confidence(partial) == 0.0
+        assert _legacy_quality("lexical", partial) == 0.2
 
     def test_rows_without_tier_information_keep_their_score(self):
-        assert _retriever()._lexical_confidence(_candidate(1, 0.6)) == 0.6
+        assert lexical_confidence(_candidate(1, 0.6)) == 0.6
 
     def test_partial_lexical_rows_are_dropped_when_vector_has_results(self):
         lexical = [_lexical(1, STRICT_MATCH_BONUS + 0.5, strict=True), _lexical(2, 0.8, strict=False, coverage=0.7)]
         vector = [_candidate(2, 0.8), _candidate(3, 0.7)]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, vector, arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, vector, arxiv_id=None, limit=10)
 
         by_id = {candidate["chunk_id"]: candidate for candidate in merged}
         assert set(by_id) == {1, 2, 3}
@@ -283,7 +291,7 @@ class TestTwoTierLexicalCandidates:
     def test_partial_lexical_rows_are_kept_without_vector_results(self):
         lexical = [_lexical(1, 0.8, strict=False, coverage=0.7), _lexical(2, 0.6, strict=False, coverage=0.5)]
 
-        merged = _retriever()._merge_hybrid_candidates("policy loss", lexical, [], arxiv_id=None, limit=10)
+        merged = _merge_legacy("policy loss", lexical, [], arxiv_id=None, limit=10)
 
         assert _ids(merged) == [1, 2]
         assert all(candidate["matched_methods"] == ["lexical"] for candidate in merged)
@@ -363,7 +371,8 @@ def _legacy_plain_rrf(ranked_lists: list[list[dict]], rank_constant: float = 60.
 
 
 class TestFusionRefactorGolden:
-    """리팩터링 전(89b100f) `_merge_hybrid_candidates` 출력을 fixtures에 고정하고 기본 설정이 그대로 재현하는지 본다."""
+    """리팩터링 전(89b100f) `_merge_hybrid_candidates` 출력을 fixtures에 고정하고 `LEGACY_RULES_FUSION`(2026-09-29까지의
+    제품 기본)이 그대로 재현하는지 본다."""
 
     @pytest.mark.parametrize("case", _golden_cases(), ids=lambda case: f"seed{case['seed']}")
     def test_default_config_reproduces_pre_refactor_output(self, case):
@@ -374,11 +383,11 @@ class TestFusionRefactorGolden:
             case["limit"],
         )
 
-        fused = fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], DEFAULT_HYBRID_FUSION)
+        fused = fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], LEGACY_RULES_FUSION)
         assert [candidate["chunk_id"] for candidate in fused] == case["fused_chunk_ids"]
         assert fusion_fingerprint(fused) == case["fused_sha256"]
 
-        merged = _retriever()._merge_hybrid_candidates(
+        merged = _merge_legacy(
             inputs["query"], inputs["lexical"], inputs["vector"], arxiv_id=None, limit=inputs["limit"]
         )
         assert [candidate["chunk_id"] for candidate in merged] == case["diversified_chunk_ids"]
@@ -393,7 +402,7 @@ class TestFusionRefactorGolden:
                 for candidate in inputs["lexical"]
                 if (candidate.get("score_breakdown") or {}).get("strict_match") is not False
             ]
-            resolved = resolve_hybrid_method_weights(inputs["query"], lexical, inputs["vector"])
+            resolved = _legacy_weights(inputs["query"], lexical, inputs["vector"])
             weights.add((round(resolved["lexical"], 6), round(resolved["vector"], 6)))
         assert len(weights) >= 5
 
@@ -626,15 +635,74 @@ class TestConvexFusion:
     @pytest.mark.parametrize("seed", range(20))
     def test_convex_fields_do_not_change_rank_fusion(self, seed):
         inputs = synthetic_fusion_case(seed)
-        tweaked = HybridFusionConfig(convex_alpha=0.9, score_normalization="theoretical", score_floors=(0.3, 0.0))
-
-        assert fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], tweaked) == (
-            fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"])
+        tweaked = HybridFusionConfig(
+            weighting="rules", convex_alpha=0.9, score_normalization="theoretical", score_floors=(0.3, 0.0)
         )
 
-    def test_product_default_is_still_the_rule_based_rrf(self):
-        assert DEFAULT_HYBRID_FUSION.weighting == "rules"
+        assert fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], tweaked) == (
+            fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], LEGACY_RULES_FUSION)
+        )
+
+
+class TestProductDefault:
+    """제품 기본은 사전 등록 비교의 pick `CC_mm_a0.35`(min-max convex, lexical α 0.35, 부분 일치 행 제거)다."""
+
+    def test_default_is_the_minmax_convex_pick(self):
         assert DEFAULT_HYBRID_FUSION == HybridFusionConfig()
+        assert DEFAULT_HYBRID_FUSION.weighting == "convex"
+        assert DEFAULT_HYBRID_FUSION.convex_alpha == 0.35
+        assert DEFAULT_HYBRID_FUSION.score_normalization == "minmax"
+        assert DEFAULT_HYBRID_FUSION.drop_partial_lexical
+
+    def test_legacy_rules_keep_every_old_constant(self):
+        assert LEGACY_RULES_FUSION == HybridFusionConfig(
+            weighting="rules",
+            rank_constant=60.0,
+            overlap_bonus=0.015,
+            drop_partial_lexical=True,
+            long_query_min_tokens=5,
+            long_query_multipliers=(0.85, 1.05),
+            confidence_bands=((0.3, 0.45, 1.1), (0.5, 0.7, 1.05)),
+            no_overlap_top_n=5,
+            no_overlap_max_confidence=0.4,
+            no_overlap_multipliers=(0.75, 1.08),
+            weight_floors=(0.2, 0.5),
+            quality_weight=True,
+            quality_tiers=((0.2, 0.2), (0.3, 0.4), (0.5, 0.65), (0.8, 0.85)),
+        )
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_retriever_merges_with_the_default(self, seed):
+        inputs = synthetic_fusion_case(seed)
+
+        merged = _retriever()._merge_hybrid_candidates(
+            inputs["query"], inputs["lexical"], inputs["vector"], arxiv_id=None, limit=inputs["limit"]
+        )
+
+        fused = fuse_hybrid_candidates(inputs["query"], inputs["lexical"], inputs["vector"], DEFAULT_HYBRID_FUSION)
+        assert merged == apply_paper_diversity(fused, limit=inputs["limit"])
+
+    def test_channel_tops_beat_a_chunk_that_is_only_middling_in_both(self):
+        """lang-abbr-dpo 유형: 두 채널의 1위가 같은 논문의 서로 다른 청크이고, 다른 논문의 청크가 두 채널 중간에 함께 있다.
+        가중 RRF는 두 채널 몫을 합친 그 청크를 1위로 올리고, 기본 설정은 vector 1위를 지킨다."""
+        lexical = [
+            _candidate(1, 11.0, arxiv_id="2608.30597"),
+            _candidate(2, 10.0, arxiv_id="2608.30597"),
+            _candidate(9, 3.8, arxiv_id="2609.16034"),
+            _candidate(4, 1.2, arxiv_id="2609.00004"),
+        ]
+        vector = [
+            _candidate(5, 0.49, arxiv_id="2608.30597"),
+            _candidate(6, 0.48, arxiv_id="2608.30597"),
+            _candidate(9, 0.40, arxiv_id="2609.16034"),
+            _candidate(7, 0.30, arxiv_id="2609.00007"),
+        ]
+
+        default = _retriever()._merge_hybrid_candidates("DPO", lexical, vector, arxiv_id=None, limit=3)
+        legacy = _merge_legacy("DPO", lexical, vector, arxiv_id=None, limit=3)
+
+        assert _ids(default)[0] == 5
+        assert _ids(legacy)[0] == 9
 
     @pytest.mark.parametrize(
         "overrides",

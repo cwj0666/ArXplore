@@ -10,10 +10,7 @@ from src.integrations.hybrid_fusion import (
     HybridFusionConfig,
     apply_paper_diversity,
     fuse_hybrid_candidates,
-    hybrid_quality_weight,
-    lexical_confidence,
     query_tokens,
-    resolve_hybrid_method_weights,
     to_float,
 )
 from src.integrations.paper_repository import PaperRepository
@@ -113,8 +110,8 @@ class PaperRetriever:
         lexical_limit: int | None = None,
         vector_limit: int | None = None,
     ) -> list[dict]:
-        """lexical/vector 결과를 rank fusion으로 결합해 공용 retrieval shape로 반환한다.
-        제어 문자를 지운 질의가 비면 []를 반환한다."""
+        """lexical/vector 결과를 `DEFAULT_HYBRID_FUSION`(정규화 점수의 convex combination)으로 결합해 공용 retrieval
+        shape로 반환한다. 제어 문자를 지운 질의가 비면 []를 반환한다."""
         query, lexical_candidates, vector_candidates = self.hybrid_fusion_inputs(
             query,
             arxiv_id=arxiv_id,
@@ -415,7 +412,8 @@ class PaperRetriever:
         limit: int,
         config: HybridFusionConfig = DEFAULT_HYBRID_FUSION,
     ) -> list[dict]:
-        """lexical/vector 결과를 reciprocal rank fusion(`fuse_hybrid_candidates`)으로 병합한 뒤 논문 다양성을 적용한다."""
+        """lexical/vector 결과를 `config`(기본 `DEFAULT_HYBRID_FUSION`)로 병합(`fuse_hybrid_candidates`)한 뒤 논문 다양성을
+        적용한다."""
         merged_candidates = fuse_hybrid_candidates(query, lexical_candidates, vector_candidates, config)
         return self._apply_paper_diversity(merged_candidates, limit=limit, arxiv_id=arxiv_id)
 
@@ -431,23 +429,6 @@ class PaperRetriever:
         return apply_paper_diversity(
             candidates, limit=limit, arxiv_id=arxiv_id, max_chunks_per_paper=max_chunks_per_paper
         )
-
-    def _resolve_hybrid_method_weights(
-        self,
-        query: str,
-        lexical_candidates: list[dict],
-        vector_candidates: list[dict],
-    ) -> dict[str, float]:
-        """제품 설정의 hybrid 채널 가중치(`resolve_hybrid_method_weights`)."""
-        return resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates, DEFAULT_HYBRID_FUSION)
-
-    def _candidate_hybrid_quality_weight(self, method: str, candidate: dict) -> float:
-        """제품 설정의 후보 품질 가중(`hybrid_quality_weight`)."""
-        return hybrid_quality_weight(method, candidate, DEFAULT_HYBRID_FUSION)
-
-    def _lexical_confidence(self, candidate: dict) -> float:
-        """hybrid 가중치 판단에 쓰는 lexical 점수(`lexical_confidence`)."""
-        return lexical_confidence(candidate)
 
     def _section_intent_bonus(self, query: str):
         """명시적 section-intent 질의에서만 해당 섹션을 밀어준다."""

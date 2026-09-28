@@ -4,7 +4,8 @@
     python scripts/eval_fusion_sweep.py sweep --cache eval/cache/candidates_<ts>.jsonl.gz
     python scripts/eval_fusion_sweep.py convex --cache eval/cache/candidates_<ts>.jsonl.gz
 
-gate: 현재 기본 융합 설정으로 재생한 순위가 캐시에 기록한 제품 hybrid 순위와 모든 질의에서 같아야 한다.
+gate: 기록 시점의 제품 융합 설정(캐시 머리말 `fusion_default`)으로 재생한 순위가 캐시에 기록한 제품 hybrid 순위와
+모든 질의에서 같아야 한다.
 다르면 질의별 차이를 출력하고 종료 코드 1. sweep도 먼저 gate를 돌리고, 실패하면 아무것도 쓰지 않고 종료 코드 1.
 sweep: 설정 가족별 재생 → 반복 층화 CV → 1-SE 선택 → paired bootstrap → eval/results/fusion_<timestamp>.{md,csv}.
 절차와 판정 규칙은 eval/fusion_sweep.py와 docs/worklog/phase-4/2026-09-28_01_*.md(사전 등록).
@@ -26,7 +27,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from eval_retrieval import git_revision  # noqa: E402
 
-from eval.candidate_cache import CacheError, cache_digest, gate, read_cache  # noqa: E402
+from eval.candidate_cache import CacheError, cache_digest, gate, read_cache, recorded_fusion_config  # noqa: E402
 from eval.fusion_sweep import (  # noqa: E402
     CONVEX,
     DEFAULT_FOLDS,
@@ -80,18 +81,18 @@ def resolve_cache(value: str | None) -> Path | None:
     return candidates[-1] if candidates else None
 
 
-def run_gate(queries, *, k: int) -> bool:
-    mismatches = gate(queries, k=k)
+def run_gate(queries, *, k: int, config=None) -> bool:
+    mismatches = gate(queries, k=k, config=config)
     for item in mismatches:
         print(f"불일치 {item.query_id}", file=sys.stderr)
         print(f"  live    : {item.live}", file=sys.stderr)
         print(f"  replayed: {item.replayed}", file=sys.stderr)
     if mismatches:
         print(
-            f"게이트 실패: 기본 설정 재생이 live hybrid와 다른 질의 {len(mismatches)}/{len(queries)}개", file=sys.stderr
+            f"게이트 실패: 기록 시점 설정 재생이 live hybrid와 다른 질의 {len(mismatches)}/{len(queries)}개", file=sys.stderr
         )
         return False
-    print(f"게이트 통과: 기본 설정 재생이 live hybrid와 {len(queries)}개 질의 모두 같습니다.", file=sys.stderr)
+    print(f"게이트 통과: 기록 시점 설정 재생이 live hybrid와 {len(queries)}개 질의 모두 같습니다.", file=sys.stderr)
     return True
 
 
@@ -115,7 +116,13 @@ def main(argv: list[str] | None = None) -> int:
     k = int(header["k"])
     print(f"캐시: {cache_path} sha256:{cache_digest(cache_path)} — 질의 {len(queries)}개, k={k}", file=sys.stderr)
 
-    if not run_gate(queries, k=k):
+    try:
+        recorded = recorded_fusion_config(header)
+    except (CacheError, TypeError, ValueError) as exc:
+        print(f"캐시 머리말의 융합 설정을 읽을 수 없습니다: {exc}", file=sys.stderr)
+        return EXIT_INPUT
+    print(f"게이트 설정: 기록 시점 제품 융합 weighting={recorded.weighting}", file=sys.stderr)
+    if not run_gate(queries, k=k, config=recorded):
         return EXIT_GATE
     if args.command == "gate":
         return 0
@@ -159,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         "코퍼스": f"papers {corpus.get('papers')} (청크 보유 {corpus.get('papers_with_chunks')}), "
         f"chunks {corpus.get('chunks')}, embeddings {corpus.get('embeddings')}, 본문 source {corpus.get('fulltext_sources')}",
         "임베딩 모델": str(header.get("embedding_model")),
-        "게이트": f"기본 설정 재생 = live hybrid, {len(queries)}/{len(queries)}",
+        "게이트": f"기록 시점 설정(weighting={recorded.weighting}) 재생 = live hybrid, {len(queries)}/{len(queries)}",
     }
     if args.command == "convex":
         meta["사전 등록"] = "docs/worklog/phase-4/2026-09-29_01 (pick은 CC 가족 안에서 고른다)"

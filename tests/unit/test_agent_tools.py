@@ -94,7 +94,7 @@ def test_formatter_handles_empty_results():
 def test_search_tool_docstring_describes_hybrid_search():
     description = search_paper_chunks_tool.description
 
-    assert "PostgreSQL 전문 검색과 pgvector 벡터 검색을 RRF로 결합" in description
+    assert "PostgreSQL 전문 검색과 pgvector 벡터 검색의 점수를 결합" in description
 
 
 def _retriever(contexts: list[dict], *, embedding_available: bool = True) -> MagicMock:

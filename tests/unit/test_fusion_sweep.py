@@ -5,7 +5,7 @@ import json
 import random
 import statistics
 from collections import Counter
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +18,7 @@ from eval.candidate_cache import (
     compare_live,
     gate,
     read_cache,
+    recorded_fusion_config,
     replay,
     restore_candidate,
     write_cache,
@@ -54,15 +55,23 @@ from eval.fusion_sweep import (
     stratified_folds,
 )
 from eval.runner import run_query
-from src.integrations.hybrid_fusion import DEFAULT_HYBRID_FUSION, STRICT_LEXICAL_SCORE_FLOOR, HybridFusionConfig
+from src.integrations.hybrid_fusion import (
+    DEFAULT_HYBRID_FUSION,
+    LEGACY_RULES_FUSION,
+    STRICT_LEXICAL_SCORE_FLOOR,
+    HybridFusionConfig,
+)
 from tests.unit.test_eval_runner import _load_script, _real_retriever
 from tests.unit.test_retrieval_fusion import _retriever, synthetic_fusion_case
 
 SOURCES = ("known_item", "manual", "llm_synth")
 
 
-def _synthetic_cached(seed: int, *, k: int = 5, query_id: str | None = None) -> CachedQuery:
-    """합성 융합 입력 + 제품 `_merge_hybrid_candidates` 결과를 live로 담은 캐시 질의. 정답은 후보 논문 중 하나다."""
+def _synthetic_cached(
+    seed: int, *, k: int = 5, query_id: str | None = None, config: HybridFusionConfig = DEFAULT_HYBRID_FUSION
+) -> CachedQuery:
+    """합성 융합 입력 + 제품 `_merge_hybrid_candidates`(`config`, 기본은 제품 기본값) 결과를 live로 담은 캐시 질의.
+    정답은 후보 논문 중 하나다."""
     case = synthetic_fusion_case(seed)
     rng = random.Random(seed)
     papers = sorted({row["arxiv_id"] for row in [*case["lexical"], *case["vector"]]}) or ["2409.00000"]
@@ -73,7 +82,9 @@ def _synthetic_cached(seed: int, *, k: int = 5, query_id: str | None = None) -> 
         relevant_arxiv_ids=(rng.choice(papers),),
         source=SOURCES[seed % 3],
     )
-    live = _retriever()._merge_hybrid_candidates(case["query"], case["lexical"], case["vector"], arxiv_id=None, limit=k)
+    live = _retriever()._merge_hybrid_candidates(
+        case["query"], case["lexical"], case["vector"], arxiv_id=None, limit=k, config=config
+    )
     return CachedQuery(
         query=query,
         normalized_query=case["query"],
@@ -83,9 +94,11 @@ def _synthetic_cached(seed: int, *, k: int = 5, query_id: str | None = None) -> 
     )
 
 
-def _roundtrip(tmp_path, queries: list[CachedQuery], *, k: int = 5, name: str = "cache.jsonl.gz"):
+def _roundtrip(
+    tmp_path, queries: list[CachedQuery], *, k: int = 5, name: str = "cache.jsonl.gz", header: dict | None = None
+):
     path = tmp_path / name
-    write_cache(path, {"k": k, "git_revision": "test"}, queries)
+    write_cache(path, {"k": k, "git_revision": "test", **(header or {})}, queries)
     return path, *read_cache(path)
 
 
@@ -131,6 +144,25 @@ class TestCandidateCache:
 
         assert [item.query_id for item in mismatches] == [tampered.id]
         assert mismatches[0].live != mismatches[0].replayed
+
+    def test_gate_replays_the_fusion_config_recorded_in_the_header(self, tmp_path):
+        legacy = [_synthetic_cached(seed, config=LEGACY_RULES_FUSION) for seed in range(15)]
+        _, header, loaded = _roundtrip(tmp_path, legacy, header={"fusion_default": asdict(LEGACY_RULES_FUSION)})
+
+        assert recorded_fusion_config(header) == LEGACY_RULES_FUSION
+        assert gate(loaded, k=5, config=recorded_fusion_config(header)) == []
+        assert gate(loaded, k=5) != []
+
+    def test_recorded_config_defaults_and_rejects_unknown_fields(self):
+        assert recorded_fusion_config({"k": 5}) == DEFAULT_HYBRID_FUSION
+        old_header = {
+            name: value
+            for name, value in asdict(LEGACY_RULES_FUSION).items()
+            if not name.startswith(("convex", "score"))
+        }
+        assert recorded_fusion_config({"fusion_default": old_header}) == LEGACY_RULES_FUSION
+        with pytest.raises(CacheError):
+            recorded_fusion_config({"fusion_default": {"weighting": "rules", "mystery": 1}})
 
     def test_gate_fails_when_live_is_missing(self):
         cached = replace(_synthetic_cached(0), live={})
@@ -180,7 +212,7 @@ class TestSpecs:
 
     def test_factorial_corners_are_current_and_plain_rrf(self):
         by_name = {spec.name: spec for spec in build_specs()}
-        assert by_name["CF_m1q1b1"].config == by_name[CURRENT].config == DEFAULT_HYBRID_FUSION
+        assert by_name["CF_m1q1b1"].config == by_name[CURRENT].config == LEGACY_RULES_FUSION
         assert by_name["CF_m0q0b0"].config == by_name[PLAIN_RRF_K60].config
         assert by_name[PLAIN_RRF_K60].config.drop_partial_lexical
         assert not by_name["REF_plainrrf_ablation"].config.drop_partial_lexical
@@ -282,7 +314,7 @@ class TestFolds:
         _, _, plan = self._plan(repeats=4, seed=1)
         scores = {"only": [rng.random() for _ in range(111)]}
 
-        result = cross_validate("x", [SweepSpec("only", "x", config=DEFAULT_HYBRID_FUSION)], scores, plan)
+        result = cross_validate("x", [SweepSpec("only", "x", config=LEGACY_RULES_FUSION)], scores, plan)
 
         assert result.mean == pytest.approx(statistics.fmean(scores["only"]))
         assert result.se > 0
@@ -290,7 +322,7 @@ class TestFolds:
 
     def test_tuning_picks_the_train_best_and_breaks_ties_by_simplicity(self):
         simple = SweepSpec("simple", "x", config=HybridFusionConfig(weighting="static"))
-        complex_ = SweepSpec("complex", "x", config=DEFAULT_HYBRID_FUSION)
+        complex_ = SweepSpec("complex", "x", config=LEGACY_RULES_FUSION)
         worse = SweepSpec("worse", "x", config=HybridFusionConfig(weighting="static", quality_weight=False))
         scores = {"simple": [0.5] * 111, "complex": [0.5] * 111, "worse": [0.4] * 111}
         _, _, plan = self._plan(repeats=2, seed=1)
@@ -359,7 +391,7 @@ class TestBootstrap:
 class TestOneStandardError:
     def _specs(self):
         return [
-            SweepSpec("C", "C", config=DEFAULT_HYBRID_FUSION),
+            SweepSpec("C", "C", config=LEGACY_RULES_FUSION),
             SweepSpec("mid", "F1", config=HybridFusionConfig(weighting="static", static_weights=(0.5, 1.0))),
             SweepSpec("plain", "F0", config=HybridFusionConfig(weighting="static", quality_weight=False)),
         ]
@@ -453,13 +485,23 @@ class TestRunSweep:
         assert report.subset_sizes["all"] == (30, 20)
 
     def test_current_config_matches_the_recorded_live_metrics(self):
-        queries = [_synthetic_cached(seed) for seed in range(30)]
+        """C는 2026-09-29까지의 제품 규칙이다. 그 규칙으로 기록한 live와 C 재생 순위가 같다."""
+        queries = [_synthetic_cached(seed, config=LEGACY_RULES_FUSION) for seed in range(30)]
         report = run_sweep(queries, k=5, specs=_small_specs(), n_folds=3, repeats=1, n_resamples=50)
         live_chunks = [[hit["chunk_id"] for hit in cached.live["hybrid"]] for cached in queries]
         assert [row.retrieved_chunk_ids for row in report.results[CURRENT]] == live_chunks
 
 
 class TestFusionSweepScript:
+    def test_gate_uses_the_recorded_config_of_a_legacy_cache(self, tmp_path):
+        script = _load_script("eval_fusion_sweep")
+        legacy = [_synthetic_cached(seed, config=LEGACY_RULES_FUSION) for seed in range(15)]
+        recorded, _, _ = _roundtrip(tmp_path, legacy, header={"fusion_default": asdict(LEGACY_RULES_FUSION)})
+        unrecorded, _, _ = _roundtrip(tmp_path, legacy, name="no_header.jsonl.gz")
+
+        assert script.main(["gate", "--cache", str(recorded)]) == 0
+        assert script.main(["gate", "--cache", str(unrecorded)]) == 1
+
     def test_gate_and_sweep_commands(self, tmp_path, capsys):
         script = _load_script("eval_fusion_sweep")
         queries = [_synthetic_cached(seed) for seed in range(15)]
@@ -490,7 +532,7 @@ class TestFusionSweepScript:
         assert code == 0
         markdown = next(out_dir.glob("fusion_*.md")).read_text(encoding="utf-8")
         assert "## 사전 등록 규칙 판정" in markdown and "## 1-SE 선택" in markdown
-        assert "게이트: 기본 설정 재생 = live hybrid, 15/15" in markdown
+        assert "게이트: 기록 시점 설정(weighting=convex) 재생 = live hybrid, 15/15" in markdown
         rows = next(out_dir.glob("fusion_*.csv")).read_text(encoding="utf-8").splitlines()
         assert len(rows) == 1 + len(_small_specs())
 
@@ -589,6 +631,10 @@ class TestConvexSpecs:
         groups = convex_groups(build_convex_specs())
         assert list(groups) == ["CC_mm", "CC_tmm", "CC_tmms", "CCK_mm", "CCK_tmm"]
         assert {len(members) for members in groups.values()} == {20}
+
+    def test_product_default_is_the_pre_registered_pick(self):
+        by_name = {spec.name: spec.config for spec in build_convex_specs()}
+        assert by_name["CC_mm_a0.35"] == DEFAULT_HYBRID_FUSION
 
     def test_convex_config_counts_one_parameter(self):
         assert count_parameters(HybridFusionConfig(weighting="convex", convex_alpha=0.3)) == 1

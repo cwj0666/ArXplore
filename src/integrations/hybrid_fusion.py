@@ -1,6 +1,8 @@
 """hybrid 검색의 lexical/vector 후보 융합과 논문 다양성 규칙(순수 함수).
 
 `PaperRetriever`는 `DEFAULT_HYBRID_FUSION`으로 `fuse_hybrid_candidates`를 부른 뒤 `apply_paper_diversity`로 자른다.
+제품 기본은 채널 점수 min-max 정규화의 convex combination(lexical 가중치 0.35)이다. 2026-09-29까지의 제품 규칙(RRF k=60 +
+손으로 고른 가중치)은 `LEGACY_RULES_FUSION`으로 남아 재생·ablation에 쓴다.
 평가 하니스(`eval/fusion_sweep.py`)는 같은 함수를 다른 설정으로 불러 저장해 둔 후보에서 융합만 다시 재생한다.
 DB·임베딩 호출이 없으므로 같은 입력이면 같은 출력이다.
 """
@@ -28,25 +30,29 @@ _QUERY_STOPWORDS = frozenset({"the", "and", "for", "with", "from", "that", "this
 
 @dataclass(frozen=True)
 class HybridFusionConfig:
-    """hybrid 융합 상수 묶음. 기본값이 제품 경로다(9880127에서 정한 값, 근거 기록 없음).
+    """hybrid 융합 상수 묶음. 필드 기본값(`HybridFusionConfig()`)이 제품 경로 `DEFAULT_HYBRID_FUSION`이다.
 
-    채널별 RRF 점수는 `채널 가중치 × 후보 품질 가중 / (rank_constant + 순위)`이고, 두 채널에 모두 나온 청크에는
-    `overlap_bonus`를 더한다. 채널 가중치는 `weighting`이 정한다.
+    제품 기본은 `weighting="convex"`, min-max 정규화, lexical 가중치 α = 0.35, 부분 일치 행 제거 켬이다. 사전 등록한 비교
+    (docs/worklog/phase-4/2026-09-29_01·02)의 규칙 (1)이 가리킨 설정을 사용자가 채택했다(2026-09-29_03). vector 단독보다
+    유의하게 낫다는 근거는 없다. `weighting` 네 모드는 다음과 같다.
 
-    - `rules`: 질의 토큰 수, lexical 1위 confidence, 상위 N개 겹침으로 곱셈 보정한 뒤 하한을 둔다(현재 제품 규칙).
-    - `static`: `static_weights`(lexical, vector)를 그대로 쓴다. (1, 1)이면 표준 RRF 가중치다.
-    - `confidence_linear`: `w_lex = w_min + (1 - w_min) × clip(conf / tau, 0, 1)`, `w_vec = 1`. conf는 lexical 1위 confidence.
     - `convex`: 순위가 아니라 점수를 합친다. `α × φ_lex + (1 − α) × φ_vec`이고 α는 `convex_alpha`(lexical 쪽 가중치)다.
       φ는 `score_normalization`(`normalize_channel_scores`)이고, 한 채널에만 나온 후보의 다른 채널 φ는 0이다.
-      rank_constant·교차 보너스·품질 가중·방법 가중은 쓰지 않는다. 평가 전용이며 제품 기본값이 아니다.
+      rank_constant·교차 보너스·품질 가중·방법 가중은 쓰지 않는다.
+    - `rules`: RRF. 질의 토큰 수, lexical 1위 confidence, 상위 N개 겹침으로 채널 가중치를 곱셈 보정한 뒤 하한을 둔다.
+      2026-09-29까지의 제품 규칙(`LEGACY_RULES_FUSION`, 9880127에서 정한 상수, 근거 기록 없음)이다.
+    - `static`: RRF. `static_weights`(lexical, vector)를 그대로 쓴다. (1, 1)이면 표준 RRF 가중치다.
+    - `confidence_linear`: RRF. `w_lex = w_min + (1 - w_min) × clip(conf / tau, 0, 1)`, `w_vec = 1`. conf는 lexical 1위 confidence.
 
+    RRF 모드의 채널 점수는 `채널 가중치 × 후보 품질 가중 / (rank_constant + 순위)`이고, 두 채널에 모두 나온 청크에는
+    `overlap_bonus`를 더한다. RRF 상수 필드의 기본값은 예전 규칙의 값 그대로다.
     `drop_partial_lexical`이 켜져 있으면 vector 결과가 있을 때 lexical 부분 일치 행(`strict_match`가 False)을 뺀다.
     """
 
     rank_constant: float = 60.0
     overlap_bonus: float = 0.015
     drop_partial_lexical: bool = True
-    weighting: str = "rules"
+    weighting: str = "convex"
     long_query_min_tokens: int = 5
     long_query_multipliers: tuple[float, float] = (0.85, 1.05)
     # (confidence 상한(미만), lexical 배수, vector 배수). 앞에서부터 처음 맞는 구간 하나만 적용한다.
@@ -61,7 +67,7 @@ class HybridFusionConfig:
     quality_weight: bool = True
     # (lexical confidence 상한(미만), 품질 가중). 모든 상한 이상이면 1.0.
     quality_tiers: tuple[tuple[float, float], ...] = ((0.2, 0.2), (0.3, 0.4), (0.5, 0.65), (0.8, 0.85))
-    convex_alpha: float = 0.5
+    convex_alpha: float = 0.35
     score_normalization: str = "minmax"
     # theoretical 정규화의 (lexical, vector) 하한.
     score_floors: tuple[float, float] = (LEXICAL_SCORE_FLOOR, VECTOR_SCORE_FLOOR)
@@ -81,7 +87,10 @@ class HybridFusionConfig:
             raise ValueError(f"confidence_tau must be > 0, got {self.confidence_tau}")
 
 
+# 제품 기본: min-max convex combination, lexical α 0.35(사전 등록 비교의 pick `CC_mm_a0.35`).
 DEFAULT_HYBRID_FUSION = HybridFusionConfig()
+# 2026-09-29까지의 제품 규칙(가중 RRF, 상수 25개). 재생 게이트(그때 기록한 캐시)와 ablation `hybrid_rules`가 쓴다.
+LEGACY_RULES_FUSION = HybridFusionConfig(weighting="rules")
 # 가중치·품질 가중·교차 보너스가 없는 표준 RRF(k=60). 예전 `eval.runner.plain_rrf`와 같게 부분 일치 행도 버리지 않는다.
 STANDARD_RRF_FUSION = HybridFusionConfig(
     weighting="static", quality_weight=False, overlap_bonus=0.0, drop_partial_lexical=False
@@ -158,7 +167,10 @@ def resolve_hybrid_method_weights(
     vector_candidates: list[dict],
     config: HybridFusionConfig = DEFAULT_HYBRID_FUSION,
 ) -> dict[str, float]:
-    """질의 성격과 lexical confidence를 보고 채널 가중치를 정한다. `lexical_candidates`는 부분 일치 행을 뺀 뒤의 목록이다."""
+    """채널 가중치. convex는 (α, 1 − α)이고, RRF 모드는 질의 성격과 lexical confidence를 보고 정한다.
+    `lexical_candidates`는 부분 일치 행을 뺀 뒤의 목록이다."""
+    if config.weighting == "convex":
+        return {"lexical": config.convex_alpha, "vector": 1.0 - config.convex_alpha}
     lexical_top_score = lexical_confidence(lexical_candidates[0]) if lexical_candidates else 0.0
     if config.weighting == "static":
         return {"lexical": config.static_weights[0], "vector": config.static_weights[1]}
@@ -208,8 +220,8 @@ def fuse_hybrid_candidates(
     vector_candidates: list[dict],
     config: HybridFusionConfig = DEFAULT_HYBRID_FUSION,
 ) -> list[dict]:
-    """lexical/vector 결과를 reciprocal rank fusion(`convex`면 정규화 점수의 볼록 결합)으로 병합해 점수 순으로 정렬한다.
-    논문 다양성은 적용하지 않는다.
+    """lexical/vector 결과를 정규화 점수의 convex combination(제품 기본) 또는 reciprocal rank fusion(RRF 모드)으로
+    병합해 점수 순으로 정렬한다. 논문 다양성은 적용하지 않는다.
 
     `config.drop_partial_lexical`이 켜져 있고 vector 결과가 있으면 lexical 결과 중 일부 lexeme만 일치한 행
     (`strict_match`가 False)은 융합에서 뺀다. vector 결과가 없으면 lexical 결과를 모두 쓴다.
@@ -217,8 +229,8 @@ def fuse_hybrid_candidates(
     """
     lexical_candidates = fusion_lexical_candidates(lexical_candidates, vector_candidates, config)
     convex = config.weighting == "convex"
+    method_weights = resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates, config)
     if convex:
-        method_weights = {"lexical": config.convex_alpha, "vector": 1.0 - config.convex_alpha}
         normalized = {
             method: normalize_channel_scores(
                 [to_float(candidate.get("score")) for candidate in candidates], config.score_normalization, floor
@@ -228,8 +240,6 @@ def fuse_hybrid_candidates(
                 ("vector", vector_candidates, config.score_floors[1]),
             )
         }
-    else:
-        method_weights = resolve_hybrid_method_weights(query, lexical_candidates, vector_candidates, config)
     merged: dict[int, dict] = {}
     fallback_key_seed = -1
 

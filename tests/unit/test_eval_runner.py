@@ -26,6 +26,7 @@ from eval.runner import (
     run_evaluation,
     run_query,
 )
+from src.integrations.hybrid_fusion import LEGACY_RULES_FUSION, apply_paper_diversity, fuse_hybrid_candidates
 from src.integrations.paper_retriever import PaperRetriever
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -417,6 +418,12 @@ class TestAblationsOnRealRetriever:
 
     def test_hybrid_plainrrf_runs_through_retriever(self):
         assert _chunk_ids("hybrid_plainrrf") == [1, 2, 4]
+
+    def test_hybrid_rules_runs_the_legacy_config_on_the_product_inputs(self):
+        retriever = _real_retriever()
+        query, lexical, vector = retriever.hybrid_fusion_inputs("benchmark evaluation", limit=3)
+        expected = apply_paper_diversity(fuse_hybrid_candidates(query, lexical, vector, LEGACY_RULES_FUSION), limit=3)
+        assert _chunk_ids("hybrid_rules") == [hit["chunk_id"] for hit in expected]
 
     def test_ablation_hits_carry_context_text(self):
         query = EvalQuery(id="q", query="benchmark evaluation", lang="en", relevant_arxiv_ids=("A",), source="manual")

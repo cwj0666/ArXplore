@@ -38,7 +38,7 @@ def _format_context_papers(context_papers: list[dict[str, Any]]) -> str:
 
 @tool
 def search_paper_chunks_tool(query: str) -> str:
-    """논문 본문 청크를 검색합니다. PostgreSQL 전문 검색과 pgvector 벡터 검색을 RRF로 결합한 hybrid 검색을 쓰고,
+    """논문 본문 청크를 검색합니다. PostgreSQL 전문 검색과 pgvector 벡터 검색의 점수를 결합한 hybrid 검색을 쓰고,
     질의 임베딩을 만들 수 없으면 전문 검색만 씁니다. 특정 주제에 대한 정보 조사가 필요할 때 사용하세요."""
     contexts, _mode = retrieve_contexts(query, retriever=PaperRetriever(), limit=SEARCH_RESULT_LIMIT)
     record_tool_hits(source_from_context(context) for context in contexts)

@@ -3,7 +3,8 @@
 절차(사전 등록: docs/worklog/phase-4/2026-09-28_01_*.md)
 
 1. `build_specs`가 후보 설정을 만든다. R0(vector·lexical 단독), F0(표준 RRF, k 격자), F1(고정 가중치 w_lex × k),
-   F2(confidence 선형 가중 w_min × tau × k), C(현재 규칙), CF(현재 규칙의 방법 가중·품질 가중·교차 보너스 2^3 요인 배치).
+   F2(confidence 선형 가중 w_min × tau × k), C(가중 규칙, 2026-09-29까지의 제품 설정 `LEGACY_RULES_FUSION`),
+   CF(C의 방법 가중·품질 가중·교차 보너스 2^3 요인 배치).
    F1·F2는 품질 가중 on/off × 교차 보너스 {0, 0.015}와 교차한다. REF는 비교용(예전 `hybrid_plainrrf` ablation 등)이다.
    lexical 부분 일치 행 제거(`drop_partial_lexical`)는 REF를 뺀 모든 설정에서 제품과 같게 켠다.
 2. `evaluate_specs`가 설정마다 질의별 `QueryResult`(eval.runner 지표 코드)를 만든다.
@@ -41,7 +42,7 @@ from eval.metrics import mean, percentile
 from eval.report import format_rate
 from eval.runner import QueryResult, aggregate, hit_cutoffs, score_hits
 from src.integrations.hybrid_fusion import (
-    DEFAULT_HYBRID_FUSION,
+    LEGACY_RULES_FUSION,
     LEXICAL_SCORE_FLOOR,
     STANDARD_RRF_FUSION,
     STRICT_LEXICAL_SCORE_FLOOR,
@@ -76,6 +77,7 @@ DEFAULT_SEED = 20260928
 DEFAULT_FOLDS = 5
 DEFAULT_REPEATS = 10
 DEFAULT_RESAMPLES = 10_000
+# 설정 이름은 예전 리포트와 비교할 수 있게 그대로 둔다. C는 2026-09-29까지의 제품 규칙이고 지금 제품 기본은 `CC_mm_a0.35`다.
 CURRENT = "C_current"
 PLAIN_RRF_K60 = "F0_rrf_k60"
 VECTOR_ONLY = "vector_only"
@@ -87,8 +89,8 @@ def count_parameters(config: HybridFusionConfig) -> int:
     """1-SE 규칙의 단순성 기준: 설정이 실제로 쓰는 자유 상수 수.
 
     rank_constant 1개는 모든 설정에 있다. 교차 보너스 1, 품질 가중 구간(상한 + 값) 8, 고정 가중치는 1이 아닌 값마다 1,
-    confidence 선형은 w_min·tau 2, 현재 규칙은 토큰 기준 1 + 배수 2 + 신뢰도 구간 6 + 겹침 규칙 4 + 하한 2 = 15.
-    `drop_partial_lexical` 같은 구조 스위치는 세지 않는다. 현재 제품 설정(C)은 25개다.
+    confidence 선형은 w_min·tau 2, 가중 규칙(C)은 토큰 기준 1 + 배수 2 + 신뢰도 구간 6 + 겹침 규칙 4 + 하한 2 = 15.
+    `drop_partial_lexical` 같은 구조 스위치는 세지 않는다. 가중 규칙 C는 25개다.
     convex는 α 1개다. 정규화 종류와 이론 하한은 점수 정의에서 정한 값이라 세지 않는다.
     """
     if config.weighting == "convex":
@@ -164,20 +166,20 @@ def build_specs() -> list[SweepSpec]:
             overlap_bonus=bonus,
         )
         specs.append(SweepSpec(f"F2_wmin{w_min:.1f}_tau{tau:g}_k{k}_q{int(quality)}_b{bonus:g}", "F2", config=config))
-    specs.append(SweepSpec(CURRENT, "C", config=DEFAULT_HYBRID_FUSION))
+    specs.append(SweepSpec(CURRENT, "C", config=LEGACY_RULES_FUSION))
     for rules, quality, bonus in product((1, 0), (1, 0), (1, 0)):
         config = replace(
-            DEFAULT_HYBRID_FUSION,
+            LEGACY_RULES_FUSION,
             weighting="rules" if rules else "static",
             quality_weight=bool(quality),
-            overlap_bonus=DEFAULT_HYBRID_FUSION.overlap_bonus if bonus else 0.0,
+            overlap_bonus=LEGACY_RULES_FUSION.overlap_bonus if bonus else 0.0,
         )
         specs.append(SweepSpec(f"CF_m{rules}q{quality}b{bonus}", "CF", config=config))
     specs.append(
         SweepSpec(
             "REF_C_keep_partial",
             "REF",
-            config=replace(DEFAULT_HYBRID_FUSION, drop_partial_lexical=False),
+            config=replace(LEGACY_RULES_FUSION, drop_partial_lexical=False),
             selectable=False,
         )
     )
@@ -652,7 +654,7 @@ def pre_registered_decision(
     manual = _find(comparisons, "pick − C", "manual", primary)
     final = selection.pick
     if selection.pick == CURRENT:
-        lines.append(f"1-SE 선택이 현재 규칙({CURRENT})이다 → 현재 규칙 유지.")
+        lines.append(f"1-SE 선택이 가중 규칙({CURRENT})이다 → C 유지.")
         final = CURRENT
     elif manual is not None and manual.high < 0:
         lines.append(
@@ -664,7 +666,7 @@ def pre_registered_decision(
     elif versus_current.high < 0:
         lines.append(
             f"규칙 (2): C가 유의하게 낫다(pick − C ΔMRR CI [{versus_current.low:+.3f}, {versus_current.high:+.3f}]) → "
-            "현재 규칙 유지, 요인 배치(CF) 표로 어느 요인이 기여하는지 기록."
+            "C 유지, 요인 배치(CF) 표로 어느 요인이 기여하는지 기록."
         )
         final = CURRENT
     elif versus_current.low > 0:
@@ -899,7 +901,7 @@ def render_markdown(report: SweepReport, *, title: str, meta: Mapping[str, str])
     ]
     lines.extend(_table(["설정", *header], rows))
 
-    lines.extend(["", "## 현재 규칙 요인 배치 (방법 가중 m × 품질 가중 q × 교차 보너스 b)", ""])
+    lines.extend(["", "## 가중 규칙 C 요인 배치 (방법 가중 m × 품질 가중 q × 교차 보너스 b)", ""])
     factorial = [spec for spec in report.specs if spec.family == "CF"]
     lines.extend(
         _table(
@@ -1056,7 +1058,7 @@ def render_convex_sections(
     lines = ["", "## Convex combination 요약", ""]
     rows = []
     entries: list[tuple[str, str, str | None]] = [
-        (CURRENT, "현재 규칙 C", None),
+        (CURRENT, "가중 규칙 C", None),
         (PLAIN_RRF_K60, "표준 RRF k=60", None),
         (VECTOR_ONLY, "vector 단독", None),
         (pick, "CC pick", CONVEX),
