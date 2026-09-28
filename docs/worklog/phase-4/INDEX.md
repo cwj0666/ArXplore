@@ -5,6 +5,7 @@
 
 | 날짜 | 제목 | 영역 | 결정 | 파일 |
 |---|---|---|---|---|
+| 2026-09-29 | convex combination 융합 비교 결과와 판정 | retrieval, eval | 사전 등록한 비교에서 CC pick(min-max, lexical α 0.35, 상수 1개)은 MRR@10 0.805로 C(0.792)와 구간상 구분되지 않아 규칙 (1)은 C를 CC pick으로 교체하라고 가리키고, vector 단독보다 유의하게 낫지 않아 규칙 (3)은 기본 검색 방식 결정을 사용자에게 넘긴다. 제품 융합 설정은 사용자가 정할 때까지 바꾸지 않는다 | [2026-09-29_02_convex-combination-융합-비교-결과와-판정.md](2026-09-29_02_convex-combination-융합-비교-결과와-판정.md) |
 | 2026-09-29 | convex combination 융합 비교 사전 등록 | retrieval, eval | 채널 점수를 정규화해 α·lexical + (1−α)·vector로 합치는 convex combination(CC)을 현재 가중 규칙 C·표준 RRF·vector 단독과 같은 캐시 재생·클러스터 CV·1-SE·클러스터 paired bootstrap으로 비교하기로 하고, 측정 전에 정규화 3종·α 격자·결측 점수 규칙·비교 쌍·판정 규칙을 이 항목에 고정한다 | [2026-09-29_01_convex-combination-융합-비교-사전-등록.md](2026-09-29_01_convex-combination-융합-비교-사전-등록.md) |
 | 2026-09-28 | hybrid 검색의 lexical·vector 채널 병렬 실행과 지연 A-B 측정 | retrieval, eval | hybrid 검색은 vector 채널(질의 임베딩 → 벡터 SQL)을 호출마다 만드는 작업 스레드 1개에서, lexical 채널을 호출 스레드에서 동시에 실행한다. 같은 조건 A/B에서 eval 경로 질의별 지연이 평균 139ms(24%) 줄었고 결과는 같다 | [2026-09-28_03_hybrid-검색의-lexical·vector-채널-병렬-실행과-지연-A-B-측정.md](2026-09-28_03_hybrid-검색의-lexical·vector-채널-병렬-실행과-지연-A-B-측정.md) |
 | 2026-09-28 | hybrid 융합 상수 재검증 결과와 현재 규칙 유지 | retrieval, eval | 사전 등록한 재검증에서 가중 규칙(상수 25개)은 표준 RRF·vector 단독과 유의한 차이가 없었고 규칙 (1)은 표준 RRF로의 교체를 가리켰지만, 사용자 결정으로 제품 융합 설정은 현재 가중 규칙 그대로 두고 결과만 기록한다 | [2026-09-28_02_hybrid-융합-상수-재검증-결과와-현재-규칙-유지.md](2026-09-28_02_hybrid-융합-상수-재검증-결과와-현재-규칙-유지.md) |
