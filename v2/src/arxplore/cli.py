@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
@@ -105,6 +106,30 @@ def db_status_command() -> None:
         typer.echo("ready: yes" if not problems else f"ready: no ({'; '.join(problems)})")
 
     _run(operation, role="cli")
+
+
+COMMAND_MODULES = (
+    "arxplore.api.commands",
+    "arxplore.pipeline.commands",
+    "arxplore.scheduler.commands",
+)
+
+
+def register_command_modules(target: typer.Typer, module_names: tuple[str, ...] = COMMAND_MODULES) -> list[str]:
+    registered = []
+    for module_name in module_names:
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if exc.name == module_name or (exc.name and module_name.startswith(f"{exc.name}.")):
+                continue
+            raise
+        module.register(target)
+        registered.append(module_name)
+    return registered
+
+
+register_command_modules(app)
 
 
 if __name__ == "__main__":
