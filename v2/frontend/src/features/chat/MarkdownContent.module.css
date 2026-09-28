@@ -45,6 +45,45 @@
   padding-left: 20px;
 }
 
+.markdown li > ul,
+.markdown li > ol {
+  margin: 4px 0 0;
+}
+
+.markdown blockquote {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+
+.markdown hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border-strong);
+  text-align: left;
+}
+
+.markdown th {
+  background: rgba(15, 23, 42, 0.04);
+  font-weight: 700;
+}
+
 .markdown li + li {
   margin-top: 4px;
 }
