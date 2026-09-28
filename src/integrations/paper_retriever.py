@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextvars
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from src.integrations.embedding_client import EmbeddingClient
 from src.integrations.hybrid_fusion import (
@@ -41,7 +43,11 @@ def hybrid_branch_limit(limit: int) -> int:
 
 
 class PaperRetriever:
-    """논문 검색과 RAG용 문맥 구성을 담당하는 retrieval 경로."""
+    """논문 검색과 RAG용 문맥 구성을 담당하는 retrieval 경로.
+
+    `parallel_channels`(기본 True)면 hybrid 검색이 lexical 경로와 vector 경로(질의 임베딩 → 벡터 SQL)를 동시에
+    실행한다. False면 lexical → vector 순서로 실행한다(병렬화 전 동작. 지연 A/B 측정용).
+    """
 
     def __init__(
         self,
@@ -49,10 +55,12 @@ class PaperRetriever:
         repository: PaperRepository | None = None,
         embedding_client: EmbeddingClient | None = None,
         vector_repository: VectorRepository | None = None,
+        parallel_channels: bool = True,
     ) -> None:
         self.repository = repository or PaperRepository()
         self.embedding_client = embedding_client or EmbeddingClient()
         self.vector_repository = vector_repository or VectorRepository()
+        self.parallel_channels = parallel_channels
 
     def search_paper_chunks(
         self,
@@ -135,11 +143,21 @@ class PaperRetriever:
     ) -> tuple[str, list[dict], list[dict]]:
         """hybrid 융합에 들어가는 (정규화 질의, lexical 결과, vector 결과). 각 채널은 자기 경로의 정규화·rerank·
         필터·diversity를 거친 `hybrid_branch_limit(limit)`개다. 질의가 비면 DB를 조회하지 않고 빈 목록을 돌려준다.
-        `scripts/eval_dump_candidates.py`가 같은 입력을 저장해 융합만 다시 재생한다."""
+        `scripts/eval_dump_candidates.py`가 같은 입력을 저장해 융합만 다시 재생한다.
+
+        `parallel_channels`면 두 채널을 동시에 실행한다(`_run_channels_in_parallel`). 결과와 예외는 순차 실행과 같다."""
         query = normalize_search_query(query)
         if not query:
             return query, [], []
         normalized_limit = max(1, limit)
+        if self.parallel_channels:
+            lexical_candidates, vector_candidates = self._run_channels_in_parallel(
+                query,
+                arxiv_id=arxiv_id,
+                lexical_limit=lexical_limit or hybrid_branch_limit(normalized_limit),
+                vector_limit=vector_limit or hybrid_branch_limit(normalized_limit),
+            )
+            return query, lexical_candidates, vector_candidates
         lexical_candidates = self.search_paper_chunks(
             query,
             arxiv_id=arxiv_id,
@@ -151,6 +169,41 @@ class PaperRetriever:
             limit=vector_limit or hybrid_branch_limit(normalized_limit),
         )
         return query, lexical_candidates, vector_candidates
+
+    def _run_channels_in_parallel(
+        self,
+        query: str,
+        *,
+        arxiv_id: str | None,
+        lexical_limit: int,
+        vector_limit: int,
+    ) -> tuple[list[dict], list[dict]]:
+        """vector 경로를 작업 스레드에서, lexical 경로를 호출 스레드에서 동시에 실행한다.
+
+        - 대부분의 시간이 질의 임베딩 API 왕복이라 vector를 먼저 띄운다. 두 경로 모두 저장소 메서드 안에서
+          풀 연결을 따로 빌렸다가 반납하므로 스레드끼리 연결을 공유하지 않는다(요청당 동시 연결은 최대 2개).
+        - 작업 스레드는 `contextvars.copy_context()`로 실행해 요청 범위 키(`override_openai_runtime`)와
+          LangSmith 추적 문맥을 그대로 본다.
+        - 예외 우선순위는 순차 실행과 같다. lexical이 실패하면 vector 결과를 기다리지 않고 lexical 예외를 낸다
+          (순차 실행에서는 vector가 아예 실행되지 않던 경우다. 이미 시작된 vector 호출은 끝까지 돌고 결과는 버린다).
+          lexical이 성공하면 vector 예외(`OpenAIError` 등)를 그대로 다시 낸다.
+        - 실행기는 호출마다 만든다(스레드 1개). 모듈 공용 실행기는 gthread 워커의 동시 요청이 작업 스레드 수에
+          막혀 줄을 서게 되고, 스레드 생성 비용은 임베딩 왕복에 비해 무시할 만하다.
+        """
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hybrid-vector")
+        try:
+            vector_future = executor.submit(
+                contextvars.copy_context().run,
+                self.search_paper_chunks_by_vector,
+                query,
+                arxiv_id=arxiv_id,
+                limit=vector_limit,
+            )
+            lexical_candidates = self.search_paper_chunks(query, arxiv_id=arxiv_id, limit=lexical_limit)
+            vector_candidates = vector_future.result()
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+        return lexical_candidates, vector_candidates
 
     def search_paper_contexts(
         self,
