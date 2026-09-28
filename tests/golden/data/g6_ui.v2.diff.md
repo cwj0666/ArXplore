@@ -4,7 +4,7 @@
 
 다시 만드는 명령(저장소 루트, 먼저 `cd v2/frontend && npm ci && npm run build`)
 - 비교: `.venv/bin/python -m tests.golden.ui.g6_v2` 또는 `.venv/bin/python -m pytest tests/golden/ui/test_g6_ui_v2.py`
-- 변형 저장: `.venv/bin/python -m tests.golden.ui.g6_v2 --out <폴더> --write-variant <화면...>`
+- 변형 저장: `.venv/bin/python -m tests.golden.ui.g6_v2 --out <폴더> --write-variant <화면...>`. 원본과 바이트가 다른 파일만 저장하고, 비교할 때는 파일마다 변형이 있으면 변형을, 없으면 원본을 쓴다.
 
 캡처 방식
 - v2 빌드를 `vite preview`로 띄우고 API는 옛 Django 백엔드로 프록시한다. DB는 `arxplore_tpl`에서 복사한 `v2_test_ui_g6`, LLM은 가짜 OpenAI 서버다.

@@ -238,7 +238,12 @@ def write_variant(actual_dir: Path, names: Sequence[str]) -> None:
     VARIANT_DIR.mkdir(parents=True, exist_ok=True)
     for name in names:
         for suffix in SCREEN_SUFFIXES:
-            shutil.copyfile(actual_dir / f"{name}{suffix}", VARIANT_DIR / f"{name}{suffix}")
+            captured = actual_dir / f"{name}{suffix}"
+            variant = VARIANT_DIR / f"{name}{suffix}"
+            if captured.read_bytes() == (g6_ui.GOLDEN_DIR / f"{name}{suffix}").read_bytes():
+                variant.unlink(missing_ok=True)
+            else:
+                shutil.copyfile(captured, variant)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
