@@ -7,7 +7,7 @@ import { createQueryClient } from "../app/queryClient";
 import { BootstrapContext } from "../shared/api/bootstrap";
 import type { BootstrapPayload } from "../shared/api/types";
 
-export const TEST_BOOTSTRAP: BootstrapPayload = {
+const TEST_BOOTSTRAP: BootstrapPayload = {
   default_summary_model: "gpt-5-mini",
   available_summary_models: ["gpt-5-mini", "gpt-5"],
 };

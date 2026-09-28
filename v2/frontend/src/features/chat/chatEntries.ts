@@ -9,7 +9,7 @@ export interface ChatEntry {
   citations: Citation[];
 }
 
-export const WELCOME_ENTRY_ID = "welcome";
+const WELCOME_ENTRY_ID = "welcome";
 
 let lastEntryNumber = 0;
 

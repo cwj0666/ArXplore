@@ -59,7 +59,7 @@ function parseRetryAfterSeconds(payload: unknown, response: Response): number | 
   return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : null;
 }
 
-export function describeRateLimit(retryAfterSeconds: number | null): string {
+function describeRateLimit(retryAfterSeconds: number | null): string {
   return retryAfterSeconds
     ? `요청이 많아 잠시 제한되었습니다. ${retryAfterSeconds}초 후 다시 시도해 주세요.`
     : "요청이 많아 잠시 제한되었습니다. 잠시 후 다시 시도해 주세요.";
