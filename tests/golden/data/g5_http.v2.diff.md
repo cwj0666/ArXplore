@@ -26,16 +26,18 @@
 ## F21: 상세 요약에서 other 섹션도 요약
 
 - 섹션 선택 규칙(버킷별 2/3/3/3, 나머지를 other로 채워 최대 12개)은 그대로다. 달라진 점은 선택된 other 섹션을 버리지 않는다는 것이다. other도 다섯 번째 버킷으로 섹션 요약(3,200자)과 버킷 요약을 거친다. 그 결과를 `[기타 해설]`, `[기타 원문 근거]`(앞 2섹션, 900자) 라벨로 병합 입력의 맨 뒤에 붙인다.
-- 네 버킷이 모두 비어도 other가 있으면 fallback 본문 대신 병합 입력으로 최종 요약을 만든다. 텍스트가 있는 섹션이 하나도 없을 때만 fallback 본문을 쓴다.
-- LLM 호출은 선택된 other 섹션 수 + 1회 늘어난다. 네 버킷이 다 찬 논문은 other가 1개라 2회, 버킷이 빈 논문은 더 늘어난다(최대 13회).
+- 후속 커밋에서 other 후보에서 비본문 섹션을 뺐다. `arxplore.parsing.roles.section_role`이 front_matter, references, toc로 보는 제목과 `acknowledg`가 들어간 제목이 대상이다. 네 키워드 버킷에 든 섹션은 제목이 무엇이든 그대로다. 빠진 섹션은 12개 예산도 쓰지 않는다. 옛 구현도 other를 요약하지 않았으므로, 목적은 키워드에 걸리지 않아 버려지던 본문 섹션만 살리는 것이다.
+- 네 버킷이 모두 비어도 본문 other가 있으면 fallback 본문 대신 병합 입력으로 최종 요약을 만든다. 요약할 섹션이 하나도 없을 때만 fallback 본문을 쓴다.
+- LLM 호출은 선택된 본문 other 섹션 수 + 1회 늘어난다(없으면 0회).
 - 새로 생성하는 요약부터 적용된다. 캐시된 요약은 다시 만들지 않는다(F22 프롬프트 버전은 1 그대로).
 - G5·G4 차이(3개 시나리오)
   - `summary:summary_generate_gpt5_mini`, `summary:summary_generate_gpt5`(2608.30597)
-    - other 섹션 `Front Matter` 1개의 섹션 호출과 other 버킷 호출이 더해진다. LLM 호출은 16회에서 18회로 는다.
-    - 최종 호출의 본문 끝에 `[기타 해설]`과 `[기타 원문 근거] [근거 1] Front Matter`가 붙는다.
-    - 가짜 서버 답은 마지막 사용자 메시지의 해시라 요약 문자열이 `Fake reply e9402cd9982b: ...`에서 `Fake reply 72c2cb03cd6c: ...`로 바뀐다. gpt5_mini의 두 번째 응답은 캐시라 같은 값이다.
-  - `summary:summary_model_failure`(2609.26796): other 섹션 5개의 섹션 호출 5회와 버킷 호출 1회가 더해진다. LLM 호출은 10회에서 16회로 늘고, 최종 호출은 여전히 400이다. 응답(500)은 같다.
-- 참고: 두 논문 모두 첫 other 섹션이 `Front Matter`(제목·저자·소속)다. 이런 섹션까지 요약에 넣을지는 별도 판단이 필요하다.
+    - other 섹션 `3 Posterior Label Correction DPO`의 섹션 호출과 other 버킷 호출이 더해져 LLM 호출이 16회에서 18회로 는다. `Front Matter`는 빠진다.
+    - 최종 호출의 본문 끝에 `[기타 해설]`과 `[기타 원문 근거] [근거 1] 3 Posterior Label Correction DPO`가 붙는다.
+    - 가짜 서버 답은 마지막 사용자 메시지의 해시라 요약 문자열이 `Fake reply e9402cd9982b: ...`에서 `Fake reply cf8f3efa6657: ...`로 바뀐다. gpt5_mini의 두 번째 응답은 캐시라 같은 값이다.
+  - `summary:summary_model_failure`(2609.26796)
+    - other 섹션 `2.2 Flash-Cache: IO-aware key-value caching`, `2.3 Flash-Verify: KV-cache-driven draft-and-verify Parallel Decoding`의 섹션 호출 2회와 버킷 호출 1회가 더해진다. LLM 호출은 10회에서 13회로 늘고, 최종 호출은 여전히 400이다. 응답(500)은 같다.
+    - 선택에서 빠진 other 섹션은 `Front Matter`, `Acknowledgments`, `References`다.
 
 ## F23: 추적 runtime 라벨
 

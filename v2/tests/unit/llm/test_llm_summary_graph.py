@@ -36,7 +36,7 @@ def _four_bucket_sections() -> list[dict[str, Any]]:
         *[_section(f"Method {index}") for index in range(5)],
         *[_section(f"Experiments {index}") for index in range(5)],
         *[_section(f"Conclusion {index}") for index in range(5)],
-        *[_section(f"Acknowledgments {index}") for index in range(3)],
+        *[_section(f"Case Study {index}") for index in range(3)],
     ]
 
 
@@ -72,7 +72,7 @@ def test_selection_caps_each_bucket_and_fills_with_other() -> None:
         "Conclusion 0",
         "Conclusion 1",
         "Conclusion 2",
-        "Acknowledgments 0",
+        "Case Study 0",
     ]
 
 
@@ -99,6 +99,32 @@ def test_other_only_input_is_capped_at_twelve_and_grouped_as_other() -> None:
         "limitations": 0,
         "other": 12,
     }
+
+
+@pytest.mark.parametrize(
+    ("title", "kept"),
+    [
+        ("Front Matter", False),
+        ("References", False),
+        ("7 Bibliography", False),
+        ("Table of Contents", False),
+        ("Acknowledgments", False),
+        ("Acknowledgement", False),
+        ("Appendix A: Proofs", True),
+        ("2.2 Flash-Cache: IO-aware key-value caching", True),
+        ("Case Study", True),
+    ],
+)
+def test_other_sections_skip_front_matter_references_toc_and_acknowledgments(title: str, kept: bool) -> None:
+    selected = select_summary_sections([_section(title)])
+
+    assert (selected == [_section(title)]) is kept
+
+
+def test_non_body_titles_are_only_filtered_from_the_other_bucket() -> None:
+    sections = [_section("References and Discussion"), _section("Acknowledgments of Training Methods")]
+
+    assert select_summary_sections(sections) == [sections[1], sections[0]]
 
 
 def test_selection_skips_non_mapping_and_blank_sections() -> None:
@@ -182,7 +208,7 @@ async def test_full_input_summarizes_the_other_bucket_too(
     assert positions == sorted(positions)
     for label in labels:
         assert f"[{label} 원문 근거]" in final_prompt
-    assert "[근거 1] Acknowledgments 0" in final_prompt
+    assert "[근거 1] Case Study 0" in final_prompt
     assert "저자: A. Author" in final_prompt
     assert any(re.search(r"^bucket: other$", text, re.M) for text in _user_texts(fake_openai))
 

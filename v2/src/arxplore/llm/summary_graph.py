@@ -12,6 +12,7 @@ from arxplore.llm.detail import author_names, compact_text
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.prompts.summary import SUMMARY_BUCKET_PROMPT, SUMMARY_PROMPT, SUMMARY_SECTION_PROMPT
 from arxplore.llm.tracing import Tracer
+from arxplore.parsing.roles import FRONT_MATTER_ROLE, REFERENCES_ROLE, TOC_ROLE, section_role
 from arxplore.text import collapse_whitespace
 
 SUMMARY_PROMPT_VERSION = 1
@@ -28,6 +29,8 @@ FINAL_TEMPERATURE = 0.2
 OTHER_BUCKET = "other"
 UNTITLED = "제목 없음"
 UNKNOWN_AUTHORS = "저자 미상"
+NON_BODY_ROLES = frozenset({FRONT_MATTER_ROLE, REFERENCES_ROLE, TOC_ROLE})
+ACKNOWLEDGMENT_TITLE_MARKER = "acknowledg"
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,13 +103,20 @@ def _bucket_of(section: Section) -> str:
     return classify_section_bucket(str(section.get("title") or ""))
 
 
+def is_summarizable_other_title(title: str) -> bool:
+    return section_role(title) not in NON_BODY_ROLES and ACKNOWLEDGMENT_TITLE_MARKER not in title.lower()
+
+
 def select_summary_sections(sections: Sequence[Any]) -> list[Section]:
     by_bucket: dict[str, list[Section]] = {bucket.name: [] for bucket in CLASSIFIED_BUCKETS}
     by_bucket[OTHER_BUCKET] = []
     for section in sections:
         if not isinstance(section, Mapping) or not str(section.get("text") or "").strip():
             continue
-        by_bucket[_bucket_of(section)].append(section)
+        bucket = _bucket_of(section)
+        if bucket == OTHER_BUCKET and not is_summarizable_other_title(str(section.get("title") or "")):
+            continue
+        by_bucket[bucket].append(section)
     selected: list[Section] = []
     for bucket in CLASSIFIED_BUCKETS:
         selected.extend(by_bucket[bucket.name][: bucket.selection_limit])
