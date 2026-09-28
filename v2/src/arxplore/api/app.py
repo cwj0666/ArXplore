@@ -136,12 +136,20 @@ async def open_services(settings: AppSettings) -> AsyncIterator[ApiServices]:
         await pool.close()
 
 
+def dist_file(root: Path, relative: str) -> Path | None:
+    try:
+        candidate = (root / relative).resolve()
+        return candidate if candidate.is_relative_to(root) and candidate.is_file() else None
+    except OSError, ValueError:
+        return None
+
+
 def spa_response(request: Request, dist: Path) -> Response:
     root = dist.resolve()
     relative = request.url.path.lstrip("/")
     if relative:
-        candidate = (root / relative).resolve()
-        if candidate.is_relative_to(root) and candidate.is_file():
+        candidate = dist_file(root, relative)
+        if candidate is not None:
             return FileResponse(candidate)
         if relative.startswith(STATIC_ASSET_PREFIX):
             return error_response(404, ROUTE_NOT_FOUND_MESSAGE)

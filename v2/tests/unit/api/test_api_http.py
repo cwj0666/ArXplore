@@ -102,6 +102,18 @@ class TestBootstrapAndPages:
             assert response.status_code == 404
             assert response.json() == {"error": ROUTE_NOT_FOUND_MESSAGE}
 
+    @pytest.mark.parametrize(
+        "path",
+        ["/admin/", "/login/", "/auth/login/", "/auth/signup/", "/settings/", "/settings/api-key/", "/favorites/"],
+    )
+    async def test_removed_account_routes_do_not_exist(self, harness: Any, path: str) -> None:
+        async with harness.client() as client:
+            get = await client.get(path)
+            post = await harness.post(client, path, {})
+
+        assert (get.status_code, get.json()) == (404, {"error": ROUTE_NOT_FOUND_MESSAGE})
+        assert post.status_code == 404
+
     async def test_spa_fallback_serves_files_and_the_index(
         self, harness: Any, tmp_path: Path, ids: dict[str, str]
     ) -> None:
@@ -116,6 +128,7 @@ class TestBootstrapAndPages:
             asset = await client.get("/assets/app.js")
             traversal = await client.get("/assets/../../secret.txt")
             missing_asset = await client.get("/assets/missing.js")
+            null_byte = await client.get("/assets/a%00b.js")
             api = await client.get("/papers/list.json")
             post = await client.post("/somewhere")
 
@@ -124,6 +137,7 @@ class TestBootstrapAndPages:
         assert (asset.status_code, asset.text) == (200, "console.log(1)")
         assert "secret" not in traversal.text
         assert (missing_asset.status_code, missing_asset.json()) == (404, {"error": ROUTE_NOT_FOUND_MESSAGE})
+        assert null_byte.status_code == 404
         assert api.headers["content-type"] == "application/json"
         assert post.status_code == 404
 
