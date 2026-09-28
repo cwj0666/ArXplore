@@ -4,7 +4,7 @@
     python scripts/eval_hybrid_latency.py --limit 4 --repeats 1 --no-memo-check   # 연기 테스트
 
 PostgreSQL과 OPENAI_API_KEY(질의 임베딩)가 필요하다. LLM 생성 호출은 없다.
-질의 블록마다 eval 하니스 경로(`search_paper_contexts_by_hybrid`, k, window=1)와 제품 경로(`retrieve_contexts`, limit=5)를
+질의 블록마다 eval 하네스 경로(`search_paper_contexts_by_hybrid`, k, window=1)와 제품 경로(`retrieve_contexts`, limit=5)를
 A/B 쌍으로, lexical·vector 단독을 대조군으로 실행한다. 쌍 순서는 반복마다 A→B / B→A로 바꾼다. 임베딩은 캐시하지 않는다.
 끝으로 임베딩을 질의당 한 번만 요청해 A와 B가 공유하는 패스로 결과 dict 전체가 같은지 확인한다(`--no-memo-check`로 끔).
 결과: eval/results/latency_<timestamp>.{md,csv}. 절차는 eval/latency.py.

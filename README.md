@@ -102,7 +102,7 @@ src/integrations/   PostgreSQL 저장소, PDF 파서, 임베딩, 검색
 src/pipeline/       수집·파싱·임베딩 진입점과 prepare-worker
 src/shared/         설정과 LangSmith 트레이싱
 dags/               Airflow DAG
-eval/               검색·생성 평가 하니스
+eval/               검색·생성 평가 하네스
 docs/               아키텍처, 평가, 실행 문서와 worklog
 ```
 
@@ -114,4 +114,4 @@ docs/               아키텍처, 평가, 실행 문서와 worklog
 | [EVALUATION.md](./docs/EVALUATION.md) | 검색·답변 품질, 응답 지연, 측정 방법 |
 | [SETUP.md](./docs/SETUP.md) | 실행 방법, compose 프로필, 테스트와 CI |
 | [Worklog](./docs/worklog/README.md) | 설계 결정 기록과 [트러블슈팅](./docs/worklog/TROUBLESHOOTING.md) |
-| [eval/README.md](./eval/README.md) | 평가 하니스 사용법과 지표 정의 |
+| [eval/README.md](./eval/README.md) | 평가 하네스 사용법과 지표 정의 |

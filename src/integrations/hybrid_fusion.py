@@ -3,7 +3,7 @@
 `PaperRetriever`는 `DEFAULT_HYBRID_FUSION`으로 `fuse_hybrid_candidates`를 부른 뒤 `apply_paper_diversity`로 자른다.
 제품 기본은 채널 점수 min-max 정규화의 convex combination(lexical 가중치 0.35)이다. 2026-09-29까지의 제품 규칙(RRF k=60 +
 손으로 고른 가중치)은 `LEGACY_RULES_FUSION`으로 남아 재생·ablation에 쓴다.
-평가 하니스(`eval/fusion_sweep.py`)는 같은 함수를 다른 설정으로 불러 저장해 둔 후보에서 융합만 다시 재생한다.
+평가 하네스(`eval/fusion_sweep.py`)는 같은 함수를 다른 설정으로 불러 저장해 둔 후보에서 융합만 다시 재생한다.
 DB·임베딩 호출이 없으므로 같은 입력이면 같은 출력이다.
 """
 

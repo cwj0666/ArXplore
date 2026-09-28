@@ -1,6 +1,6 @@
 # 평가
 
-README의 평가 요약을 자세히 풀어 쓴 문서입니다. 하니스 사용법과 지표 정의는 [`eval/README.md`](../eval/README.md), 결정 근거는 [worklog](./worklog/README.md)에 있습니다.
+README의 평가 요약을 자세히 풀어 쓴 문서입니다. 하네스 사용법과 지표 정의는 [`eval/README.md`](../eval/README.md), 결정 근거는 [worklog](./worklog/README.md)에 있습니다.
 
 ## 검색 품질
 
@@ -39,7 +39,7 @@ README의 평가 요약을 자세히 풀어 쓴 문서입니다. 하니스 사�
 - 같은 임베딩을 넣으면 111개 질의 모두 결과가 같습니다. 단계별 중앙값은 임베딩 149ms, lexical SQL 약 235ms, vector SQL 57ms이고, 한국어 질의는 lexical SQL이 약 10ms라 줄어드는 폭이 작습니다(ko p50 246→228ms, en 604→381ms). 같은 조건의 대조군은 lexical 단독 160 / 383ms, vector 단독 198 / 263ms입니다.
 - 이 A/B는 가중 RRF 규칙 시점(2026-09-28)에 쟀습니다. 2026-09-29의 융합 규칙 변경은 두 채널을 같은 방식으로 병렬 실행하고 채널 결과를 합치는 계산만 바꾸므로 다시 재지 않았고, 위 값을 그대로 씁니다. 품질 표 실행(`20260929-005408.md`)의 지연 열은 교대 측정이 아니라 이 비교에 쓰지 않습니다. 동시 요청 부하와 원격 DB에서의 지연은 재지 않았습니다.
 
-평가 하니스는 [`eval/`](../eval/README.md)에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF, 예전 가중 RRF 규칙)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
+평가 하네스는 [`eval/`](../eval/README.md)에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF, 예전 가중 RRF 규칙)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
 
 ```bash
 python scripts/eval_build_queries.py                     # 표본·프롬프트 확인 (dry-run, LLM 미호출)

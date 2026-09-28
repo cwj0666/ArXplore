@@ -161,7 +161,7 @@ nginx(`docker/nginx/nginx.conf`)는 SPA 경로를 `index.html`로 돌리고 API�
 - **Hybrid** — 채널 점수 per-query min-max 정규화의 convex combination(0.35·lexical + 0.65·vector, `DEFAULT_HYBRID_FUSION`, `src/integrations/hybrid_fusion.py`). vector 결과가 있으면 lexical 부분 일치 행 제외. 사전 등록 비교 규칙 (1) + 사용자 결정으로 2026-09-29 채택했고 vector 단독 대비 이득은 유의하지 않다. 예전 가중 RRF 규칙은 `LEGACY_RULES_FUSION`(ablation `hybrid_rules`)
 - DB 연결은 `src/integrations/db.py` 풀(프로세스당 `POSTGRES_POOL_MAX`, 기본 8)
 
-오프라인 평가 하니스: `eval/`, `scripts/eval_build_queries.py`, `scripts/eval_retrieval.py`.
+오프라인 평가 하네스: `eval/`, `scripts/eval_build_queries.py`, `scripts/eval_retrieval.py`.
 
 ### Agent
 

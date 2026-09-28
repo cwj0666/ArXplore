@@ -1,6 +1,6 @@
 # 오프라인 검색 평가
 
-`PaperRetriever`의 lexical / vector / hybrid 경로와 일부 ablation을 같은 질의셋으로 비교하는 하니스입니다.
+`PaperRetriever`의 lexical / vector / hybrid 경로와 일부 ablation을 같은 질의셋으로 비교하는 하네스입니다.
 retriever 코드는 수정하지 않고, 공개 함수(`search_paper_contexts*`)와 하위 단계를 그대로 호출합니다.
 
 | 파일 | 역할 |
