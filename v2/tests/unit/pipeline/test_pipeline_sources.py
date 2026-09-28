@@ -1,7 +1,6 @@
-import html
-import json
 from datetime import date
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -13,20 +12,10 @@ from arxplore.sources import arxiv as arxiv_module
 from arxplore.sources import arxiv_metadata as arxiv_metadata_module
 from arxplore.sources.arxiv import ArxivClient
 from arxplore.sources.arxiv_metadata import fetch_arxiv_metadata, metadata_batches, unique_arxiv_ids
-from arxplore.sources.hf_daily import (
-    DailyPapersFormatError,
-    HfDailyPapersClient,
-    daily_papers_from_page,
-    extract_daily_papers_props,
-)
+from arxplore.sources.hf_daily import DailyPapersFormatError, HfDailyPapersClient, daily_papers_api_url
 
 ARXIV_URL = "https://export.arxiv.org/api/query"
 PAPERS = [{"paper": {"id": "2609.00001", "title": "A & B"}}, {"paper": {"id": "2609.00002"}}]
-
-
-def _page(props: object) -> str:
-    encoded = html.escape(json.dumps(props), quote=True)
-    return f'<html><div data-target="DailyPapers" data-props="{encoded}"></div></html>'
 
 
 def _feed(*arxiv_ids: str) -> str:
@@ -52,50 +41,101 @@ def _feed(*arxiv_ids: str) -> str:
     )
 
 
-def test_daily_papers_are_read_from_the_unescaped_data_props() -> None:
-    assert daily_papers_from_page(_page({"dailyPapers": PAPERS, "other": 1})) == PAPERS
-    assert extract_daily_papers_props(_page({"dailyPapers": []})) == {"dailyPapers": []}
+API_URL = "https://huggingface.co/api/daily_papers"
 
 
-def test_missing_daily_papers_key_means_an_empty_list() -> None:
-    assert daily_papers_from_page(_page({"other": 1})) == []
+@pytest.fixture
+def hf_sleeps() -> list[float]:
+    return []
 
 
-@pytest.mark.parametrize(
-    "page",
-    [
-        "<html>no props here</html>",
-        '<div data-target="DailyPapers" data-props="{&quot;dailyPapers&quot;: []}',
-        _page(["not", "a", "dict"]),
-        _page({"dailyPapers": {"not": "a list"}}),
-    ],
-)
-def test_malformed_pages_are_rejected(page: str) -> None:
-    with pytest.raises(DailyPapersFormatError):
-        daily_papers_from_page(page)
+def _hf_client(hf_sleeps: list[float], **overrides: Any) -> HfDailyPapersClient:
+    async def fake_sleep(seconds: float) -> None:
+        hf_sleeps.append(seconds)
+
+    values: dict[str, Any] = {"base_url": "https://huggingface.co/papers", "timeout_seconds": 20, "sleep": fake_sleep}
+    values.update(overrides)
+    return HfDailyPapersClient(**values)
+
+
+def test_the_api_lives_on_the_origin_of_the_configured_base_url() -> None:
+    assert daily_papers_api_url("https://huggingface.co/papers") == API_URL
+    assert daily_papers_api_url("http://127.0.0.1:18302/mirror/papers/") == "http://127.0.0.1:18302/api/daily_papers"
+    client = HfDailyPapersClient.from_settings(AppSettings.model_validate({}))
+    assert (client.api_url, client.timeout_seconds) == (API_URL, 20)
 
 
 @respx.mock
-async def test_fetch_reads_the_dated_page_with_the_configured_timeout() -> None:
-    route = respx.get("https://huggingface.co/papers/date/2026-09-15").respond(200, text=_page({"dailyPapers": PAPERS}))
-    client = HfDailyPapersClient.from_settings(AppSettings.model_validate({"HF_REQUEST_TIMEOUT_SECONDS": "7"}))
-    try:
-        assert await client.fetch_daily_papers(date(2026, 9, 15)) == PAPERS
-    finally:
-        await client.aclose()
+async def test_fetch_asks_the_json_api_for_the_date_with_a_user_agent(hf_sleeps: list[float]) -> None:
+    route = respx.get(API_URL).respond(200, json=PAPERS)
+    client = _hf_client(hf_sleeps, timeout_seconds=7)
+
+    assert await client.fetch_daily_papers(date(2026, 9, 15)) == PAPERS
+
+    request = route.calls.last.request
+    assert request.url.params["date"] == "2026-09-15"
+    assert request.headers["User-Agent"] == "arxplore/2.0"
+    assert request.headers["Accept"] == "application/json"
+    assert request.extensions["timeout"]["read"] == 7
+    assert hf_sleeps == []
+    await client.aclose()
+
+
+@respx.mock
+async def test_a_weekend_day_is_an_empty_list(hf_sleeps: list[float]) -> None:
+    respx.get(API_URL).respond(200, json=[])
+    assert await _hf_client(hf_sleeps).fetch_daily_papers(date(2026, 9, 12)) == []
+
+
+@respx.mock
+async def test_server_errors_timeouts_and_rate_limits_are_retried_with_backoff(hf_sleeps: list[float]) -> None:
+    route = respx.get(API_URL).mock(
+        side_effect=[httpx.Response(503), httpx.ReadTimeout("slow"), httpx.Response(200, json=PAPERS)]
+    )
+
+    assert await _hf_client(hf_sleeps).fetch_daily_papers(date(2026, 9, 15)) == PAPERS
+    assert route.call_count == 3
+    assert hf_sleeps == [2.0, 4.0]
+
+
+@respx.mock
+async def test_retry_after_is_honoured_up_to_a_minute(hf_sleeps: list[float]) -> None:
+    respx.get(API_URL).mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "7"}),
+            httpx.Response(429, headers={"Retry-After": "900"}),
+            httpx.Response(200, json=PAPERS),
+        ]
+    )
+
+    assert await _hf_client(hf_sleeps).fetch_daily_papers(date(2026, 9, 15)) == PAPERS
+    assert hf_sleeps == [7.0, 60.0]
+
+
+@respx.mock
+async def test_the_last_error_is_raised_after_the_attempts(hf_sleeps: list[float]) -> None:
+    route = respx.get(API_URL).respond(429)
+
+    with pytest.raises(httpx.HTTPStatusError, match="429"):
+        await _hf_client(hf_sleeps).fetch_daily_papers(date(2026, 9, 15))
+    assert route.call_count == 3
+
+
+@respx.mock
+async def test_client_errors_are_not_retried(hf_sleeps: list[float]) -> None:
+    route = respx.get(API_URL).respond(404)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _hf_client(hf_sleeps).fetch_daily_papers(date(2026, 9, 15))
     assert route.call_count == 1
-    assert route.calls.last.request.extensions["timeout"]["read"] == 7
+    assert hf_sleeps == []
 
 
 @respx.mock
-async def test_fetch_raises_http_errors() -> None:
-    respx.get("https://huggingface.co/papers/date/2026-09-15").respond(429)
-    client = HfDailyPapersClient(base_url="https://huggingface.co/papers", timeout_seconds=5)
-    try:
-        with pytest.raises(httpx.HTTPStatusError, match="429"):
-            await client.fetch_daily_papers(date(2026, 9, 15))
-    finally:
-        await client.aclose()
+async def test_a_response_that_is_not_a_list_is_rejected(hf_sleeps: list[float]) -> None:
+    respx.get(API_URL).respond(200, json={"dailyPapers": PAPERS})
+    with pytest.raises(DailyPapersFormatError):
+        await _hf_client(hf_sleeps).fetch_daily_papers(date(2026, 9, 15))
 
 
 def test_metadata_ids_are_normalized_deduplicated_and_batched_in_order() -> None:
