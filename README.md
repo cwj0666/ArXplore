@@ -115,7 +115,3 @@ docs/               아키텍처, 평가, 실행 문서와 worklog
 | [SETUP.md](./docs/SETUP.md) | 실행 방법, compose 프로필, 테스트와 CI |
 | [Worklog](./docs/worklog/README.md) | 설계 결정 기록과 [트러블슈팅](./docs/worklog/TROUBLESHOOTING.md) |
 | [eval/README.md](./eval/README.md) | 평가 하니스 사용법과 지표 정의 |
-
-## Team
-
-SK네트웍스 AI 캠프 팀 프로젝트입니다.
