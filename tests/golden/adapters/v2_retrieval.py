@@ -1,23 +1,18 @@
 import asyncio
 import os
-from collections.abc import Awaitable, Iterable
-from dataclasses import replace
+from collections.abc import Awaitable
+from dataclasses import asdict, replace
 from typing import Any, TypeVar
 
+from arxplore.api.services.store import PostgresPaperStore
 from arxplore.config import AppSettings, load_settings
 from arxplore.db.pool import Pool, create_pool_from_settings
-from arxplore.db.repositories.fulltexts import list_chunks
-from arxplore.db.repositories.papers import get_paper
-from arxplore.domain.papers import Paper
 from arxplore.domain.retrieval import ContextChunk, RetrievalContext, RetrievalHit
 from arxplore.embedding import EmbeddingClient
+from arxplore.llm.paper_chat import retrieve_paper_chat_sources
 from arxplore.retrieval.service import RetrievalConfig, Retriever
 
 T = TypeVar("T")
-
-PAPER_CHAT_CONTEXT_LIMIT = 5
-ABSTRACT_SECTION_TITLE = "Abstract"
-FIRST_CHUNKS_MODE = "first_chunks"
 
 
 def _score_breakdown(hit: RetrievalHit) -> dict[str, Any]:
@@ -97,16 +92,6 @@ def context_record(context: RetrievalContext) -> dict[str, Any]:
     }
 
 
-def _optional_str(value: Any) -> str | None:
-    normalized = str(value or "").strip()
-    return normalized or None
-
-
-def _paper_url(arxiv_id: str, pdf_url: Any) -> str:
-    normalized = str(pdf_url or "").strip()
-    return normalized or f"https://arxiv.org/abs/{arxiv_id}"
-
-
 class V2RetrievalAdapter:
     def __init__(self) -> None:
         base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
@@ -116,6 +101,7 @@ class V2RetrievalAdapter:
         self._runner = asyncio.Runner()
         self._pool: Pool = create_pool_from_settings(settings, role="golden")
         self._run(self._pool.open(wait=True, timeout=self._pool.timeout))
+        self._store = PostgresPaperStore(self._pool)
         self._embedder = EmbeddingClient.from_settings(settings, base_url=base_url)
         self._config = RetrievalConfig.from_settings(settings)
 
@@ -153,64 +139,13 @@ class V2RetrievalAdapter:
     def paper_chat_sources(
         self, arxiv_id: str, question: str, *, retrieval_mode: str
     ) -> tuple[list[dict[str, Any]], str] | None:
-        paper = self._run(get_paper(self._pool, arxiv_id))
+        paper = self._run(self._store.get_paper(arxiv_id))
         if paper is None:
             return None
-        result = self._run(
-            self._retriever(retrieval_mode).retrieve_contexts(
-                question, limit=PAPER_CHAT_CONTEXT_LIMIT, arxiv_id=arxiv_id
-            )
+        retrieval = self._run(
+            retrieve_paper_chat_sources(paper, question, retriever=self._retriever(retrieval_mode), chunks=self._store)
         )
-        contexts: list[dict[str, Any]] = [context_record(context) for context in result.contexts]
-        mode: str = result.mode
-        if not contexts:
-            chunks = self._run(list_chunks(self._pool, arxiv_id, limit=PAPER_CHAT_CONTEXT_LIMIT))
-            contexts = [
-                {"chunk_id": chunk.chunk_id, "section_title": chunk.section_title, "chunk_text": chunk.chunk_text}
-                for chunk in chunks
-            ]
-            mode = FIRST_CHUNKS_MODE
-        return self._sources(paper, contexts), mode
-
-    @staticmethod
-    def _sources(paper: Paper, contexts: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-        arxiv_id = paper.arxiv_id
-        title = paper.title or ""
-        url = _paper_url(arxiv_id, paper.pdf_url)
-        sources: list[dict[str, Any]] = []
-        abstract = (paper.abstract or "").strip()
-        if abstract:
-            sources.append(
-                {
-                    "arxiv_id": arxiv_id,
-                    "title": title,
-                    "url": url,
-                    "section_title": ABSTRACT_SECTION_TITLE,
-                    "chunk_id": None,
-                    "text": abstract,
-                }
-            )
-        seen: set[int] = set()
-        for context in contexts:
-            chunk_id = context.get("chunk_id")
-            if chunk_id is not None:
-                if chunk_id in seen:
-                    continue
-                seen.add(chunk_id)
-            text = str(context.get("context_text") or context.get("chunk_text") or "").strip()
-            if not text:
-                continue
-            sources.append(
-                {
-                    "arxiv_id": arxiv_id,
-                    "title": title,
-                    "url": url,
-                    "section_title": _optional_str(context.get("section_title")),
-                    "chunk_id": chunk_id,
-                    "text": text,
-                }
-            )
-        return sources
+        return [asdict(source) for source in retrieval.sources], retrieval.retrieval_mode
 
     def close(self) -> None:
         try:
