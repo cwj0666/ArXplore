@@ -12,6 +12,7 @@ const { values } = parseArgs({
     pdf: { type: "string" },
     paper: { type: "string" },
     "missing-paper": { type: "string" },
+    impl: { type: "string", default: "legacy" },
   },
 });
 
@@ -20,6 +21,10 @@ const origin = new URL(baseUrl).origin;
 const outDir = values.out;
 const paper = values.paper;
 const missingPaper = values["missing-paper"];
+const impl = values.impl;
+if (impl !== "legacy" && impl !== "v2") {
+  throw new Error(`unknown --impl ${impl}`);
+}
 const pdfBytes = await readFile(values.pdf);
 const viewport = { width: 1440, height: 900 };
 const timeout = 120_000;
@@ -134,13 +139,17 @@ async function detailPages(browser) {
   await capture(page, "summary_model_dialog");
 
   const summary = page.waitForResponse((response) => response.url().includes("/summary/"));
-  await dialog.locator("button.primary").click();
+  const confirm =
+    impl === "v2" ? dialog.getByRole("button", { name: "생성", exact: true }) : dialog.locator("button.primary");
+  await confirm.click();
   await summary;
   await page.locator("#summary-card[aria-busy='false'] #summary-content").waitFor();
   await capture(page, "summary_result");
 
   await page.getByRole("button", { name: "PDF 분할 보기" }).click();
-  await page.locator("#pdf-panel:not(.pdf-panel-hidden) #pdf-frame").waitFor();
+  const pdfFrame =
+    impl === "v2" ? page.locator("#pdf-panel #pdf-frame") : page.locator("#pdf-panel:not(.pdf-panel-hidden) #pdf-frame");
+  await pdfFrame.waitFor();
   await waitForPdfViewer(page);
   await capture(page, "pdf_split_view", { waitForNetwork: false });
   await page.getByTitle("분할창 닫기").click();
