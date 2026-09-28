@@ -1,0 +1,77 @@
+{
+  "format": 1,
+  "corpus": "HF Daily Papers 2026-09-11..2026-09-24, 275 papers",
+  "source_url": "https://arxiv.org/pdf/{arxiv_id}v{version}",
+  "papers": [
+    {
+      "arxiv_id": "2609.27980",
+      "version": 1,
+      "sha256": "869185b9b37c702e580f9eb135fa1876ccc4ccaddb6c321a9dab8ed95ff80d99",
+      "bytes": 547236,
+      "reason": "짧은 논문: 4쪽 워크숍 논문"
+    },
+    {
+      "arxiv_id": "2609.10539",
+      "version": 1,
+      "sha256": "a25153b6c95e396dc6b4daba54042ed72d88066c813b6e9861433f4b866aed81",
+      "bytes": 11221632,
+      "reason": "부록이 긴 논문: 74쪽 벤치마크, 그림 18개"
+    },
+    {
+      "arxiv_id": "2609.22319",
+      "version": 1,
+      "sha256": "1b29f3f46c16604b9cdcd30bc8be578e87a32fcf71691817f9bf5ba40a613a10",
+      "bytes": 5230909,
+      "reason": "참고문헌이 많은 서베이(로봇 학습의 물리 사전지식)"
+    },
+    {
+      "arxiv_id": "2609.27158",
+      "version": 1,
+      "sha256": "b102c61d2da2aaf49ca030e026f0a1285cd682c8d457953beaf3d2dd60b6e4e8",
+      "bytes": 256213,
+      "reason": "수식 중심 이론 논문(선형 표현 가설과 군 작용), 16쪽"
+    },
+    {
+      "arxiv_id": "2609.20758",
+      "version": 1,
+      "sha256": "a94fdc226974beef098049c50d2d5ed942ffeb174e635315396993befce09afa",
+      "bytes": 422082,
+      "reason": "stat.ML 논문: 본문 15쪽에 증명 부록을 더해 총 30쪽"
+    },
+    {
+      "arxiv_id": "2609.17652",
+      "version": 3,
+      "sha256": "895b417dc13723ed5c7e9ca7dd902cc66a9fa4e7e43189b3f6f928bc637d8d5c",
+      "bytes": 561889,
+      "reason": "표가 많은 논문: 19쪽에 표 21개, v3"
+    },
+    {
+      "arxiv_id": "2609.25199",
+      "version": 1,
+      "sha256": "0b1ab9f651645ec7724c342b7f8559a8179ae03b02743b6bf62f02a726922920",
+      "bytes": 731884,
+      "reason": "코드·형식 수학(Lean) 카탈로그가 긴 52쪽 논문"
+    },
+    {
+      "arxiv_id": "2609.12397",
+      "version": 2,
+      "sha256": "31a9fef7e3da89135dc2c778d40c0d5cf1f5cf2991e9d564a12e386dbef52a0d",
+      "bytes": 6798578,
+      "reason": "ICML 2단 조판, v2"
+    },
+    {
+      "arxiv_id": "2609.16034",
+      "version": 1,
+      "sha256": "830babae673bfbbfec6f996095b9f3a2fa275d4a5fc2dff01ff877ee46e090ab",
+      "bytes": 8160674,
+      "reason": "기업 기술 보고서 템플릿(eess.AS), 18쪽"
+    },
+    {
+      "arxiv_id": "2609.09143",
+      "version": 1,
+      "sha256": "008aefeae5b05e798f1a0cf6c30774f79c6b20f9655cdeaf1a5f99453d8e7061",
+      "bytes": 1775670,
+      "reason": "그림이 많은 cs.CV 논문: 27쪽에 그림 23개"
+    }
+  ]
+}
