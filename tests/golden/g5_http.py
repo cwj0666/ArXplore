@@ -118,7 +118,7 @@ def _text(content: Any) -> str:
     return ""
 
 
-def _system_text(request: Mapping[str, Any]) -> str:
+def system_text(request: Mapping[str, Any]) -> str:
     return next(
         (_text(message.get("content")) for message in _messages(request) if message.get("role") == "system"), ""
     )
@@ -174,7 +174,7 @@ def _agent_link(title: str, url: str) -> str:
 
 
 def reply_key_findings_or_overview(request: Mapping[str, Any]) -> Any:
-    return KEY_FINDINGS_REPLY if "핵심 포인트" in _system_text(request) else OVERVIEW_REPLY
+    return KEY_FINDINGS_REPLY if "핵심 포인트" in system_text(request) else OVERVIEW_REPLY
 
 
 def reply_model_error(request: Mapping[str, Any]) -> Any:
@@ -182,7 +182,7 @@ def reply_model_error(request: Mapping[str, Any]) -> Any:
 
 
 def reply_final_summary_error(request: Mapping[str, Any]) -> Any:
-    if "깊이 있게 분석" in _system_text(request):
+    if "깊이 있게 분석" in system_text(request):
         raise FakeHTTPError(400, "simulated final summary failure", error_type="invalid_request_error")
     return default_chat_handler(request)
 

@@ -1,0 +1,5 @@
+- main:
+  - heading "페이지를 찾을 수 없습니다" [level=1]
+  - paragraph: 주소가 바뀌었거나 없는 페이지입니다.
+  - link "논문 목록으로":
+    - /url: /

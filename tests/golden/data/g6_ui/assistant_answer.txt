@@ -1,0 +1,14 @@
+AI 어시스턴트
+
+관심 있는 주제를 질문하면 관련 논문을 찾아 답변합니다. 추천 논문은 클릭 가능한 링크로 정리됩니다.
+
+찾고 싶은 연구 주제나 기술 키워드를 질문해 주세요.
+
+RAG 논문 추천해줘
+
+검색 결과를 정리했습니다.
+
+Benchmark Radar: A Living Database and Search Engine for AI Benchmarks and Evaluation — 질문과 관련된 논문입니다.
+출처
+Benchmark Radar: A Living Database and Search Engine for AI Benchmarks and Evaluation
+Abstract

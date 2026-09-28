@@ -1,0 +1,12 @@
+- banner:
+  - heading "ArXplore" [level=1]:
+    - link "ArXplore":
+      - /url: /
+- tablist "검색 모드 선택":
+  - tab "키워드 검색" [selected]
+  - tab "AI 어시스턴트"
+- text: Search papers by title or abstract.
+- tabpanel "키워드 검색":
+  - textbox "Search papers by title or abstract": zzqqxx-no-such-term
+  - button "Search"
+- text: 수집된 논문이 없습니다.

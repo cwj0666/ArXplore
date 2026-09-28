@@ -1,0 +1,9 @@
+{
+  "name": "arxplore-golden-ui",
+  "private": true,
+  "type": "module",
+  "description": "G6 screenshot and DOM text capture for the ArXplore UI",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}
