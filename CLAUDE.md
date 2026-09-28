@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 리팩토링 브랜치 (refactor/v2)
+
+- 전면 리팩토링은 로컬 브랜치 `refactor/v2`에서만 한다. push하지 않고, 기준 브랜치 `develop/portfolio-2026-09`와 fork 원격은 건드리지 않는다.
+- 계획은 `~/portfolio/02_projects/arxplore/reports/refactor/06_plan.md`, 기존 구현 분석은 같은 폴더의 00~05(기준 커밋 68dab7b)다. 결정 기록은 `docs/worklog/phase-5`에 둔다.
+- 목표 스택과 폴더 구조는 계획 문서가 기준이다: FastAPI, 경량 스케줄러(Airflow 제거), psycopg 3, uv, React 19.
+- 코드에 주석과 docstring을 쓰지 않는다. LLM에 넘어가는 도구 설명처럼 기능인 문자열은 `@tool(description=...)` 같은 명시적 인자로 둔다.
+- 모듈은 먼저 골든(`tests/golden`)과 같게 옮긴다. 버그 수정은 계획의 수정 ID(F01~F30)를 단 별도 커밋으로 하고, 골든 차이는 그 커밋에서만 허용한다.
+- 아래 내용은 기존 구현(68dab7b) 설명이다. 새 구조로 옮긴 부분은 P8에서 다시 쓴다.
+
 ## Commands
 
 ### 컨테이너 실행
