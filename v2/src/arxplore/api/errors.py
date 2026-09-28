@@ -10,6 +10,7 @@ STREAM_ERROR_MESSAGE = "답변 생성 중 오류가 발생했습니다. 잠시 �
 DATA_LOAD_ERROR_MESSAGE = "논문 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
 ROUTE_NOT_FOUND_MESSAGE = "요청한 주소를 찾을 수 없습니다."
 SERVER_ERROR_MESSAGE = "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+CSRF_FAILURE_MESSAGE = "요청을 확인하지 못했습니다(CSRF 검증 실패). 페이지를 새로고침한 뒤 다시 시도해 주세요."
 RATE_LIMITED_MESSAGE = "요청이 너무 많습니다. {retry_after}초 후 다시 시도하세요."
 
 

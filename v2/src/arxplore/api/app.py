@@ -12,9 +12,9 @@ from pydantic.json_schema import models_json_schema
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 
-from arxplore.api.csrf_page import csrf_failure_page
 from arxplore.api.dependencies import ApiServices
 from arxplore.api.errors import (
+    CSRF_FAILURE_MESSAGE,
     INVALID_REQUEST_MESSAGE,
     ROUTE_NOT_FOUND_MESSAGE,
     SERVER_ERROR_MESSAGE,
@@ -26,7 +26,6 @@ from arxplore.api.responses import empty_response, error_response
 from arxplore.api.routes import bootstrap, chat, generation, papers
 from arxplore.api.schemas import EVENT_MODELS, REQUEST_MODELS
 from arxplore.api.security import (
-    CsrfFailure,
     CsrfRejectedError,
     SecurityHeadersMiddleware,
     TrustedHostMiddleware,
@@ -169,8 +168,9 @@ def build_openapi_schema(app: FastAPI) -> dict[str, Any]:
 
 def install_exception_handlers(app: FastAPI, *, frontend_dist: Path | None) -> None:
     async def csrf_rejected(request: Request, exc: Exception) -> Response:
-        missing_cookie = isinstance(exc, CsrfRejectedError) and exc.failure is CsrfFailure.NO_COOKIE
-        return HTMLResponse(csrf_failure_page(missing_cookie=missing_cookie), status_code=403)
+        if isinstance(exc, CsrfRejectedError):
+            logger.info("CSRF 검증 실패(%s): %s", exc.failure.value, request.url.path)
+        return error_response(403, CSRF_FAILURE_MESSAGE)
 
     async def rate_limited(request: Request, exc: Exception) -> Response:
         if not isinstance(exc, RateLimitExceededError):

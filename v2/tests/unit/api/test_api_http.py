@@ -6,6 +6,7 @@ import pytest
 
 from arxplore.api.errors import (
     AI_UNAVAILABLE_MESSAGE,
+    CSRF_FAILURE_MESSAGE,
     DATA_LOAD_ERROR_MESSAGE,
     GENERATION_ERROR_MESSAGE,
     INVALID_REQUEST_MESSAGE,
@@ -144,7 +145,7 @@ class TestBootstrapAndPages:
 
 
 class TestCsrf:
-    async def test_rejections_render_the_django_page(self, harness: Any, ids: dict[str, str]) -> None:
+    async def test_rejections_are_json_403(self, harness: Any, ids: dict[str, str]) -> None:
         path = f"/papers/{ids['main']}/analyze/"
         token = "a" * 32
         async with harness.client() as client:
@@ -156,11 +157,9 @@ class TestCsrf:
 
         for response in (no_cookie, no_header, mismatch, bad_origin):
             assert response.status_code == 403
-            assert response.headers["content-type"] == "text/html; charset=utf-8"
-            assert "CSRF 검증에 실패했습니다." in response.text
+            assert response.headers["content-type"] == "application/json"
+            assert response.json() == {"error": CSRF_FAILURE_MESSAGE}
             assert_security_headers(response)
-        assert "CSRF 쿠키" in no_cookie.text
-        assert "CSRF 쿠키" not in no_header.text
         assert trusted.status_code == 200
 
     async def test_rejected_requests_do_not_count_toward_the_rate_limit(
