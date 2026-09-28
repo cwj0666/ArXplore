@@ -13,7 +13,7 @@ Hugging Face Daily Papers의 최신 AI 논문을 매일 수집해 한국어 요�
   </tr>
   <tr>
     <td width="50%"><img src="./docs/assets/pdf-split.jpg" alt="PDF 분할 보기 화면" /><br /><sub><b>PDF 분할 보기</b> · 원문과 요약을 나란히</sub></td>
-    <td width="50%"><img src="./docs/assets/paper-chat.jpg" alt="논문 챗 화면" /><br /><sub><b>논문 챗</b> · 논문 안에서 근거를 찾아 답하고 출처 섹션 표시</sub></td>
+    <td width="50%"><img src="./docs/assets/paper-chat.jpg" alt="논문 Copilot 화면" /><br /><sub><b>논문 Copilot</b> · 논문 안에서 근거를 찾아 답하고 출처 섹션 표시</sub></td>
   </tr>
 </table>
 
@@ -22,7 +22,7 @@ Hugging Face Daily Papers의 최신 AI 논문을 매일 수집해 한국어 요�
 - **논문 수집 자동화**: Airflow가 매일 HF Daily Papers를 수집하고 처리 작업을 큐에 등록합니다.
 - **PDF 처리 파이프라인**: HURIDOCS 레이아웃 분석, pypdf, 초록 순의 3단계 폴백으로 본문을 파싱하고, 섹션 단위로 청킹해 임베딩합니다.
 - **한국어 요약**: 논문 개요와 핵심 포인트, 모델을 골라 생성하는 상세 요약을 제공하고 결과를 캐시합니다.
-- **논문 챗**: 선택한 논문 안에서 근거를 검색해 답하고, 답변의 인용 번호를 출처 섹션과 연결합니다.
+- **논문 Copilot**: 선택한 논문 안에서 근거를 검색해 답하고, 답변의 인용 번호를 출처 섹션과 연결합니다.
 - **AI 어시스턴트**: LangGraph ReAct 에이전트가 전체 코퍼스를 검색해 관련 논문 링크와 함께 답합니다.
 - **하이브리드 검색**: 전문 검색과 벡터 검색의 점수를 정규화해 가중합으로 합칩니다.
 - **스트리밍 UI**: SSE로 답변을 실시간 출력하고, 생성 중에 멈출 수 있습니다.
@@ -37,7 +37,7 @@ flowchart LR
     D --> E[(PostgreSQL + pgvector)]
     E --> F[하이브리드 검색]
     E --> G[요약 체인]
-    F --> H[에이전트 · 논문 챗]
+    F --> H[에이전트 · 논문 Copilot]
     G --> I[Django API + React]
     H --> I
 ```
@@ -74,7 +74,7 @@ flowchart LR
 | 답변 모드 | Faithfulness | Answer Relevancy |
 | --- | --- | --- |
 | AI 어시스턴트 | 0.865 | 0.667 |
-| 논문 챗 | 0.913 | 0.563 |
+| 논문 Copilot | 0.913 | 0.563 |
 
 **응답 지연**: 하이브리드 검색 p50 282ms (전문·벡터 검색 병렬 실행)
 
