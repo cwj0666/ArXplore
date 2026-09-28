@@ -2,6 +2,7 @@ import importlib
 import os
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 IMPLEMENTATION_ENV = "GOLDEN_IMPL"
@@ -54,6 +55,10 @@ class HttpAdapter(Protocol):
     def openai_key(self, configured: bool) -> AbstractContextManager[None]: ...
 
     def close(self) -> None: ...
+
+
+class HttpAdapterFactory(Protocol):
+    def __call__(self, *, frontend_dist: Path) -> HttpAdapter: ...
 
 
 class RetrievalAdapter(Protocol):

@@ -9,15 +9,16 @@ from typing import Any
 
 from tests.fakes.openai_server import FakeOpenAIServer
 from tests.golden import environment, g5_http
-from tests.golden.adapters import IMPLEMENTATION_ENV, load_http_adapter
+from tests.golden.adapters import IMPLEMENTATION_ENV, AdapterUnavailable, HttpAdapter, load_adapter
 from tests.golden.store import GOLDEN_ROOT, read_golden, write_golden
 
 REPO_ROOT = GOLDEN_ROOT.parents[1]
+HTTP_ADAPTER_KIND = "http"
+BUNDLE_COPY_PREFIX = f"{environment.COPY_PREFIX}g5_"
+RUNNER_MODULE = "tests.golden.g5_runner"
 RUNNER_TIMEOUT_SECONDS = 1800
-HARNESS_APP_ENV = {
-    "DJANGO_SETTINGS_MODULE": "arxplore_web.settings",
-    "DJANGO_SECRET_KEY": "golden-harness-secret-key-not-for-production",
-    "DJANGO_DEBUG": "",
+ADAPTER_UNAVAILABLE_EXIT_CODE = 3
+SHARED_APP_ENV = {
     "RATE_LIMIT_ENABLED": "true",
     "RATE_LIMIT_LLM_PER_MINUTE": "30",
     "RATE_LIMIT_DETAIL_PER_MINUTE": "60",
@@ -28,6 +29,25 @@ HARNESS_APP_ENV = {
     "AGENT_STREAM_BUFFER_CHARS": "120",
     "VECTOR_MIN_SIMILARITY": "0",
 }
+
+
+def http_adapter_options() -> dict[str, Any]:
+    return {"frontend_dist": g5_http.SPA_DIST}
+
+
+def load_bundle_http_adapter() -> HttpAdapter:
+    return load_adapter(HTTP_ADAPTER_KIND, **http_adapter_options())
+
+
+def bundle_database_copy_name(bundle_name: str) -> str:
+    return f"{BUNDLE_COPY_PREFIX}{bundle_name}"
+
+
+def bundle_app_environ(server: FakeOpenAIServer, database_url: str) -> dict[str, str]:
+    return {
+        **environment.harness_environ(openai_environ=server.environ(), database_url=database_url, pg_options=""),
+        **SHARED_APP_ENV,
+    }
 
 
 def runner_environ() -> dict[str, str]:
@@ -44,22 +64,36 @@ def runner_environ() -> dict[str, str]:
     return values
 
 
+def bundle_subprocess_command(bundle_name: str, database_url: str, out: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        RUNNER_MODULE,
+        "--bundle",
+        bundle_name,
+        "--database-url",
+        database_url,
+        "--out",
+        str(out),
+    ]
+
+
+def run_bundle_in_subprocess(bundle_name: str, database_url: str, workdir: Path) -> dict[str, Any]:
+    with environment.database_copy(database_url, bundle_database_copy_name(bundle_name)) as copy_url:
+        out = workdir / f"{bundle_name}.json.gz"
+        command = bundle_subprocess_command(bundle_name, copy_url, out)
+        completed = subprocess.run(command, cwd=workdir, env=runner_environ(), timeout=RUNNER_TIMEOUT_SECONDS)
+        if completed.returncode == ADAPTER_UNAVAILABLE_EXIT_CODE:
+            raise AdapterUnavailable(
+                f"no {HTTP_ADAPTER_KIND} adapter for {os.environ.get(IMPLEMENTATION_ENV) or 'legacy'}"
+            )
+        completed.check_returncode()
+        return read_golden(out)
+
+
 def run_bundles(names: Sequence[str], *, database_url: str) -> dict[str, Any]:
-    results: dict[str, Any] = {}
     with tempfile.TemporaryDirectory(prefix="golden-g5-") as workdir:
-        for name in names:
-            with environment.database_copy(database_url, f"golden_g5_{name}") as copy_url:
-                out = Path(workdir) / f"{name}.json.gz"
-                subprocess.run(
-                    [sys.executable, "-m", "tests.golden.g5_runner", "--bundle", name, "--database-url", copy_url]
-                    + ["--out", str(out)],
-                    cwd=workdir,
-                    env=runner_environ(),
-                    check=True,
-                    timeout=RUNNER_TIMEOUT_SECONDS,
-                )
-                results[name] = read_golden(out)
-    return results
+        return {name: run_bundle_in_subprocess(name, database_url, Path(workdir)) for name in names}
 
 
 def apply_setup_sql(url: str, statements: Sequence[str]) -> None:
@@ -75,19 +109,20 @@ def apply_setup_sql(url: str, statements: Sequence[str]) -> None:
         connection.close()
 
 
-def run_child(bundle_name: str, database_url: str, out: Path) -> int:
+def run_bundle_child(bundle_name: str, database_url: str, out: Path) -> int:
     if (Path.cwd() / ".env").exists():
         raise SystemExit("the HTTP golden runner must not start next to a .env file")
     bundle = g5_http.BUNDLES[bundle_name]
-    if not environment.database_name(database_url).startswith(environment.COPY_PREFIX):
-        raise SystemExit("the HTTP golden runner only writes to golden_* database copies")
+    if not environment.database_name(database_url).startswith(BUNDLE_COPY_PREFIX):
+        raise SystemExit(f"the HTTP golden runner only writes to {BUNDLE_COPY_PREFIX}* database copies")
     apply_setup_sql(database_url, bundle.setup_sql)
     with environment.loopback_only(), FakeOpenAIServer() as server:
-        os.environ.update(
-            environment.harness_environ(openai_environ=server.environ(), database_url=database_url, pg_options="")
-        )
-        os.environ.update(HARNESS_APP_ENV)
-        adapter = load_http_adapter(frontend_dist=g5_http.SPA_DIST)
+        os.environ.update(bundle_app_environ(server, database_url))
+        try:
+            adapter = load_bundle_http_adapter()
+        except AdapterUnavailable as exc:
+            print(exc, file=sys.stderr)
+            return ADAPTER_UNAVAILABLE_EXIT_CODE
         try:
             scenarios = g5_http.run_bundle(adapter, server, bundle)
             described = adapter.describe()
@@ -98,12 +133,12 @@ def run_child(bundle_name: str, database_url: str, out: Path) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m tests.golden.g5_runner")
+    parser = argparse.ArgumentParser(prog=f"python -m {RUNNER_MODULE}")
     parser.add_argument("--bundle", required=True, choices=sorted(g5_http.BUNDLES))
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    return run_child(args.bundle, args.database_url, args.out)
+    return run_bundle_child(args.bundle, args.database_url, args.out)
 
 
 if __name__ == "__main__":

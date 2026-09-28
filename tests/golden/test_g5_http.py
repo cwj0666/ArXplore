@@ -3,17 +3,22 @@ from typing import Any
 import pytest
 
 from tests.golden import g5_http, g5_runner
+from tests.golden.adapters import AdapterUnavailable, implementation_name
 from tests.golden.store import diff, format_problems, read_golden, resolve_golden
 
 GOLDEN_FILE = resolve_golden(g5_http.GOLDEN_PATH)
 GOLDEN = read_golden(GOLDEN_FILE) if GOLDEN_FILE.is_file() else {"bundles": {}}
 SCENARIO_IDS = [(bundle, scenario) for bundle in sorted(GOLDEN["bundles"]) for scenario in GOLDEN["bundles"][bundle]]
 FAKE_REQUEST_KEYS = ("llm_requests", "llm_statuses", "embedding_requests", "arxiv_requests", "fake_server_errors")
+COMPARE_RESPONSES = g5_http.response_comparison(implementation_name())
 
 
 @pytest.fixture(scope="module")
 def g5_results(golden_database_url: str) -> dict[str, Any]:
-    return g5_runner.run_bundles(sorted(GOLDEN["bundles"]), database_url=golden_database_url)
+    try:
+        return g5_runner.run_bundles(sorted(GOLDEN["bundles"]), database_url=golden_database_url)
+    except AdapterUnavailable as exc:
+        pytest.skip(str(exc))
 
 
 def test_golden_covers_every_bundle():
@@ -29,7 +34,7 @@ def test_http_responses_match_golden(g5_results, bundle, scenario):
     expected = GOLDEN["bundles"][bundle][scenario]["responses"]
     actual = g5_results[bundle]["scenarios"][scenario]["responses"]
 
-    problems = diff(expected, actual)
+    problems = COMPARE_RESPONSES(expected, actual)
     assert not problems, format_problems(f"G5 {bundle}:{scenario}", problems)
 
 

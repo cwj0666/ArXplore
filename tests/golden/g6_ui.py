@@ -99,8 +99,8 @@ def capture_ui(out_dir: Path, *, database_url: str) -> dict[str, Any]:
         port = free_port()
         values = {
             **g5_runner.runner_environ(),
-            **environment.harness_environ(openai_environ=server.environ(), database_url=copy_url, pg_options=""),
-            **g5_runner.HARNESS_APP_ENV,
+            **g5_runner.bundle_app_environ(server, copy_url),
+            **environment.LEGACY_DJANGO_ENV,
             "RATE_LIMIT_ENABLED": "false",
         }
         log_path = Path(workdir) / "django.log"

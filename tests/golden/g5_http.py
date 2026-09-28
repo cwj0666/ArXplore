@@ -19,7 +19,7 @@ from tests.fakes.openai_server import (
     default_chat_handler,
 )
 from tests.golden.adapters import HttpAdapter, HttpResult
-from tests.golden.store import DATA_DIR
+from tests.golden.store import DATA_DIR, diff
 
 FORMAT = 1
 GOLDEN_PATH = DATA_DIR / "g5_http.json.gz"
@@ -679,6 +679,96 @@ def _mask_retry_after(result: HttpResult, text: str, payload: Any) -> tuple[str,
         for key, value in payload.items()
     }
     return pattern.sub(RETRY_AFTER_PLACEHOLDER, text), masked_payload
+
+
+LEGACY_RULES = "legacy"
+V2_RULES = "v2"
+RULE_REQUEST = "request"
+RULE_STATUS = "status code"
+RULE_MEDIA_TYPE = "content-type media type"
+RULE_ALLOW = "allow methods"
+RULE_COOKIES = "set-cookie attributes without value"
+RULE_SSE_BODY = "SSE body bytes"
+RULE_JSON_BODY = "JSON body value"
+RULE_OTHER_BODY = "other body bytes"
+V2_EXACT_HEADERS = (
+    "cache-control",
+    "x-accel-buffering",
+    "retry-after",
+    "location",
+    "x-content-type-options",
+    "x-frame-options",
+    "referrer-policy",
+    "cross-origin-opener-policy",
+)
+V2_COOKIE_ATTRIBUTES = ("path", "max-age", "samesite", "secure", "httponly")
+
+
+def _media_types(values: list[str]) -> list[str]:
+    return [value.split(";", 1)[0].strip().lower() for value in values]
+
+
+def _allowed_methods(values: list[str]) -> list[str]:
+    return sorted({method.strip().upper() for value in values for method in value.split(",") if method.strip()})
+
+
+def _cookie_view(cookie: Mapping[str, Any]) -> dict[str, Any]:
+    attributes = {str(key).lower(): value for key, value in (cookie.get("attributes") or {}).items()}
+    view: dict[str, Any] = {"name": cookie.get("name")}
+    for name in V2_COOKIE_ATTRIBUTES:
+        value = attributes.get(name)
+        if name in ("secure", "httponly"):
+            view[name] = value is True
+        elif name == "samesite" and isinstance(value, str):
+            view[name] = value.lower()
+        else:
+            view[name] = value
+    return view
+
+
+def v2_rule_views(record: Mapping[str, Any]) -> dict[str, Any]:
+    headers = record.get("headers") or {}
+    views: dict[str, Any] = {
+        RULE_REQUEST: record.get("request"),
+        RULE_STATUS: record.get("status"),
+        RULE_MEDIA_TYPE: _media_types(headers.get("content-type", [])),
+        RULE_ALLOW: _allowed_methods(headers.get("allow", [])),
+        RULE_COOKIES: [_cookie_view(cookie) for cookie in headers.get("set-cookie", [])],
+    }
+    for name in V2_EXACT_HEADERS:
+        views[f"header {name}"] = [str(value).strip() for value in headers.get(name, [])]
+    if "events" in record:
+        views[RULE_SSE_BODY] = record.get("body")
+    elif "json" in record:
+        views[RULE_JSON_BODY] = record.get("json")
+    else:
+        views[RULE_OTHER_BODY] = record.get("body")
+    return views
+
+
+def compare_responses_legacy(expected: list[Any], actual: list[Any]) -> list[str]:
+    return diff(expected, actual)
+
+
+def compare_responses_v2(expected: list[Any], actual: list[Any]) -> list[str]:
+    problems: list[str] = []
+    if len(expected) != len(actual):
+        problems.append(f"response count {len(expected)} -> {len(actual)}")
+    for index, (left, right) in enumerate(zip(expected, actual, strict=False)):
+        request = left.get("request") or {}
+        label = f"response {index} {request.get('method', '?')} {request.get('path', '?')}"
+        problems.extend(f"{label}: {problem}" for problem in diff(v2_rule_views(left), v2_rule_views(right)))
+    return problems
+
+
+RESPONSE_COMPARISONS: dict[str, Callable[[list[Any], list[Any]], list[str]]] = {
+    LEGACY_RULES: compare_responses_legacy,
+    V2_RULES: compare_responses_v2,
+}
+
+
+def response_comparison(implementation: str) -> Callable[[list[Any], list[Any]], list[str]]:
+    return RESPONSE_COMPARISONS[V2_RULES if implementation == V2_RULES else LEGACY_RULES]
 
 
 def _without_stream_options(body: Any) -> Any:

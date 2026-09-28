@@ -14,6 +14,11 @@ EXACT_SEARCH_OPTION = "-c enable_indexscan=off"
 EXACT_SEARCH_ENV = "GOLDEN_EXACT_SEARCH"
 COPY_PREFIX = "golden_"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+LEGACY_DJANGO_ENV = {
+    "DJANGO_SETTINGS_MODULE": "arxplore_web.settings",
+    "DJANGO_SECRET_KEY": "golden-harness-secret-key-not-for-production",
+    "DJANGO_DEBUG": "",
+}
 
 
 def database_url() -> str:
@@ -85,7 +90,7 @@ def query_rows(
     connection = connect(url, options=options)
     try:
         cursor = connection.cursor()
-        cursor.execute(sql, params)
+        cursor.execute(sql, params or None)
         rows = cursor.fetchall()
         cursor.close()
         return rows

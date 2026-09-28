@@ -10,7 +10,8 @@ from pypdf import PdfReader
 
 from src.integrations.fulltext_parser import FulltextParser
 from src.integrations.pdf_parser.types import FulltextParseResult
-from tests.golden.adapters import ParsedPdf
+from tests.golden.adapters import HttpAdapterFactory, ParsedPdf
+from tests.golden.environment import LEGACY_DJANGO_ENV
 
 PYPDF_SOURCE = "pdf"
 
@@ -158,8 +159,10 @@ class LegacyHttpAdapter:
         from django.conf import settings
         from django.core.wsgi import get_wsgi_application
 
-        if os.environ.get("DJANGO_SETTINGS_MODULE") != "arxplore_web.settings":
-            raise RuntimeError("the HTTP golden runs the production settings module arxplore_web.settings")
+        os.environ.update(LEGACY_DJANGO_ENV)
+        expected_module = LEGACY_DJANGO_ENV["DJANGO_SETTINGS_MODULE"]
+        if settings.configured and settings.SETTINGS_MODULE != expected_module:
+            raise RuntimeError(f"Django is already configured with {settings.SETTINGS_MODULE}, not {expected_module}")
         application = get_wsgi_application()
         settings.FRONTEND_DIST_DIR = frontend_dist
         self._django_version = django.get_version()
@@ -227,3 +230,6 @@ class LegacyHttpAdapter:
 
 def http_adapter(*, frontend_dist: Path) -> LegacyHttpAdapter:
     return LegacyHttpAdapter(frontend_dist=frontend_dist)
+
+
+HTTP_ADAPTER_FACTORY: HttpAdapterFactory = http_adapter
