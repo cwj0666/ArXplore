@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -11,6 +11,8 @@ from arxplore.config import AppSettings, build_postgres_connection_params
 
 type DictConnection = AsyncConnection[DictRow]
 type Pool = AsyncConnectionPool[AsyncConnection[DictRow]]
+type AnyPool = AsyncConnectionPool[Any]
+type ConnectionSource = AnyPool | AsyncConnection[Any]
 
 APPLICATION_NAME_PREFIX = "arxplore-"
 
@@ -99,3 +101,16 @@ async def connect_from_settings(settings: AppSettings, *, role: str, autocommit:
         connect_timeout=settings.postgres_connect_timeout,
         autocommit=autocommit,
     )
+
+
+def transaction(pool: AnyPool) -> AbstractAsyncContextManager[AsyncConnection[Any]]:
+    return pool.connection()
+
+
+@asynccontextmanager
+async def use_connection(source: ConnectionSource) -> AsyncIterator[AsyncConnection[Any]]:
+    if isinstance(source, AsyncConnection):
+        yield source
+        return
+    async with source.connection() as connection:
+        yield connection
