@@ -36,3 +36,9 @@
     - 가짜 서버 답은 마지막 사용자 메시지의 해시라 요약 문자열이 `Fake reply e9402cd9982b: ...`에서 `Fake reply 72c2cb03cd6c: ...`로 바뀐다. gpt5_mini의 두 번째 응답은 캐시라 같은 값이다.
   - `summary:summary_model_failure`(2609.26796): other 섹션 5개의 섹션 호출 5회와 버킷 호출 1회가 더해진다. LLM 호출은 10회에서 16회로 늘고, 최종 호출은 여전히 400이다. 응답(500)은 같다.
 - 참고: 두 논문 모두 첫 other 섹션이 `Front Matter`(제목·저자·소속)다. 이런 섹션까지 요약에 넣을지는 별도 판단이 필요하다.
+
+## F23: 추적 runtime 라벨
+
+- 옛 구현은 개요·핵심 포인트·상세 요약 체인에 runtime을 넘기지 않아 운영에서도 `runtime:dev`로 기록했다. 이제 다섯 stage(`paper_overview`, `paper_key_findings`, `summary`, `paper_chat`, `agent_chat`) 모두 `RUNTIME` 설정을 해석한 값(`development`→`dev`, `prod`→`production`, 모르는 값→`dev`)을 태그 `runtime:`과 메타데이터 `runtime`에 쓴다.
+- v2 추적 모듈에는 제품 경로의 다섯 stage만 있다. 옛 허용 목록에만 있던 `translation`, `rag_answer`, `paper_detail_document`, `analyze_paper_detail`은 옮기지 않았다. 파이프라인 stage는 P3 파이프라인 이식에서 다룬다.
+- G5·G4 차이: 없음. 추적은 가짜 서버 요청 본문에 들어가지 않고 골든 실행에서는 꺼져 있다.

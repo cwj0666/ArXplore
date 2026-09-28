@@ -9,7 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.prompts.key_findings import KEY_FINDINGS_PROMPT
 from arxplore.llm.prompts.overview import OVERVIEW_PROMPT
-from arxplore.llm.tracing import DEFAULT_TRACE_RUNTIME, Tracer, TraceStage
+from arxplore.llm.tracing import Tracer, TraceStage
 from arxplore.text import collapse_whitespace
 
 ANALYSIS_PROMPT_VERSION = 1
@@ -179,16 +179,9 @@ def extract_key_findings(text: str, *, max_items: int = MAX_KEY_FINDINGS) -> lis
 
 
 class PaperDetailWriter:
-    def __init__(
-        self,
-        models: ChatModelFactory,
-        tracer: Tracer,
-        *,
-        trace_runtime: str | None = DEFAULT_TRACE_RUNTIME,
-    ) -> None:
+    def __init__(self, models: ChatModelFactory, tracer: Tracer) -> None:
         self.models = models
         self.tracer = tracer
-        self.trace_runtime = trace_runtime
 
     async def _run(self, prompt: ChatPromptTemplate, stage: TraceStage, paper: PaperDetailInput, model: str) -> str:
         if not has_paper_detail_context(paper):
@@ -196,7 +189,7 @@ class PaperDetailWriter:
         chain = prompt | self.models.create(model=model, temperature=DETAIL_TEMPERATURE) | StrOutputParser()
         inputs = {"paper_metadata": format_paper_metadata(paper), "paper_sections": format_paper_sections(paper)}
         with self.tracer.scope():
-            return await chain.ainvoke(inputs, config=self.tracer.config(stage, runtime=self.trace_runtime))
+            return await chain.ainvoke(inputs, config=self.tracer.config(stage))
 
     async def overview(self, paper: PaperDetailInput, *, model: str) -> str:
         return await self._run(OVERVIEW_PROMPT, "paper_overview", paper, model)

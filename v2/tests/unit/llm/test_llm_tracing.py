@@ -1,8 +1,16 @@
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
 import pytest
+from langchain_core.runnables import RunnableConfig
 from langsmith import utils as langsmith_utils
 
 from arxplore.config import AppSettings
-from arxplore.llm.tracing import Tracer, resolve_trace_runtime
+from arxplore.llm.detail import PaperDetailInput, PaperDetailWriter
+from arxplore.llm.models import ChatModelFactory
+from arxplore.llm.summary_graph import SummaryWriter
+from arxplore.llm.tracing import Tracer, TraceStage, resolve_trace_runtime
 
 
 @pytest.mark.parametrize(
@@ -80,3 +88,35 @@ def test_disabled_scope_turns_off_environment_tracing(monkeypatch: pytest.Monkey
 
     with tracer.scope():
         assert not langsmith_utils.tracing_is_enabled()
+
+
+@dataclass(frozen=True)
+class RecordingTracer(Tracer):
+    configs: list[RunnableConfig] = field(default_factory=list)
+
+    def config(
+        self,
+        stage: TraceStage,
+        *,
+        runtime: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> RunnableConfig:
+        result = super().config(stage, runtime=runtime, metadata=metadata)
+        self.configs.append(result)
+        return result
+
+
+async def test_every_writer_labels_traces_with_the_configured_runtime(
+    fake_openai: Any, models: ChatModelFactory
+) -> None:
+    tracer = RecordingTracer(enabled=False, project="ArXplore", user="tester", runtime="production")
+    paper = PaperDetailInput(arxiv_id="a", title="T", sections=[{"title": "Method", "text": "body"}])
+
+    await PaperDetailWriter(models, tracer).analyze(paper, model="gpt-5-mini")
+    await SummaryWriter(models, tracer).summarize(
+        title="T", authors="A", text="", sections=[{"title": "Method", "text": "body"}], model="gpt-5-mini"
+    )
+
+    stages = [(config["run_name"], config["metadata"]["runtime"]) for config in tracer.configs]
+    assert stages == [("paper_overview", "production"), ("paper_key_findings", "production"), ("summary", "production")]
+    assert all("runtime:production" in config["tags"] for config in tracer.configs)

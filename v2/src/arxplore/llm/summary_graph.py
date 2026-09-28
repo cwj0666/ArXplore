@@ -11,7 +11,7 @@ from langgraph.runtime import Runtime
 from arxplore.llm.detail import author_names, compact_text
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.prompts.summary import SUMMARY_BUCKET_PROMPT, SUMMARY_PROMPT, SUMMARY_SECTION_PROMPT
-from arxplore.llm.tracing import DEFAULT_TRACE_RUNTIME, Tracer
+from arxplore.llm.tracing import Tracer
 from arxplore.text import collapse_whitespace
 
 SUMMARY_PROMPT_VERSION = 1
@@ -289,16 +289,9 @@ def build_summary_graph() -> CompiledStateGraph[SummaryState, SummaryContext, Su
 
 
 class SummaryWriter:
-    def __init__(
-        self,
-        models: ChatModelFactory,
-        tracer: Tracer,
-        *,
-        trace_runtime: str | None = DEFAULT_TRACE_RUNTIME,
-    ) -> None:
+    def __init__(self, models: ChatModelFactory, tracer: Tracer) -> None:
         self.models = models
         self.tracer = tracer
-        self.trace_runtime = trace_runtime
         self.graph = build_summary_graph()
 
     async def summarize(
@@ -313,7 +306,7 @@ class SummaryWriter:
         context = SummaryContext(
             models=self.models,
             model=model,
-            trace=self.tracer.config("summary", runtime=self.trace_runtime),
+            trace=self.tracer.config("summary"),
         )
         state: SummaryState = {
             "title": title or UNTITLED,
