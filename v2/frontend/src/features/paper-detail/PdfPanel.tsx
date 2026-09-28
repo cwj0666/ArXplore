@@ -17,6 +17,7 @@ export function PdfPanel({ visible, pdfUrl, onClose }: PdfPanelProps) {
           type="button"
           className={`${buttons.layoutCtrlBtn} ${buttons.pdfCloseBtn}`}
           title="분할창 닫기"
+          aria-label="분할창 닫기"
           onClick={onClose}
         >
           &times;

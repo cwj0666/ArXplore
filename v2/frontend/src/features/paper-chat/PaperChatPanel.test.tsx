@@ -67,6 +67,26 @@ describe("PaperChatPanel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("moves focus into the panel when it opens and back to the button when Esc or × closes it", async () => {
+    const user = userEvent.setup();
+    render(<PaperChatPanel arxivId="2609.27980" />);
+    const panel = screen.getByRole("region", { name: "논문 AI 채팅" });
+    const fab = screen.getByRole("button", { name: "AI 채팅 열기" });
+
+    await user.click(fab);
+    const input = screen.getByRole("textbox", { name: "논문에 대해 질문하기" });
+    expect(input).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(panel.className).toMatch(/hidden/);
+    expect(fab).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(input).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "채팅창 닫기" }));
+    expect(fab).toHaveFocus();
+  });
+
   it("returns focus to the input after an answer and hides the panel without cancelling", async () => {
     const streams: ControlledStream[] = [];
     vi.stubGlobal(

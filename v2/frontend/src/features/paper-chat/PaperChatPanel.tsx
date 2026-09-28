@@ -28,6 +28,8 @@ export function PaperChatPanel({ arxivId }: { arxivId: string }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const fabRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterToggleRef = useRef<HTMLElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [opacityPercent, setOpacityPercent] = useState(100);
   const [inputText, setInputText] = useState("");
@@ -50,6 +52,39 @@ export function PaperChatPanel({ arxivId }: { arxivId: string }) {
       box.scrollTop = box.scrollHeight;
     }
   }, [entries, streaming]);
+
+  const openPanel = () => {
+    focusAfterToggleRef.current = inputRef.current;
+    setIsOpen(true);
+  };
+
+  const closePanel = useCallback(() => {
+    focusAfterToggleRef.current = fabRef.current;
+    setIsOpen(false);
+  }, []);
+
+  useEffect(() => {
+    const target = focusAfterToggleRef.current;
+    focusAfterToggleRef.current = null;
+    target?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!isOpen || !panel) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        closePanel();
+      }
+    };
+    panel.addEventListener("keydown", handleKeyDown);
+    return () => {
+      panel.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closePanel, isOpen]);
 
   const sendMessage = () => {
     if (chat.send(inputText)) {
@@ -102,9 +137,7 @@ export function PaperChatPanel({ arxivId }: { arxivId: string }) {
             <button
               type="button"
               className={styles.closeBtn}
-              onClick={() => {
-                setIsOpen(false);
-              }}
+              onClick={closePanel}
               title="채팅창 닫기"
               aria-label="채팅창 닫기"
             >
@@ -192,13 +225,12 @@ export function PaperChatPanel({ arxivId }: { arxivId: string }) {
       </div>
 
       <button
+        ref={fabRef}
         type="button"
         className={isOpen ? `${styles.fab} ${styles.hidden}` : styles.fab}
         title="AI 채팅 열기"
         aria-label="AI 채팅 열기"
-        onClick={() => {
-          setIsOpen(true);
-        }}
+        onClick={openPanel}
       >
         <ChatBubbleIcon className={styles.fabIcon} />
       </button>

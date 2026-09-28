@@ -1,0 +1,171 @@
+- banner:
+  - heading "ArXplore" [level=1]:
+    - link "ArXplore":
+      - /url: /
+- tablist "검색 모드 선택":
+  - tab "키워드 검색" [selected]
+  - tab "AI 어시스턴트"
+- text: Search papers by title or abstract.
+- tabpanel "키워드 검색":
+  - textbox "Search papers by title or abstract": diffusion
+  - button "Search"
+- text: 총 23개 논문 — 1 / 2 페이지
+- combobox "정렬":
+  - option "최신순" [selected]
+  - option "추천순"
+- region "논문 목록":
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Uranus: Building the Next-Generation Simulation Infrastructure fo..."':
+      - /url: https://arxiv.org/pdf/2609.24815.pdf
+    - 'link "Uranus: Building the Next-Generation Simulation Infrastructure for Embodied AI 상세 보기"':
+      - /url: /papers/2609.24815/
+      - text: Scalable simulation is essential for robot data generation, policy training, evaluation, and safe iteration, yet real-world interaction is costly and conventional simulators require labor-intensive co... ArXplore로 분석하기 2026-09-23 2
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "All modalities are equal, but video is more equal: Closing the Cr..."':
+      - /url: https://arxiv.org/pdf/2609.27901.pdf
+    - 'link "All modalities are equal, but video is more equal: Closing the Cross-Attention Gap in Joint Video Generation 상세 보기"':
+      - /url: /papers/2609.27901/
+      - text: Video is a rich representation of a physical event, capturing appearance, geometry, motion, and temporal evolution. Other modalities, such as 3D body motion or audio, encode narrower aspects of the sa... ArXplore로 분석하기 2026-09-23 8
+  - article:
+    - text: 논문원본 바로가기
+    - link "On the Diffusibility of High-Dimensional Latents":
+      - /url: https://arxiv.org/pdf/2609.28473.pdf
+    - link "On the Diffusibility of High-Dimensional Latents 상세 보기":
+      - /url: /papers/2609.28473/
+      - text: Representation Autoencoders (RAEs) enable diffusion models to operate in the feature spaces of pretrained visual encoders. However, many off-the-shelf encoders are not optimized for faithful reconstru... ArXplore로 분석하기 2026-09-23 7
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Flash-dLLM: IO-Aware KV Caching and Parallel Decoding for Fast, M..."':
+      - /url: https://arxiv.org/pdf/2609.26796.pdf
+    - 'link "Flash-dLLM: IO-Aware KV Caching and Parallel Decoding for Fast, Memory-Efficient Diffusion LLMs 상세 보기"':
+      - /url: /papers/2609.26796/
+      - text: Diffusion Large Language Models (dLLMs) have recently emerged as a promising alternative to autoregressive LLMs by enabling non-autoregressive text generation. However, their practical deployment rema... ArXplore로 분석하기 2026-09-22 36
+  - article:
+    - text: 논문원본 바로가기
+    - link "Streaming Video Editing with Easy Adaptation":
+      - /url: https://arxiv.org/pdf/2609.24788.pdf
+    - link "Streaming Video Editing with Easy Adaptation 상세 보기":
+      - /url: /papers/2609.24788/
+      - text: In this paper, we propose SVEET, a framework that requires merely training on a pretrained bidirectional video diffusion model but supports high-quality streaming video editing in an auto-regressive f... ArXplore로 분석하기 2026-09-21 11
+  - article:
+    - text: 논문원본 바로가기
+    - link "Circuit Hypernetworks for Quantum-Augmented Diffusion Language Mo...":
+      - /url: https://arxiv.org/pdf/2609.24657.pdf
+    - link "Circuit Hypernetworks for Quantum-Augmented Diffusion Language Models 상세 보기":
+      - /url: /papers/2609.24657/
+      - text: Language models can be adapted by changing the computations applied to individual tokens. Quantum circuits offer one such approach, but evaluating wider circuits inside a large model can be computatio... ArXplore로 분석하기 2026-09-21 40
+  - article:
+    - text: 논문원본 바로가기
+    - link "Why Do Video Diffusion Models Violate Physics? Unveiling the Flaw...":
+      - /url: https://arxiv.org/pdf/2609.23658.pdf
+    - link "Why Do Video Diffusion Models Violate Physics? Unveiling the Flaws in Attention Mechanisms 상세 보기":
+      - /url: /papers/2609.23658/
+      - text: Despite impressive visual quality, state-of-the-art video diffusion models often generate content that violates real-world physical laws. While existing solutions rely on external priors or specialize... ArXplore로 분석하기 2026-09-20 30
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Mira-Scene: Pixel-Aligned Layouts for Generative 3D Scene"':
+      - /url: https://arxiv.org/pdf/2609.23796.pdf
+    - 'link "Mira-Scene: Pixel-Aligned Layouts for Generative 3D Scene 상세 보기"':
+      - /url: /papers/2609.23796/
+      - text: Single-image 3D object generation can now produce high-fidelity assets, yet accurately placing them into a coherent scene layout remains an open challenge. A central difficulty lies in how object layo... ArXplore로 분석하기 2026-09-20 5
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "UltraTex: Unleashing 2K Multi-View Diffusion for 3D Texturing"':
+      - /url: https://arxiv.org/pdf/2609.23169.pdf
+    - 'link "UltraTex: Unleashing 2K Multi-View Diffusion for 3D Texturing 상세 보기"':
+      - /url: /papers/2609.23169/
+      - text: High-quality texture generation is essential for creating realistic and production-ready 3D assets. Recent multi-view diffusion methods have shown promising results for image-guided 3D texturing, but ... ArXplore로 분석하기 2026-09-19 3
+  - article:
+    - text: 논문원본 바로가기
+    - link "Learning Foresight without Explicit Trajectories for 3D Diffusion...":
+      - /url: https://arxiv.org/pdf/2609.20669.pdf
+    - link "Learning Foresight without Explicit Trajectories for 3D Diffusion Policies 상세 보기":
+      - /url: /papers/2609.20669/
+      - text: 3D diffusion policies are strong at generating geometrically grounded actions from current observations, but successful manipulation requires not only knowing what motion is feasible now, but also ant... ArXplore로 분석하기 2026-09-17 8
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Video DeltaNet: A Video-Native Hybrid Attention for Livestream Vi..."':
+      - /url: https://arxiv.org/pdf/2609.20744.pdf
+    - 'link "Video DeltaNet: A Video-Native Hybrid Attention for Livestream Video Generation 상세 보기"':
+      - /url: /papers/2609.20744/
+      - text: Video diffusion models repeatedly process long spatiotemporal token sequences during denoising, making attention a major computational bottleneck. Linear attention offers an appealing alternative and ... ArXplore로 분석하기 2026-09-17 53
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Refinement Is Inherently Editable: Training-Free Prompt-to-Prompt..."':
+      - /url: https://arxiv.org/pdf/2609.20633.pdf
+    - 'link "Refinement Is Inherently Editable: Training-Free Prompt-to-Prompt Image Editing with Generative Refinement Network 상세 보기"':
+      - /url: /papers/2609.20633/
+      - text: Text-guided image editing must introduce the requested changes while preserving unrelated source content. Diffusion-based editors rely on spatial controls whose inaccuracies can leave edits incomplete... ArXplore로 분석하기 2026-09-17 13
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "LynnReal-Omni: Native multi-modal Video Generation for Agentic Vi..."':
+      - /url: https://arxiv.org/pdf/2609.15863.pdf
+    - 'link "LynnReal-Omni: Native multi-modal Video Generation for Agentic Visual Workflows 상세 보기"':
+      - /url: /papers/2609.15863/
+      - text: "Video diffusion models are stochastic and hard to control: precise content often requires repeated sampling without guaranteed success, and long-horizon scenes drift in appearance, interactions, and t... ArXplore로 분석하기 2026-09-14 34"
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "BVB: Benchmarking Agentic Video Understanding via Programmatic Re..."':
+      - /url: https://arxiv.org/pdf/2609.15478.pdf
+    - 'link "BVB: Benchmarking Agentic Video Understanding via Programmatic Reconstruction in Blender 상세 보기"':
+      - /url: /papers/2609.15478/
+      - text: Multimodal agents can create complex videos in software such as Blender by coding without relying on diffusion models. Yet video understanding benchmarks still evaluate models mainly through question ... ArXplore로 분석하기 2026-09-14 34
+  - article:
+    - text: 논문원본 바로가기
+    - link "How Lossless Is Lossless Speculative Decoding? The Role of Numeri...":
+      - /url: https://arxiv.org/pdf/2609.15504.pdf
+    - link "How Lossless Is Lossless Speculative Decoding? The Role of Numerical Precision in Orthrus 상세 보기":
+      - /url: /papers/2609.15504/
+      - text: Orthrus is a hybrid autoregressive-diffusion architecture that accelerates autoregressive language-model inference by generating multiple tokens in parallel while using a frozen autoregressive backbon... ArXplore로 분석하기 2026-09-14 23
+  - article:
+    - text: 논문원본 바로가기
+    - link "Register Tokens for Bounded-State Reasoning in Diffusion Language...":
+      - /url: https://arxiv.org/pdf/2609.16372.pdf
+    - link "Register Tokens for Bounded-State Reasoning in Diffusion Language Models 상세 보기":
+      - /url: /papers/2609.16372/
+      - text: Masked diffusion language models (dLLMs) generate text by iteratively denoising masked tokens with bidirectional attention. Extending reasoning across generation chunks normally requires keeping earli... ArXplore로 분석하기 2026-09-14 7
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "VC-Attention: Value Smoothing and Softmax Casting for Low-bit Att..."':
+      - /url: https://arxiv.org/pdf/2609.15810.pdf
+    - 'link "VC-Attention: Value Smoothing and Softmax Casting for Low-bit Attention 상세 보기"':
+      - /url: /papers/2609.15810/
+      - text: Diffusion Transformers deliver state-of-the-art video generation, but their long spatiotemporal sequences make attention the dominant deployment cost, and a deployable low-bit kernel must be accurate ... ArXplore로 분석하기 2026-09-14 51
+  - article:
+    - text: 논문원본 바로가기
+    - link "StepAudio 3 Music Technical Report":
+      - /url: https://arxiv.org/pdf/2609.16034.pdf
+    - link "StepAudio 3 Music Technical Report 상세 보기":
+      - /url: /papers/2609.16034/
+      - text: We introduce StepAudio 3 Music, a large-scale, long-form music generation model that supports explicit musical planning and open-domain text-controlled generation. The StepAudio Music Tokenizer repres... ArXplore로 분석하기 2026-09-11 108
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Dynin-Robotics: Omnimodal Unified Diffusion Vision-Language-Actio..."':
+      - /url: https://arxiv.org/pdf/2609.13053.pdf
+    - 'link "Dynin-Robotics: Omnimodal Unified Diffusion Vision-Language-Action Model 상세 보기"':
+      - /url: /papers/2609.13053/
+      - text: Visual goal and dynamics prediction can provide language-conditioned robot policies with both a target outcome and a representation of action-dependent scene changes. We bring these predictions into a... ArXplore로 분석하기 2026-09-11 8
+  - article:
+    - text: 논문원본 바로가기
+    - link "StepAudio 3 Gen Technical Report":
+      - /url: https://arxiv.org/pdf/2609.12945.pdf
+    - link "StepAudio 3 Gen Technical Report 상세 보기":
+      - /url: /papers/2609.12945/
+      - text: We introduce StepAudio 3 Gen, a general-purpose audio generation model that supports zero-shot text-to-speech (TTS), voice design, vocal generation, sound effects, music, vibe speech, and mixtures of ... ArXplore로 분석하기 2026-09-11 100
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Attention-DP3: Spatially Object-aware 3D Diffusion Policy via Geo..."':
+      - /url: https://arxiv.org/pdf/2609.13318.pdf
+    - 'link "Attention-DP3: Spatially Object-aware 3D Diffusion Policy via Geometry-aligned Attentional Conditioning 상세 보기"':
+      - /url: /papers/2609.13318/
+      - text: 3D point-cloud observations are inherently ambiguous in complex, cluttered manipulation scenes, where target objects may be partially occluded or tightly intermingled with visually similar distractors... ArXplore로 분석하기 2026-09-10 7
+- navigation "페이지 이동":
+  - text: 1 / 2
+  - link "다음 페이지":
+    - /url: /?q=diffusion&page=2
+    - text: ›
+  - link "10페이지 뒤로":
+    - /url: /?q=diffusion&page=2
+    - text: »

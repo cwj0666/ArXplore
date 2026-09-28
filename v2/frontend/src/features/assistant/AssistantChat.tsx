@@ -124,6 +124,7 @@ export function AssistantChat({ initialQuery }: { initialQuery: string }) {
         <input
           id="assistant-chat-input"
           type="text"
+          aria-label="AI 어시스턴트에게 질문하기"
           placeholder="연구 주제, 트렌드, 논문을 질문해 보세요."
           ref={inputRef}
           value={inputValue}

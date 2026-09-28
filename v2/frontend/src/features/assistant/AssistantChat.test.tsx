@@ -78,7 +78,8 @@ describe("AssistantChat", () => {
     const { streams } = stubStreams();
     const user = userEvent.setup();
     render(<AssistantChat initialQuery="" />);
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("textbox", { name: "AI 어시스턴트에게 질문하기" });
+    expect(input).toHaveAttribute("placeholder", "연구 주제, 트렌드, 논문을 질문해 보세요.");
 
     await user.type(input, "한글");
     act(() => {
