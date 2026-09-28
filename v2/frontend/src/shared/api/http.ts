@@ -129,7 +129,3 @@ export function getErrorMessage(error: unknown, fallback: string): string {
   }
   return fallback;
 }
-
-export function hasErrorPayload(error: ApiError): boolean {
-  return extractErrorMessage(error.payload) !== null;
-}

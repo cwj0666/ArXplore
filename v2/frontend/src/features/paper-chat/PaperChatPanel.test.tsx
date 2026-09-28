@@ -52,6 +52,21 @@ describe("PaperChatPanel", () => {
     expect(screen.getByRole("button", { name: "전송" })).toBeInTheDocument();
   });
 
+  it("reports a missing stream endpoint instead of falling back to the JSON chat endpoint", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("<h1>Not Found</h1>", { status: 404, statusText: "Not Found" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<PaperChatPanel arxivId="2609.27980" />);
+
+    await user.click(screen.getByRole("button", { name: "AI 채팅 열기" }));
+    await user.type(screen.getByRole("textbox", { name: "논문에 대해 질문하기" }), "질문{Enter}");
+
+    expect(await screen.findByText("오류: 요청이 실패했습니다. (HTTP 404 Not Found)")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("returns focus to the input after an answer and hides the panel without cancelling", async () => {
     const streams: ControlledStream[] = [];
     vi.stubGlobal(

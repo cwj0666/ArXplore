@@ -74,9 +74,3 @@ export interface Citation {
   chunk_id: number | null;
   in_answer: boolean;
 }
-
-export interface PaperChatResponse {
-  answer: string;
-  citations: Citation[];
-  retrieval_mode: string;
-}
