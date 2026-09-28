@@ -33,6 +33,22 @@ class ParserAdapter(Protocol):
     def summarize_chunks(self, chunks: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
+class RetrievalAdapter(Protocol):
+    def describe(self) -> dict[str, str]: ...
+
+    def eval_search(self, method: str, query: str, *, k: int, adjacency_window: int) -> list[dict[str, Any]]: ...
+
+    def retrieve_contexts(
+        self, query: str, *, limit: int, arxiv_id: str | None, retrieval_mode: str
+    ) -> tuple[list[dict[str, Any]], str]: ...
+
+    def paper_chat_sources(
+        self, arxiv_id: str, question: str, *, retrieval_mode: str
+    ) -> tuple[list[dict[str, Any]], str] | None: ...
+
+    def close(self) -> None: ...
+
+
 def implementation_name() -> str:
     return os.environ.get(IMPLEMENTATION_ENV, "").strip() or DEFAULT_IMPLEMENTATION
 
@@ -54,3 +70,7 @@ def load_adapter(kind: str, implementation: str | None = None) -> Any:
 
 def load_parser_adapter(implementation: str | None = None) -> ParserAdapter:
     return load_adapter("parser", implementation)
+
+
+def load_retrieval_adapter(implementation: str | None = None) -> RetrievalAdapter:
+    return load_adapter("retrieval", implementation)

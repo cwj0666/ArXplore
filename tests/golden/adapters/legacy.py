@@ -1,4 +1,7 @@
 import io
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.metadata import version
 from typing import Any
 
@@ -59,3 +62,71 @@ class LegacyParserAdapter:
 
 def parser_adapter() -> LegacyParserAdapter:
     return LegacyParserAdapter()
+
+
+@contextmanager
+def _retrieval_mode(mode: str) -> Iterator[None]:
+    from src.shared.settings import get_settings
+
+    previous = os.environ.get("RETRIEVAL_MODE")
+    os.environ["RETRIEVAL_MODE"] = mode
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("RETRIEVAL_MODE", None)
+        else:
+            os.environ["RETRIEVAL_MODE"] = previous
+        get_settings.cache_clear()
+
+
+class LegacyRetrievalAdapter:
+    def __init__(self) -> None:
+        from src.integrations.db import close_all_pools
+        from src.integrations.paper_retriever import PaperRetriever
+        from src.shared.settings import get_settings
+
+        get_settings.cache_clear()
+        close_all_pools()
+        self._retriever = PaperRetriever()
+
+    def describe(self) -> dict[str, str]:
+        return {"implementation": "legacy"}
+
+    def eval_search(self, method: str, query: str, *, k: int, adjacency_window: int) -> list[dict[str, Any]]:
+        search = {
+            "lexical": self._retriever.search_paper_contexts,
+            "vector": self._retriever.search_paper_contexts_by_vector,
+            "hybrid": self._retriever.search_paper_contexts_by_hybrid,
+        }[method]
+        return search(query, limit=k, adjacency_window=adjacency_window)
+
+    def retrieve_contexts(
+        self, query: str, *, limit: int, arxiv_id: str | None, retrieval_mode: str
+    ) -> tuple[list[dict[str, Any]], str]:
+        from src.core.agent.retrieval import retrieve_contexts
+
+        with _retrieval_mode(retrieval_mode):
+            return retrieve_contexts(query, retriever=self._retriever, limit=limit, arxiv_id=arxiv_id)
+
+    def paper_chat_sources(
+        self, arxiv_id: str, question: str, *, retrieval_mode: str
+    ) -> tuple[list[dict[str, Any]], str] | None:
+        from src.core.agent.paper_chat import retrieve_paper_chat_sources
+
+        paper = self._retriever.repository.get_paper(arxiv_id)
+        if paper is None:
+            return None
+        with _retrieval_mode(retrieval_mode):
+            result = retrieve_paper_chat_sources(dict(paper), question, retriever=self._retriever)
+        return result.sources, result.retrieval_mode
+
+    def close(self) -> None:
+        from src.integrations.db import close_all_pools
+
+        close_all_pools()
+
+
+def retrieval_adapter() -> LegacyRetrievalAdapter:
+    return LegacyRetrievalAdapter()
