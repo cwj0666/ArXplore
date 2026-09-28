@@ -9,10 +9,19 @@ from arxplore.db.repositories.scheduler_runs import RunStatus
 from arxplore.pipeline import commands
 from arxplore.pipeline.embed import EmbeddingBudget
 from arxplore.pipeline.worker import WorkerOptions
-from arxplore.scheduler.jobs import CollectParams, LangsmithCleanupParams, MaintenanceParams
+from arxplore.scheduler import commands as scheduler_commands
+from arxplore.scheduler.jobs import (
+    COLLECT_RETRY,
+    NO_RETRY,
+    CollectParams,
+    LangsmithCleanupParams,
+    MaintenanceParams,
+    RetryPolicy,
+)
 from arxplore.scheduler.runner import RunOutcome
 
 runner = CliRunner()
+retries: list[RetryPolicy] = []
 
 
 @pytest.fixture
@@ -122,9 +131,13 @@ def test_removed_legacy_worker_options_are_rejected(
 @pytest.fixture
 def captured_runs(monkeypatch: pytest.MonkeyPatch, clean_env: Any) -> list[tuple[str, Any]]:
     calls: list[tuple[str, Any]] = []
+    retries.clear()
 
-    async def fake_run_job_manually(settings: Any, definition: Any, params: Any) -> RunOutcome:
+    async def fake_run_job_manually(
+        settings: Any, definition: Any, params: Any, *, retry: RetryPolicy = NO_RETRY
+    ) -> RunOutcome:
         calls.append((definition.name, params))
+        retries.append(retry)
         return RunOutcome(run_id=7, status=RunStatus.SUCCESS, result={"ok": True}, error=None, attempts=1)
 
     monkeypatch.setattr(commands, "run_job_manually", fake_run_job_manually)
@@ -193,7 +206,7 @@ def test_run_langsmith_cleanup_accepts_the_dag_params(captured_runs: list[tuple[
 
 
 def test_a_failed_manual_run_exits_with_one(monkeypatch: pytest.MonkeyPatch, clean_env: Any) -> None:
-    async def failing(settings: Any, definition: Any, params: Any) -> RunOutcome:
+    async def failing(settings: Any, definition: Any, params: Any, *, retry: RetryPolicy = NO_RETRY) -> RunOutcome:
         return RunOutcome(run_id=1, status=RunStatus.FAILED, result=None, error="RuntimeError: x", attempts=1)
 
     monkeypatch.setattr(commands, "run_job_manually", failing)
@@ -202,3 +215,28 @@ def test_a_failed_manual_run_exits_with_one(monkeypatch: pytest.MonkeyPatch, cle
 
     assert result.exit_code == 1
     assert '"error": "RuntimeError: x"' in result.output
+
+
+def test_a_manual_collect_does_not_retry_unless_asked(captured_runs: list[tuple[str, Any]]) -> None:
+    assert runner.invoke(app, ["run", "collect"]).exit_code == 0
+    assert runner.invoke(app, ["run", "collect", "--retries", "2", "--retry-delay", "1.5"]).exit_code == 0
+    assert retries == [RetryPolicy(retries=0, delay_seconds=600.0), RetryPolicy(retries=2, delay_seconds=1.5)]
+
+
+def test_the_scheduler_retries_collect_three_times_ten_minutes_apart_by_default(
+    monkeypatch: pytest.MonkeyPatch, clean_env: Any
+) -> None:
+    received: list[dict[str, RetryPolicy]] = []
+
+    async def fake_run_scheduler(settings: Any, *, retries: dict[str, RetryPolicy]) -> None:
+        received.append(retries)
+
+    monkeypatch.setattr(scheduler_commands, "run_scheduler", fake_run_scheduler)
+
+    assert runner.invoke(app, ["scheduler"]).exit_code == 0
+    assert runner.invoke(app, ["scheduler", "--collect-retries", "1", "--collect-retry-delay", "30"]).exit_code == 0
+    assert received == [
+        {"collect": COLLECT_RETRY},
+        {"collect": RetryPolicy(retries=1, delay_seconds=30.0)},
+    ]
+    assert RetryPolicy(retries=3, delay_seconds=600.0) == COLLECT_RETRY

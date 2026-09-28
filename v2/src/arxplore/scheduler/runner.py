@@ -11,7 +11,7 @@ from psycopg import AsyncConnection, OperationalError
 from arxplore.db.repositories import scheduler_runs
 from arxplore.db.repositories.scheduler_runs import RunStatus
 from arxplore.scheduler.cron import next_fire_time, previous_fire_time
-from arxplore.scheduler.jobs import JobDefinition, JobFailedError, JobResources, params_as_dict
+from arxplore.scheduler.jobs import NO_RETRY, JobDefinition, JobFailedError, JobResources, RetryPolicy, params_as_dict
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +24,6 @@ type LockConnector = Callable[[], Awaitable[AsyncConnection[Any]]]
 
 class SchedulerLockedError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class RetryPolicy:
-    retries: int = 0
-    delay_seconds: float = 0.0
-
-
-NO_RETRY = RetryPolicy()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -144,7 +135,7 @@ class Scheduler:
         return self._clock().astimezone(self.timezone)
 
     def retry_for(self, definition: JobDefinition) -> RetryPolicy:
-        return self.retries.get(definition.name, NO_RETRY)
+        return self.retries.get(definition.name, definition.retry)
 
     async def acquire_lock(self) -> None:
         connection = await self._connect_lock()

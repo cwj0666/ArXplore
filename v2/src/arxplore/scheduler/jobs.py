@@ -146,12 +146,25 @@ type JobFunction = Callable[[JobResources, Any], Awaitable[dict[str, Any]]]
 type ScheduledParams = Callable[[datetime], Any]
 
 
+@dataclass(frozen=True, slots=True)
+class RetryPolicy:
+    retries: int = 0
+    delay_seconds: float = 0.0
+
+
+NO_RETRY = RetryPolicy()
+COLLECT_RETRIES = 3
+COLLECT_RETRY_DELAY_SECONDS = 600.0
+COLLECT_RETRY = RetryPolicy(retries=COLLECT_RETRIES, delay_seconds=COLLECT_RETRY_DELAY_SECONDS)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class JobDefinition:
     name: str
     cron: str
     run: JobFunction
     scheduled_params: ScheduledParams
+    retry: RetryPolicy = NO_RETRY
 
 
 def _collect_params_for(scheduled_for: datetime) -> CollectParams:
@@ -159,7 +172,13 @@ def _collect_params_for(scheduled_for: datetime) -> CollectParams:
 
 
 JOB_DEFINITIONS: tuple[JobDefinition, ...] = (
-    JobDefinition(name=COLLECT_JOB, cron="0 18 * * *", run=run_collect, scheduled_params=_collect_params_for),
+    JobDefinition(
+        name=COLLECT_JOB,
+        cron="0 18 * * *",
+        run=run_collect,
+        scheduled_params=_collect_params_for,
+        retry=COLLECT_RETRY,
+    ),
     JobDefinition(
         name=MAINTENANCE_JOB,
         cron="0 */3 * * *",

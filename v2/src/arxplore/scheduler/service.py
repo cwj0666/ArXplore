@@ -8,8 +8,15 @@ from psycopg import AsyncConnection
 from arxplore.config import AppSettings
 from arxplore.db.migrate import verify_schema
 from arxplore.db.pool import connect_from_settings
-from arxplore.scheduler.jobs import JOB_DEFINITIONS, JobDefinition, JobResources, open_job_resources
-from arxplore.scheduler.runner import NO_RETRY, RetryPolicy, RunOutcome, Scheduler, run_manual
+from arxplore.scheduler.jobs import (
+    JOB_DEFINITIONS,
+    NO_RETRY,
+    JobDefinition,
+    JobResources,
+    RetryPolicy,
+    open_job_resources,
+)
+from arxplore.scheduler.runner import RunOutcome, Scheduler, run_manual
 
 SCHEDULER_ROLE = "scheduler"
 SCHEDULER_LOCK_ROLE = "scheduler-lock"

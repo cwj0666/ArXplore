@@ -18,11 +18,14 @@ from arxplore.pipeline.langsmith_cleanup import DEFAULT_RETENTION_DAYS
 from arxplore.pipeline.worker import DEFAULT_WAIT_TIMEOUT_SECONDS, DEFAULT_WORKER_NAME, WorkerOptions, run_worker
 from arxplore.scheduler.jobs import (
     COLLECT_JOB,
+    COLLECT_RETRY_DELAY_SECONDS,
     LANGSMITH_CLEANUP_JOB,
     MAINTENANCE_JOB,
+    NO_RETRY,
     CollectParams,
     LangsmithCleanupParams,
     MaintenanceParams,
+    RetryPolicy,
     job_definition,
 )
 from arxplore.scheduler.runner import RunOutcome
@@ -70,11 +73,11 @@ def _outcome_payload(job: str, outcome: RunOutcome) -> dict[str, Any]:
     }
 
 
-def _run_manual_job(job: str, params: Any) -> None:
+def _run_manual_job(job: str, params: Any, *, retry: RetryPolicy = NO_RETRY) -> None:
     configure_logging()
     settings = get_settings()
     try:
-        outcome = asyncio.run(run_job_manually(settings, job_definition(job), params))
+        outcome = asyncio.run(run_job_manually(settings, job_definition(job), params, retry=retry))
     except (MigrationError, ValueError) as exc:
         raise _fail(str(exc)) from exc
     _echo_json(_outcome_payload(job, outcome))
@@ -156,8 +159,16 @@ def register_run(app: typer.Typer) -> None:
     @run_app.command("collect", help="Collect one day of HF Daily Papers and enqueue its prepare job.")
     def collect_command(
         target_date: Annotated[str | None, typer.Option("--target-date", help="YYYY-MM-DD; defaults to today.")] = None,
+        retries: Annotated[int, typer.Option("--retries", min=0, help="Extra attempts when collecting fails.")] = 0,
+        retry_delay: Annotated[
+            float, typer.Option("--retry-delay", min=0.0, help="Seconds to wait between attempts.")
+        ] = COLLECT_RETRY_DELAY_SECONDS,
     ) -> None:
-        _run_manual_job(COLLECT_JOB, CollectParams(target_date=parse_date_option(target_date)))
+        _run_manual_job(
+            COLLECT_JOB,
+            CollectParams(target_date=parse_date_option(target_date)),
+            retry=RetryPolicy(retries=retries, delay_seconds=retry_delay),
+        )
 
     @run_app.command("maintenance", help="Backfill missing HF days, then enrich papers from arXiv.")
     def maintenance_command(

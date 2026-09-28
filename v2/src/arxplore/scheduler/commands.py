@@ -9,6 +9,13 @@ from arxplore.config import get_settings
 from arxplore.db.migrate import MigrationError
 from arxplore.db.pool import create_pool_from_settings, open_pool
 from arxplore.db.repositories import scheduler_runs
+from arxplore.scheduler.jobs import (
+    COLLECT_JOB,
+    COLLECT_RETRIES,
+    COLLECT_RETRY,
+    COLLECT_RETRY_DELAY_SECONDS,
+    RetryPolicy,
+)
 from arxplore.scheduler.runner import SchedulerLockedError
 from arxplore.scheduler.service import MANUAL_RUN_ROLE, run_scheduler
 
@@ -24,11 +31,11 @@ def _fail(message: str) -> typer.Exit:
     return typer.Exit(code=1)
 
 
-def start_scheduler() -> None:
+def start_scheduler(*, collect_retry: RetryPolicy = COLLECT_RETRY) -> None:
     configure_logging()
     settings = get_settings()
     try:
-        asyncio.run(run_scheduler(settings))
+        asyncio.run(run_scheduler(settings, retries={COLLECT_JOB: collect_retry}))
     except (SchedulerLockedError, MigrationError, ValueError) as exc:
         raise _fail(str(exc)) from exc
 
@@ -62,9 +69,18 @@ def register(app: typer.Typer) -> None:
     )
 
     @scheduler_app.callback(invoke_without_command=True)
-    def scheduler_command(ctx: typer.Context) -> None:
+    def scheduler_command(
+        ctx: typer.Context,
+        collect_retries: Annotated[
+            int, typer.Option("--collect-retries", min=0, help="Extra attempts when the collect job fails.")
+        ] = COLLECT_RETRIES,
+        collect_retry_delay: Annotated[
+            float,
+            typer.Option("--collect-retry-delay", min=0.0, help="Seconds to wait between collect attempts."),
+        ] = COLLECT_RETRY_DELAY_SECONDS,
+    ) -> None:
         if ctx.invoked_subcommand is None:
-            start_scheduler()
+            start_scheduler(collect_retry=RetryPolicy(retries=collect_retries, delay_seconds=collect_retry_delay))
 
     @scheduler_app.command("history", help="Show recent scheduler runs, newest first.")
     def history_command(

@@ -13,11 +13,14 @@ from arxplore.db.repositories.scheduler_runs import RunStatus, RunTrigger
 from arxplore.scheduler import jobs as scheduler_jobs
 from arxplore.scheduler.jobs import (
     COLLECT_JOB,
+    COLLECT_RETRY,
     MAINTENANCE_JOB,
+    NO_RETRY,
     CollectParams,
     JobDefinition,
     JobResources,
     MaintenanceParams,
+    RetryPolicy,
     job_definition,
 )
 from arxplore.scheduler.runner import Scheduler, SchedulerLockedError, run_manual, run_scheduled
@@ -306,3 +309,87 @@ async def test_history_lists_recent_runs_newest_first(pool) -> None:
     assert runs[0].status is RunStatus.SUCCESS
     assert runs[0].result == {"ok": True}
     assert len(await scheduler_runs.list_recent_runs(pool, limit=2)) == 2
+
+
+async def test_a_failing_job_is_retried_until_it_succeeds(pool, probe) -> None:
+    sleeps: list[float] = []
+    seen_during_retry: list[dict[str, Any] | None] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        seen_during_retry.append(await probe.row("SELECT status, attempts, error FROM scheduler_runs"))
+
+    calls = {"count": 0}
+
+    async def flaky(resources: JobResources, params: Any) -> dict[str, Any]:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise RuntimeError(f"HF is down {calls['count']}")
+        return {"ok": True}
+
+    outcome = await run_manual(
+        _resources(pool),
+        _definition("collect", flaky),
+        CollectParams(),
+        retry=RetryPolicy(retries=3, delay_seconds=5.0),
+        sleep=fake_sleep,
+    )
+
+    assert (outcome.status, outcome.attempts, outcome.error) == (RunStatus.SUCCESS, 3, None)
+    assert sleeps == [5.0, 5.0]
+    assert seen_during_retry == [
+        {"status": "running", "attempts": 1, "error": "RuntimeError: HF is down 1"},
+        {"status": "running", "attempts": 2, "error": "RuntimeError: HF is down 2"},
+    ]
+    [run] = await _runs(probe)
+    assert (run["status"], run["attempts"], run["error"]) == ("success", 3, None)
+
+
+async def test_a_job_fails_when_the_retries_run_out(pool, probe) -> None:
+    async def fake_sleep(seconds: float) -> None:
+        return None
+
+    async def broken(resources: JobResources, params: Any) -> dict[str, Any]:
+        raise RuntimeError("HF is down")
+
+    outcome = await run_manual(
+        _resources(pool),
+        _definition("collect", broken),
+        CollectParams(),
+        retry=RetryPolicy(retries=2, delay_seconds=1.0),
+        sleep=fake_sleep,
+    )
+
+    assert (outcome.status, outcome.attempts) == (RunStatus.FAILED, 3)
+    [run] = await _runs(probe)
+    assert (run["status"], run["attempts"], run["error"]) == ("failed", 3, "RuntimeError: HF is down")
+
+
+def test_only_collect_retries_by_default() -> None:
+    assert job_definition(COLLECT_JOB).retry == COLLECT_RETRY
+    assert job_definition(MAINTENANCE_JOB).retry == NO_RETRY
+
+
+async def test_scheduled_collect_uses_the_configured_retry(pool, probe, pipeline_database) -> None:
+    clock = FakeClock(START)
+    calls = {"count": 0}
+
+    async def flaky(resources: JobResources, params: Any) -> dict[str, Any]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("blip")
+        raise Stop
+
+    definition = JobDefinition(
+        name="collect",
+        cron="0 18 * * *",
+        run=flaky,
+        scheduled_params=lambda when: CollectParams(),
+        retry=RetryPolicy(retries=1, delay_seconds=120.0),
+    )
+
+    with pytest.raises(Stop):
+        await _scheduler(pool, pipeline_database, [definition], clock).run()
+
+    assert calls["count"] == 2
+    assert clock.now == START + timedelta(seconds=120)
