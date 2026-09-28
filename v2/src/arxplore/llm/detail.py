@@ -42,7 +42,7 @@ PRIORITY_SECTION_KEYWORDS = (
     "limitation",
     "conclusion",
 )
-FINDING_MARKER = re.compile(r"^(?:[-*•]|\d+[.)])\s*")
+FINDING_MARKER = re.compile(r"^(?:[-*•]|\d+[.)](?!\d))\s*")
 FINDING_KEY_NOISE = re.compile(r"\W+")
 SENTENCE_ENDINGS = (".", "!", "?")
 

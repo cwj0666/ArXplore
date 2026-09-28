@@ -153,8 +153,20 @@ class TestExtractKeyFindings:
     def test_collapses_internal_whitespace(self) -> None:
         assert extract_key_findings("-   spaced    out   finding  ") == ["spaced out finding."]
 
-    def test_leading_decimal_number_is_mistaken_for_list_numbering(self) -> None:
-        assert extract_key_findings("3.5% gain on GSM8K over the baseline") == ["5% gain on GSM8K over the baseline."]
+    def test_leading_decimal_numbers_are_not_list_numbering(self) -> None:
+        assert extract_key_findings("3.5% gain on GSM8K over the baseline") == ["3.5% gain on GSM8K over the baseline."]
+        assert extract_key_findings("10.25x faster decoding on long inputs") == [
+            "10.25x faster decoding on long inputs."
+        ]
+        assert extract_key_findings("- 3.5% gain on GSM8K over the baseline") == [
+            "3.5% gain on GSM8K over the baseline."
+        ]
+
+    def test_numbering_followed_by_a_decimal_is_still_stripped(self) -> None:
+        assert extract_key_findings("1. 3.5% gain on GSM8K over the baseline\n2) 4.2 point drop without it") == [
+            "3.5% gain on GSM8K over the baseline.",
+            "4.2 point drop without it.",
+        ]
 
 
 async def test_writer_calls_overview_then_key_findings_with_the_chosen_model(
