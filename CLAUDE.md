@@ -8,7 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 계획은 `~/portfolio/02_projects/arxplore/reports/refactor/06_plan.md`, 기존 구현 분석은 같은 폴더의 00~05(기준 커밋 68dab7b)다. 결정 기록은 `docs/worklog/phase-5`에 둔다.
 - 목표 스택과 폴더 구조는 계획 문서가 기준이다: FastAPI, 경량 스케줄러(Airflow 제거), psycopg 3, uv, React 19.
 - 코드에 주석과 docstring을 쓰지 않는다. LLM에 넘어가는 도구 설명처럼 기능인 문자열은 `@tool(description=...)` 같은 명시적 인자로 둔다.
-- 모듈은 먼저 골든(`tests/golden`)과 같게 옮긴다. 버그 수정은 계획의 수정 ID(F01~F30)를 단 별도 커밋으로 하고, 골든 차이는 그 커밋에서만 허용한다.
+- 모듈은 먼저 골든(`tests/golden`)과 같게 옮긴다. 버그 수정은 계획의 수정 ID(F01~F31)를 단 별도 커밋으로 하고, 골든 차이는 그 커밋에서만 허용한다.
+- 전환 기간 배치
+  - 새 코드는 `v2/` 아래에 둔다. 자체 `pyproject.toml`, `uv.lock`, `.venv`(Python 3.14)를 쓴다.
+  - 옛 코드는 루트 `.venv`(Python 3.12)로 돈다.
+  - `tests/fakes`(가짜 OpenAI·arXiv 서버)와 `tests/golden`은 두 구현이 공유하고, 구현은 `GOLDEN_IMPL=legacy|v2`로 고른다.
+  - P8에서 `v2/`를 루트로 올린다.
+- 골든 DB는 Docker 컨테이너 `arxplore-golden-pg`(localhost:55432, user `arxplore`, trust)다.
+  - DB `arxplore`는 골든 원본이라 쓰지 않는다. 쓰기가 필요하면 `CREATE DATABASE ... TEMPLATE arxplore` 복사본을 쓴다.
+  - `arxplore_test`는 옛 통합 테스트용이다.
+- 여러 작업자가 같은 작업 트리에서 커밋하므로 `git add <자기 경로>` 뒤 `git commit -- <자기 경로>`로만 커밋한다. 외부 요청의 헤더·본문에 사용자 이메일 등 개인정보를 넣지 않는다.
 - 아래 내용은 기존 구현(68dab7b) 설명이다. 새 구조로 옮긴 부분은 P8에서 다시 쓴다.
 
 ## Commands
