@@ -95,16 +95,16 @@ def test_chunk_indexes_links_and_metadata():
         assert metadata["continues_next"] == metadata["ends_mid_sentence"]
 
 
-def test_chunk_ends_prefer_the_last_sentence_break_inside_the_lookahead_window():
+def test_chunk_ends_prefer_the_last_sentence_break_within_max_chars():
     chunks = build_chunks(LONG_BODY, [section("2 Method", LONG_BODY)])
 
     assert [(chunk["metadata"]["char_start"], chunk["metadata"]["char_end"]) for chunk in chunks] == [
-        (0, 2001),
-        (1826, 3751),
-        (3576, 5501),
-        (5326, 6299),
+        (0, 1750),
+        (1575, 3325),
+        (3150, 4900),
+        (4725, 6299),
     ]
-    assert max(len(chunk["chunk_text"]) for chunk in chunks) == 2000
+    assert max(len(chunk["chunk_text"]) for chunk in chunks) == 1749
     assert all(chunk["chunk_text"].endswith(".") for chunk in chunks)
 
 
@@ -157,20 +157,50 @@ def test_small_chunk_windows_always_make_progress():
     assert chunks[-1]["metadata"]["char_end"] == len(text)
 
 
-def test_chunk_length_can_exceed_max_chars_by_the_lookahead():
-    chunks = build_chunks(LONG_BODY, [section("2 Method", LONG_BODY)])
+def test_chunks_never_exceed_max_chars():
+    texts = [
+        LONG_BODY,
+        random_prose(7, 600),
+        lossy_prone_section(3),
+        "x" * 5000,
+        "\n".join(f"row {index} 1.0 2.0 3.0" for index in range(500)),
+        ("A" * 1500 + " ") * 6,
+    ]
+    for max_chars, overlap_chars in [(DEFAULT_MAX_CHARS, DEFAULT_OVERLAP_CHARS), (600, 100), (300, 200), (1000, 0)]:
+        chunks = build_chunks(
+            "body", [section("2 Method", text) for text in texts], max_chars=max_chars, overlap_chars=overlap_chars
+        )
 
-    assert max(len(chunk["chunk_text"]) for chunk in chunks) > DEFAULT_MAX_CHARS
+        assert max(len(chunk["chunk_text"]) for chunk in chunks) <= max_chars
 
 
-def test_a_short_tail_is_absorbed_into_the_previous_chunk():
+def test_a_text_without_boundaries_is_cut_at_max_chars():
+    chunks = build_chunks("x" * 5000, [section("2 Method", "x" * 5000)])
+
+    assert [(chunk["metadata"]["char_start"], chunk["metadata"]["char_end"]) for chunk in chunks] == [
+        (0, 1800),
+        (1600, 3400),
+        (3200, 5000),
+    ]
+
+
+def test_a_short_tail_stays_a_separate_chunk_when_absorbing_would_exceed_max_chars():
     text = BODY_PARAGRAPH[:2001] + "and a short tail"
 
     chunks = build_chunks(text, [section("2 Method", text)])
 
+    assert [(chunk["metadata"]["char_start"], chunk["metadata"]["char_end"]) for chunk in chunks] == [
+        (0, 1750),
+        (1575, len(text)),
+    ]
+    assert chunks[1]["chunk_text"].endswith("large language models. and a short tail")
+
+
+def test_a_short_section_is_absorbed_into_the_previous_section_with_the_same_title():
+    chunks = build_chunks("body", [section("2 Method", BODY_PARAGRAPH[:500]), section("2 Method", "and a short tail")])
+
     assert len(chunks) == 1
-    assert chunks[0]["chunk_text"] == text.strip()
-    assert chunks[0]["metadata"]["char_end"] == len(text)
+    assert chunks[0]["chunk_text"] == BODY_PARAGRAPH[:500].strip() + "\nand a short tail"
 
 
 def test_a_short_first_sentence_is_kept():

@@ -11,7 +11,6 @@ from arxplore.parsing.sections import FRONT_MATTER_TITLE, FULL_TEXT_TITLE
 DEFAULT_MAX_CHARS = 1800
 DEFAULT_OVERLAP_CHARS = 200
 MIN_MAX_CHARS = 300
-END_LOOKAHEAD_CHARS = 220
 MIN_BREAK_CHARS = 220
 TINY_CHUNK_CHARS = 160
 ABSORB_MAX_CHARS = 360
@@ -99,7 +98,7 @@ def _chunk_end(text: str, start: int, max_chars: int) -> int:
     tentative_end = min(len(text), start + max_chars)
     if tentative_end >= len(text):
         return len(text)
-    window = text[start : min(len(text), tentative_end + END_LOOKAHEAD_CHARS)]
+    window = text[start:tentative_end]
     minimum_break = max(max_chars // 2, MIN_BREAK_CHARS)
     preferred_breaks = [match.end() for match in _END_PREFERRED_BREAK.finditer(window) if match.end() >= minimum_break]
     if preferred_breaks:
@@ -168,11 +167,14 @@ def _should_absorb(drafts: Sequence[_ChunkDraft], new: _ChunkDraft) -> bool:
     )
 
 
-def _absorb(previous: _ChunkDraft, new: _ChunkDraft, section_text: str) -> None:
+def _merged_text(previous: _ChunkDraft, new: _ChunkDraft, section_text: str) -> str:
     if previous.section_index == new.section_index:
-        previous.text = section_text[previous.char_start : new.char_end].strip()
-    else:
-        previous.text = f"{previous.text.rstrip()}\n{new.text.lstrip()}".strip()
+        return section_text[previous.char_start : new.char_end].strip()
+    return f"{previous.text.rstrip()}\n{new.text.lstrip()}".strip()
+
+
+def _absorb(previous: _ChunkDraft, new: _ChunkDraft, merged_text: str) -> None:
+    previous.text = merged_text
     previous.char_end = new.char_end
     previous.ends_mid_sentence = new.ends_mid_sentence
 
@@ -206,8 +208,11 @@ def _chunk_section(
                 starts_mid_sentence=starts_mid_sentence(section_text, new_start),
                 ends_mid_sentence=ends_mid_sentence(section_text, end),
             )
-            if _should_absorb(drafts, new_content):
-                _absorb(drafts[-1], new_content, section_text)
+            merged_text = (
+                _merged_text(drafts[-1], new_content, section_text) if _should_absorb(drafts, new_content) else None
+            )
+            if merged_text is not None and len(merged_text) <= max_chars:
+                _absorb(drafts[-1], new_content, merged_text)
             else:
                 chunk_text = new_text if new_start == start else section_text[start:end].strip()
                 drafts.append(
