@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
 from arxplore.api.app import build_services, create_app
 from arxplore.api.dependencies import ApiServices
@@ -274,10 +275,15 @@ class Harness:
         )
 
     @asynccontextmanager
-    async def client(self, **settings_values: str) -> AsyncIterator[httpx.AsyncClient]:
+    async def app(self, **settings_values: str) -> AsyncIterator[FastAPI]:
         self.settings_values.update(settings_values)
         app = create_app(self.settings(), services_factory=self.services, frontend_dist=self.frontend_dist)
         async with app.router.lifespan_context(app):
+            yield app
+
+    @asynccontextmanager
+    async def client(self, **settings_values: str) -> AsyncIterator[httpx.AsyncClient]:
+        async with self.app(**settings_values) as app:
             transport = httpx.ASGITransport(app=app, client=(CLIENT_IP, 50000))
             async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
                 yield client

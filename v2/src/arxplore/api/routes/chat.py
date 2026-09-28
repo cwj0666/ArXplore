@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, Request
 from starlette.responses import JSONResponse, Response
 
 from arxplore.api.dependencies import enforce_csrf, enforce_llm_rate_limit, get_services
+from arxplore.api.disconnect import CLIENT_CLOSED_REQUEST, ClientDisconnectedError, until_disconnected
 from arxplore.api.errors import STREAM_ERROR_MESSAGE, ApiError
 from arxplore.api.openapi_docs import AGENT_ERROR_RESPONSES, LLM_ERROR_RESPONSES, event_stream_response, request_body
-from arxplore.api.responses import api_error_response, citation_items, error_response, json_object
+from arxplore.api.responses import api_error_response, citation_items, empty_response, error_response, json_object
 from arxplore.api.schemas import AgentChatResponse, ChatRequest, PaperChatResponse
 from arxplore.api.services.chat import chat_fields
 from arxplore.api.sse import event_stream_response as sse_response
@@ -27,9 +28,11 @@ async def assistant_chat(request: Request) -> Response:
     services = get_services(request)
     try:
         chat = services.chat.prepare_agent_chat(*chat_fields(await json_object(request)))
-        answer = await services.chat.answer_agent_chat(chat)
+        answer = await until_disconnected(request, services.chat.answer_agent_chat(chat))
     except ApiError as exc:
         return api_error_response(exc)
+    except ClientDisconnectedError:
+        return empty_response(CLIENT_CLOSED_REQUEST)
     except Exception:
         logger.exception("에이전트 응답 생성 실패")
         return error_response(500, STREAM_ERROR_MESSAGE)
@@ -65,9 +68,11 @@ async def paper_chat(arxiv_id: str, request: Request) -> Response:
     services = get_services(request)
     try:
         prepared = await services.chat.prepare_paper_chat(arxiv_id, *chat_fields(await json_object(request)))
-        result = await services.chat.answer_paper_chat(prepared)
+        result = await until_disconnected(request, services.chat.answer_paper_chat(prepared))
     except ApiError as exc:
         return api_error_response(exc)
+    except ClientDisconnectedError:
+        return empty_response(CLIENT_CLOSED_REQUEST)
     except Exception:
         logger.exception("상세 챗 응답 생성 실패")
         return error_response(500, STREAM_ERROR_MESSAGE)

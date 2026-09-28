@@ -45,8 +45,15 @@
 
 ## F24: 외부 arXiv 검색 async와 결과 캐시
 
-- 상세 요청 안의 arXiv 관련 논문 검색은 이식 단계부터 `httpx.AsyncClient`로 돈다(`arxplore.sources.arxiv`, 0530057 이전 커밋). 옛 구현처럼 요청 스레드를 막지 않는다. URL, 파라미터, 8초 타임아웃, 1회 시도는 옛 값 그대로다.
+- 상세 요청 안의 arXiv 관련 논문 검색은 이식 단계부터 `httpx.AsyncClient`로 돈다(`arxplore.sources.arxiv`, 3793658). 그래서 옛 구현과 달리 요청 스레드를 막지 않는다. URL, 파라미터, 8초 타임아웃, 1회 시도는 옛 값 그대로다.
 - F24는 결과 캐시를 더한다. 키는 (질의, max_results)이고 성공한 결과만 1시간 보관한다. 최대 512개이며 오래 안 쓴 것부터 버린다. 실패는 캐시하지 않아 다음 요청이 다시 시도한다.
 - 같은 키로 동시에 들어온 요청은 검색 1회를 함께 기다린다. 한 요청이 끊겨도 공유 검색은 끝까지 돈다.
 - 골든 하네스의 `reset_state`가 시나리오마다 캐시를 비운다.
 - G5·G4 차이: 없음. 외부 검색을 하는 두 시나리오(`detail_external_related`, `detail_external_failure`)는 요청이 1번씩이다.
+
+## F25: 클라이언트가 끊으면 생성 중단
+
+- SSE 두 경로(`/papers/<id>/chat/stream/`, `/papers/assistant/stream/`)는 응답을 보내는 동안 `http.disconnect`를 따로 기다린다. 연결이 끊기면 스트림 작업을 취소하고, 에이전트 그래프와 OpenAI 스트림도 함께 닫힌다. ASGI spec 2.4 서버처럼 Starlette 기본 응답이 끊김을 다음 쓰기 때에만 알아채는 경우에도 같다. 옛 WSGI 구현은 다음 청크를 쓸 때까지 생성을 계속했다.
+- 스트림이 아닌 LLM 경로(`analyze/`, `summary/`, `/papers/<id>/chat/`, `/papers/assistant/chat/`)는 생성을 별도 작업으로 돌리면서 끊김을 기다린다. 끊기면 생성을 취소하고 캐시에 저장하지 않으며 빈 499 응답으로 끝낸다. 이 응답은 이미 떠난 클라이언트에게 가지 않는다.
+- 검증 순서(400·404·503)와 캐시 응답은 그대로다. 끊김 감시는 생성 단계에만 붙는다.
+- G5·G4 차이: 없음. 골든 하네스의 ASGITransport는 응답이 끝난 뒤에만 `http.disconnect`를 보낸다.

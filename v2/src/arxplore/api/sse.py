@@ -4,8 +4,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from typing import Any
 
-from starlette.responses import StreamingResponse
-
+from arxplore.api.disconnect import DisconnectAwareStreamingResponse
 from arxplore.api.errors import STREAM_ERROR_MESSAGE
 from arxplore.llm.events import AnswerChunk, AnswerEvent
 
@@ -41,5 +40,7 @@ async def sse_events(events: AsyncGenerator[AnswerEvent]) -> AsyncIterator[bytes
     yield DONE_MESSAGE
 
 
-def event_stream_response(events: AsyncGenerator[AnswerEvent]) -> StreamingResponse:
-    return StreamingResponse(sse_events(events), media_type=EVENT_STREAM_MEDIA_TYPE, headers=EVENT_STREAM_HEADERS)
+def event_stream_response(events: AsyncGenerator[AnswerEvent]) -> DisconnectAwareStreamingResponse:
+    return DisconnectAwareStreamingResponse(
+        sse_events(events), media_type=EVENT_STREAM_MEDIA_TYPE, headers=EVENT_STREAM_HEADERS
+    )
