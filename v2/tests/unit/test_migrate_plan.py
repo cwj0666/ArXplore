@@ -38,11 +38,16 @@ class TestPackagedMigrations:
     def test_versions_and_names(self) -> None:
         migrations = load_migrations()
 
-        assert [(migration.version, migration.name) for migration in migrations] == [
+        assert [(migration.version, migration.name) for migration in migrations[:3]] == [
             (1, "0001_baseline"),
             (2, "0002_drop_legacy_topics"),
             (3, "0003_prepare_jobs_date_and_status"),
         ]
+        versions = [migration.version for migration in migrations]
+        assert versions == sorted(set(versions))
+        for migration in migrations:
+            assert re.fullmatch(r"\d{4}_[a-z0-9_]+", migration.name)
+            assert int(migration.name[:4]) == migration.version
 
     def test_checksums_are_sha256_of_file_contents(self) -> None:
         for migration in load_migrations():
