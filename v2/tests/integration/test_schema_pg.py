@@ -139,3 +139,15 @@ async def test_verify_schema_rejects_unknown_database_versions(open_connection) 
 
     with pytest.raises(SchemaNotReadyError, match="unknown migrations in database: 9998"):
         await verify_schema(connection, embedding_dimensions=1536)
+
+
+async def test_0002_drops_the_legacy_topic_tables(open_connection) -> None:
+    connection = await open_connection()
+    topic_tables = ("topics", "topic_papers", "topic_documents")
+    await migrate(connection, target=1)
+    assert all([await _relation_exists(connection, table) for table in topic_tables])
+
+    assert [migration.version for migration in await migrate(connection, target=2)] == [2]
+
+    assert not any([await _relation_exists(connection, table) for table in topic_tables])
+    assert await _relation_exists(connection, "papers")
