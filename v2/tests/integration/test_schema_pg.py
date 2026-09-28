@@ -52,6 +52,19 @@ async def _relation_exists(connection: psycopg.AsyncConnection, name: str) -> bo
     return bool((await cursor.fetchone())["present"])
 
 
+async def _column_type(connection: psycopg.AsyncConnection, table: str, column: str) -> str:
+    cursor = await connection.execute(
+        "SELECT data_type FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+        (table, column),
+    )
+    return str((await cursor.fetchone())["data_type"])
+
+
+async def _latest_version(connection: psycopg.AsyncConnection) -> int:
+    cursor = await connection.execute("SELECT max(version) AS latest FROM schema_migrations")
+    return int((await cursor.fetchone())["latest"])
+
+
 async def _apply_baseline_without_recording(connection: psycopg.AsyncConnection) -> None:
     baseline = load_migrations()[0]
     async with connection.transaction():
@@ -151,3 +164,68 @@ async def test_0002_drops_the_legacy_topic_tables(open_connection) -> None:
 
     assert not any([await _relation_exists(connection, table) for table in topic_tables])
     assert await _relation_exists(connection, "papers")
+
+
+LEGACY_JOBS = [
+    ("auto", "2026-04-06", "done", "{}"),
+    ("auto", "2026-04-07", "processing", '{"force": true}'),
+    ("auto", "2026-04-08", "pending", "{}"),
+    ("auto", "2026-04-09", "failed", '{"force": true}'),
+    ("backfill", "2026-04-07", "pending", "{}"),
+    ("auto", "2025-12-31", "done", "{}"),
+]
+
+
+async def _insert_legacy_jobs(connection: psycopg.AsyncConnection, jobs: list[tuple[str, str, str, str]]) -> None:
+    async with connection.cursor() as cursor:
+        await cursor.executemany(
+            "INSERT INTO prepare_jobs (mode, target_date, status, payload) VALUES (%s, %s, %s, %s::jsonb)",
+            jobs,
+        )
+
+
+async def test_0003_converts_legacy_target_dates(open_connection) -> None:
+    connection = await open_connection()
+    await migrate(connection, target=2)
+    await _insert_legacy_jobs(connection, LEGACY_JOBS)
+
+    assert [migration.version for migration in await migrate(connection, target=3)] == [3]
+
+    assert await _column_type(connection, "prepare_jobs", "target_date") == "date"
+    cursor = await connection.execute("SELECT mode, target_date::text AS target_date, status FROM prepare_jobs")
+    assert sorted(tuple(row.values()) for row in await cursor.fetchall()) == sorted(
+        (mode, target_date, status) for mode, target_date, status, _ in LEGACY_JOBS
+    )
+    cursor = await connection.execute(
+        "SELECT target_date FROM prepare_jobs WHERE mode = 'auto' AND status = 'pending' AND target_date >= %s",
+        ("2026-04-07",),
+    )
+    assert [str(row["target_date"]) for row in await cursor.fetchall()] == ["2026-04-08"]
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await connection.execute(
+            "INSERT INTO prepare_jobs (mode, target_date, status) VALUES ('auto', '2026-05-01', 'running')"
+        )
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        await connection.execute("INSERT INTO prepare_jobs (mode, target_date) VALUES ('auto', '2026-04-06')")
+
+
+@pytest.mark.parametrize(
+    ("job", "error"),
+    [
+        (("auto", "2026/04/07", "pending", "{}"), psycopg.errors.RaiseException),
+        (("auto", "2026-02-30", "pending", "{}"), psycopg.errors.DatetimeFieldOverflow),
+        (("auto", "2026-04-07", "running", "{}"), psycopg.errors.CheckViolation),
+    ],
+)
+async def test_0003_refuses_rows_it_cannot_convert(
+    open_connection, job: tuple[str, str, str, str], error: type[Exception]
+) -> None:
+    connection = await open_connection()
+    await migrate(connection, target=2)
+    await _insert_legacy_jobs(connection, [job])
+
+    with pytest.raises(error):
+        await migrate(connection, target=3)
+
+    assert await _latest_version(connection) == 2
+    assert await _column_type(connection, "prepare_jobs", "target_date") == "text"

@@ -41,6 +41,7 @@ class TestPackagedMigrations:
         assert [(migration.version, migration.name) for migration in migrations] == [
             (1, "0001_baseline"),
             (2, "0002_drop_legacy_topics"),
+            (3, "0003_prepare_jobs_date_and_status"),
         ]
 
     def test_checksums_are_sha256_of_file_contents(self) -> None:
