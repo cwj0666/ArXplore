@@ -111,8 +111,8 @@ class MemoryStore:
     papers: list[Paper] = field(default_factory=list)
     fulltexts: dict[str, PaperFulltext] = field(default_factory=dict)
     chunks: dict[str, list[StoredChunk]] = field(default_factory=dict)
-    overviews: dict[str, AiOverview] = field(default_factory=dict)
-    summaries: dict[tuple[str, str], DetailedSummary] = field(default_factory=dict)
+    overviews: dict[tuple[str, int], AiOverview] = field(default_factory=dict)
+    summaries: dict[tuple[str, str, int], DetailedSummary] = field(default_factory=dict)
     error: Exception | None = None
     recent_limits: list[int] = field(default_factory=list)
 
@@ -135,19 +135,23 @@ class MemoryStore:
     async def list_chunks(self, arxiv_id: str, *, limit: int) -> Sequence[StoredChunk]:
         return self.chunks.get(arxiv_id, [])[:limit]
 
-    async def get_overview(self, arxiv_id: str) -> AiOverview | None:
-        return self.overviews.get(arxiv_id)
+    async def get_overview(self, arxiv_id: str, *, prompt_version: int) -> AiOverview | None:
+        return self.overviews.get((arxiv_id, prompt_version))
 
-    async def save_overview(self, arxiv_id: str, *, overview: str, key_findings: list[Any], model: str) -> None:
-        self.overviews[arxiv_id] = AiOverview(
+    async def save_overview(
+        self, arxiv_id: str, *, overview: str, key_findings: list[Any], model: str, prompt_version: int
+    ) -> None:
+        self.overviews[(arxiv_id, prompt_version)] = AiOverview(
             overview=overview, key_findings=key_findings, model=model, generated_at=None
         )
 
-    async def get_detailed_summary(self, arxiv_id: str, model: str) -> DetailedSummary | None:
-        return self.summaries.get((arxiv_id, model))
+    async def get_detailed_summary(self, arxiv_id: str, model: str, *, prompt_version: int) -> DetailedSummary | None:
+        return self.summaries.get((arxiv_id, model, prompt_version))
 
-    async def save_detailed_summary(self, arxiv_id: str, *, summary: str, model: str) -> None:
-        self.summaries[(arxiv_id, model)] = DetailedSummary(summary=summary, model=model, generated_at=None)
+    async def save_detailed_summary(self, arxiv_id: str, *, summary: str, model: str, prompt_version: int) -> None:
+        self.summaries[(arxiv_id, model, prompt_version)] = DetailedSummary(
+            summary=summary, model=model, generated_at=None
+        )
 
 
 @dataclass
@@ -218,12 +222,14 @@ def seeded_store() -> MemoryStore:
         },
         chunks={MAIN_ID: [make_chunk(MAIN_ID, 1, "first chunk"), make_chunk(MAIN_ID, 2, "second chunk", None)]},
         overviews={
-            CACHED_ID: AiOverview(
+            (CACHED_ID, 1): AiOverview(
                 overview="cached overview", key_findings=["k1"], model="gpt-5-mini", generated_at=None
             )
         },
         summaries={
-            (CACHED_ID, "gpt-5-mini"): DetailedSummary(summary="cached summary", model="gpt-5-mini", generated_at=None)
+            (CACHED_ID, "gpt-5-mini", 1): DetailedSummary(
+                summary="cached summary", model="gpt-5-mini", generated_at=None
+            )
         },
     )
 

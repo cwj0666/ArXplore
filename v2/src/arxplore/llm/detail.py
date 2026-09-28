@@ -12,6 +12,7 @@ from arxplore.llm.prompts.overview import OVERVIEW_PROMPT
 from arxplore.llm.tracing import DEFAULT_TRACE_RUNTIME, Tracer, TraceStage
 from arxplore.text import collapse_whitespace
 
+ANALYSIS_PROMPT_VERSION = 1
 DETAIL_TEMPERATURE = 0.2
 METADATA_ABSTRACT_MAX_CHARS = 1600
 SECTION_TEXT_MAX_CHARS = 2200

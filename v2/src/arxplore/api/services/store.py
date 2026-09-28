@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol
 
 from arxplore.db.pool import AnyPool
-from arxplore.db.repositories import ai_cache, fulltexts, papers
+from arxplore.db.repositories import fulltexts, generation_cache, papers
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import AiOverview, DetailedSummary, Paper, PaperFulltext
 
@@ -16,13 +16,17 @@ class PaperStore(Protocol):
 
     async def list_chunks(self, arxiv_id: str, *, limit: int) -> Sequence[StoredChunk]: ...
 
-    async def get_overview(self, arxiv_id: str) -> AiOverview | None: ...
+    async def get_overview(self, arxiv_id: str, *, prompt_version: int) -> AiOverview | None: ...
 
-    async def save_overview(self, arxiv_id: str, *, overview: str, key_findings: list[Any], model: str) -> None: ...
+    async def save_overview(
+        self, arxiv_id: str, *, overview: str, key_findings: list[Any], model: str, prompt_version: int
+    ) -> None: ...
 
-    async def get_detailed_summary(self, arxiv_id: str, model: str) -> DetailedSummary | None: ...
+    async def get_detailed_summary(
+        self, arxiv_id: str, model: str, *, prompt_version: int
+    ) -> DetailedSummary | None: ...
 
-    async def save_detailed_summary(self, arxiv_id: str, *, summary: str, model: str) -> None: ...
+    async def save_detailed_summary(self, arxiv_id: str, *, summary: str, model: str, prompt_version: int) -> None: ...
 
 
 class PostgresPaperStore:
@@ -41,14 +45,25 @@ class PostgresPaperStore:
     async def list_chunks(self, arxiv_id: str, *, limit: int) -> Sequence[StoredChunk]:
         return await fulltexts.list_chunks(self.pool, arxiv_id, limit=limit)
 
-    async def get_overview(self, arxiv_id: str) -> AiOverview | None:
-        return await ai_cache.get_overview(self.pool, arxiv_id)
+    async def get_overview(self, arxiv_id: str, *, prompt_version: int) -> AiOverview | None:
+        return await generation_cache.get_overview(self.pool, arxiv_id, prompt_version=prompt_version)
 
-    async def save_overview(self, arxiv_id: str, *, overview: str, key_findings: list[Any], model: str) -> None:
-        await ai_cache.save_overview(self.pool, arxiv_id, overview=overview, key_findings=key_findings, model=model)
+    async def save_overview(
+        self, arxiv_id: str, *, overview: str, key_findings: list[Any], model: str, prompt_version: int
+    ) -> None:
+        await generation_cache.save_overview(
+            self.pool,
+            arxiv_id,
+            overview=overview,
+            key_findings=key_findings,
+            model=model,
+            prompt_version=prompt_version,
+        )
 
-    async def get_detailed_summary(self, arxiv_id: str, model: str) -> DetailedSummary | None:
-        return await ai_cache.get_detailed_summary(self.pool, arxiv_id, model)
+    async def get_detailed_summary(self, arxiv_id: str, model: str, *, prompt_version: int) -> DetailedSummary | None:
+        return await generation_cache.get_detailed_summary(self.pool, arxiv_id, model, prompt_version=prompt_version)
 
-    async def save_detailed_summary(self, arxiv_id: str, *, summary: str, model: str) -> None:
-        await ai_cache.save_detailed_summary(self.pool, arxiv_id, summary=summary, model=model)
+    async def save_detailed_summary(self, arxiv_id: str, *, summary: str, model: str, prompt_version: int) -> None:
+        await generation_cache.save_detailed_summary(
+            self.pool, arxiv_id, summary=summary, model=model, prompt_version=prompt_version
+        )

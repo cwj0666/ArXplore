@@ -14,6 +14,7 @@ from arxplore.llm.prompts.summary import SUMMARY_BUCKET_PROMPT, SUMMARY_PROMPT, 
 from arxplore.llm.tracing import DEFAULT_TRACE_RUNTIME, Tracer
 from arxplore.text import collapse_whitespace
 
+SUMMARY_PROMPT_VERSION = 1
 FALLBACK_TEXT_MAX_CHARS = 12000
 SECTION_TEXT_MAX_CHARS = 3200
 MERGED_SUMMARY_MAX_CHARS = 22000

@@ -5,9 +5,9 @@ from arxplore.api.errors import UNSUPPORTED_MODEL_MESSAGE, AiUnavailableError, I
 from arxplore.api.services.detail import find_paper, published_at_text
 from arxplore.api.services.store import PaperStore
 from arxplore.domain.papers import Paper, PaperFulltext
-from arxplore.llm.detail import PaperDetailInput, PaperDetailWriter
+from arxplore.llm.detail import ANALYSIS_PROMPT_VERSION, PaperDetailInput, PaperDetailWriter
 from arxplore.llm.models import ChatModelFactory
-from arxplore.llm.summary_graph import SummaryWriter
+from arxplore.llm.summary_graph import SUMMARY_PROMPT_VERSION, SummaryWriter
 
 OVERVIEW_MODEL = "gpt-5-mini"
 DEFAULT_SUMMARY_MODEL = "gpt-5-mini"
@@ -77,7 +77,7 @@ class GenerationService:
 
     async def analysis(self, arxiv_id: str) -> AnalysisPayload:
         paper = await find_paper(self.store, arxiv_id)
-        cached = await self.store.get_overview(arxiv_id)
+        cached = await self.store.get_overview(arxiv_id, prompt_version=ANALYSIS_PROMPT_VERSION)
         if cached is not None and cached.overview:
             return AnalysisPayload(overview=cached.overview, key_findings=cached.key_findings or [], cached=True)
         self.require_api_key()
@@ -85,14 +85,20 @@ class GenerationService:
         analysis = await self.detail_writer.analyze(detail_input(paper, fulltext), model=OVERVIEW_MODEL)
         if analysis.overview:
             await self.store.save_overview(
-                arxiv_id, overview=analysis.overview, key_findings=analysis.key_findings, model=OVERVIEW_MODEL
+                arxiv_id,
+                overview=analysis.overview,
+                key_findings=analysis.key_findings,
+                model=OVERVIEW_MODEL,
+                prompt_version=ANALYSIS_PROMPT_VERSION,
             )
         return AnalysisPayload(overview=analysis.overview, key_findings=analysis.key_findings, cached=False)
 
     async def summary(self, arxiv_id: str, *, model: str) -> SummaryPayload:
         normalized_model = validate_summary_model(model)
         paper = await find_paper(self.store, arxiv_id)
-        cached = await self.store.get_detailed_summary(arxiv_id, normalized_model)
+        cached = await self.store.get_detailed_summary(
+            arxiv_id, normalized_model, prompt_version=SUMMARY_PROMPT_VERSION
+        )
         if cached is not None and cached.summary:
             return SummaryPayload(summary=cached.summary, cached=True, model=normalized_model)
         self.require_api_key()
@@ -105,5 +111,7 @@ class GenerationService:
             model=normalized_model,
         )
         if summary:
-            await self.store.save_detailed_summary(arxiv_id, summary=summary, model=normalized_model)
+            await self.store.save_detailed_summary(
+                arxiv_id, summary=summary, model=normalized_model, prompt_version=SUMMARY_PROMPT_VERSION
+            )
         return SummaryPayload(summary=summary, cached=False, model=normalized_model)
