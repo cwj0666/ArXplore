@@ -3,7 +3,12 @@ from dataclasses import fields
 
 import pytest
 
-from arxplore.retrieval.lexical import build_lexical_candidates_query, fetch_lexical_candidates
+from arxplore.parsing.roles import is_references_section_title
+from arxplore.retrieval.lexical import (
+    REFERENCES_SECTION_TITLE_SQL_REGEX,
+    build_lexical_candidates_query,
+    fetch_lexical_candidates,
+)
 from arxplore.retrieval.service import Retriever
 
 pytestmark = pytest.mark.integration
@@ -215,3 +220,63 @@ async def test_lexical_candidate_query_can_use_gin_indexes(seeder) -> None:
 
     assert "idx_paper_chunks_chunk_vector" in plan
     assert "idx_papers_title_abstract_vector" in plan
+
+
+REFERENCE_TITLE_CASES = [
+    "References",
+    "7 References",
+    "IV. REFERENCES",
+    "iii) references",
+    "iv references",
+    "Civil References",
+    "cl Bibliography",
+    "3.2 Reference Model",
+    "Works  Cited",
+    "Method",
+]
+
+
+async def test_structural_penalty_follows_the_chunk_role_rule(seeder, retrieval_pool) -> None:
+    await seeder.papers(
+        [
+            {
+                "arxiv_id": "2605.00001",
+                "title": "Quantization Notes",
+                "abstract": "A study of quantization.",
+                "chunks": [
+                    (title, f"Quantization detail number {index}.", "body")
+                    for index, title in enumerate(REFERENCE_TITLE_CASES)
+                ],
+            }
+        ]
+    )
+
+    async with retrieval_pool.connection() as connection:
+        hits = await fetch_lexical_candidates(connection, "quantization", limit=20, arxiv_id="2605.00001")
+
+    penalties = {hit.section_title: hit.lexical.structural_adjustment for hit in hits if hit.lexical is not None}
+    assert set(penalties) == set(REFERENCE_TITLE_CASES)
+    assert penalties == {title: -0.08 if is_references_section_title(title) else 0.0 for title in REFERENCE_TITLE_CASES}
+    assert penalties["iv references"] == 0.0
+    assert penalties["Civil References"] == 0.0
+    assert penalties["iii) references"] == -0.08
+
+
+async def test_postgres_evaluates_the_title_rule_like_python(seeder) -> None:
+    titles = [
+        *REFERENCE_TITLE_CASES,
+        "",
+        "  References:  ",
+        "1.References",
+        "A. References",
+        "C References",
+        "7\nReferences",
+    ]
+
+    rows = await seeder.execute(
+        "SELECT title, title ~ %s AS matched FROM unnest(%s::text[]) WITH ORDINALITY AS t(title, position) "
+        "ORDER BY position",
+        (REFERENCES_SECTION_TITLE_SQL_REGEX, titles),
+    )
+
+    assert [row["matched"] for row in rows] == [is_references_section_title(title) for title in titles]
