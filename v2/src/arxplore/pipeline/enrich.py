@@ -5,11 +5,11 @@ import httpx
 
 from arxplore.db.pool import AnyPool
 from arxplore.db.repositories import papers
+from arxplore.db.repositories.papers import ENRICHED_PAPER_SOURCE
 from arxplore.domain.papers import EnrichmentCandidate, PaperUpsert
 from arxplore.sources.arxiv import RATE_LIMITED_STATUS, ArxivClient, ArxivPaper
 from arxplore.sources.arxiv_metadata import fetch_arxiv_metadata
 
-ENRICHED_PAPER_SOURCE = "hf_daily_papers+arxiv"
 DEFAULT_ENRICH_MAX_PAPERS = 30
 SAMPLE_LIMIT = 5
 

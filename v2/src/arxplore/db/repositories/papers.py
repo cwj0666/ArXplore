@@ -9,7 +9,12 @@ from arxplore.text import strip_surrogates, strip_surrogates_deep
 
 EMPTY_ARXIV_ID_MESSAGE = "paper['arxiv_id']는 비어 있을 수 없습니다."
 
-SAVE_PAPER_SQL = """
+HF_RAW_PAPER_SOURCE = "hf_daily_papers_raw"
+ENRICHED_PAPER_SOURCE = "hf_daily_papers+arxiv"
+
+_HF_ROW_OVER_ENRICHED_ROW = "(papers.source = %(enriched_source)s AND EXCLUDED.source = %(hf_raw_source)s)"
+
+SAVE_PAPER_SQL = f"""
 INSERT INTO papers (
     arxiv_id, title, authors, abstract, primary_category,
     categories, pdf_url, published_at, updated_at,
@@ -21,22 +26,28 @@ INSERT INTO papers (
 )
 ON CONFLICT (arxiv_id)
 DO UPDATE SET
-    title = EXCLUDED.title,
-    authors = EXCLUDED.authors,
-    abstract = EXCLUDED.abstract,
+    title = CASE WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.title ELSE EXCLUDED.title END,
+    authors = CASE WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.authors ELSE EXCLUDED.authors END,
+    abstract = CASE WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.abstract ELSE EXCLUDED.abstract END,
     primary_category = COALESCE(EXCLUDED.primary_category, papers.primary_category),
     categories = CASE
         WHEN EXCLUDED.categories = '[]'::jsonb THEN papers.categories
         ELSE EXCLUDED.categories
     END,
-    pdf_url = EXCLUDED.pdf_url,
-    published_at = COALESCE(EXCLUDED.published_at, papers.published_at),
-    updated_at = COALESCE(EXCLUDED.updated_at, papers.updated_at),
+    pdf_url = CASE WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.pdf_url ELSE EXCLUDED.pdf_url END,
+    published_at = CASE
+        WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.published_at
+        ELSE COALESCE(EXCLUDED.published_at, papers.published_at)
+    END,
+    updated_at = CASE
+        WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.updated_at
+        ELSE COALESCE(EXCLUDED.updated_at, papers.updated_at)
+    END,
     upvotes = COALESCE(%(upvotes)s::integer, papers.upvotes),
     github_url = COALESCE(EXCLUDED.github_url, papers.github_url),
     github_stars = COALESCE(EXCLUDED.github_stars, papers.github_stars),
     citation_count = COALESCE(EXCLUDED.citation_count, papers.citation_count),
-    source = EXCLUDED.source,
+    source = CASE WHEN {_HF_ROW_OVER_ENRICHED_ROW} THEN papers.source ELSE EXCLUDED.source END,
     updated_at_utc = NOW()
 """
 
@@ -88,6 +99,8 @@ def _save_params(paper: PaperUpsert, arxiv_id: str) -> dict[str, Any]:
         "github_stars": paper.github_stars,
         "citation_count": paper.citation_count,
         "source": _clean_optional(paper.source),
+        "enriched_source": ENRICHED_PAPER_SOURCE,
+        "hf_raw_source": HF_RAW_PAPER_SOURCE,
     }
 
 

@@ -242,3 +242,21 @@ async def test_date_without_raw_payload_is_an_empty_success(pool, kit) -> None:
     result = await prepare_date(DAY, _context(pool, kit))
     assert (result.status, result.success_count, result.failure_count) == ("success", 0, 0)
     assert result.job_result()["selected_candidate_count"] == 0
+
+
+async def test_a_parse_failure_leaves_no_paper_row(pool, probe, kit) -> None:
+    parser = kit.FakeParser(failing_ids={ARXIV_ID})
+
+    with pytest.raises(RuntimeError, match="parser exploded"):
+        await prepare_paper(_candidate(kit), _context(pool, kit, parser))
+
+    assert await probe.scalar("SELECT count(*) FROM papers") == 0
+
+
+async def test_an_hf_row_still_replaces_hf_metadata(pool, probe, kit) -> None:
+    await prepare_paper(_candidate(kit, title="First title"), _context(pool, kit))
+
+    await prepare_paper(_candidate(kit, title="Second title", upvotes=9), _context(pool, kit))
+
+    row = await probe.row("SELECT title, upvotes, source FROM papers WHERE arxiv_id = %s", (ARXIV_ID,))
+    assert row == {"title": "Second title", "upvotes": 9, "source": "hf_daily_papers_raw"}

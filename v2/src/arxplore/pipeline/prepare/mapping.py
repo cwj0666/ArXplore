@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from arxplore.db.repositories.papers import HF_RAW_PAPER_SOURCE
 from arxplore.domain.papers import PaperUpsert
 from arxplore.sources.arxiv import normalize_arxiv_id
 
-HF_RAW_PAPER_SOURCE = "hf_daily_papers_raw"
 ARXIV_PDF_URL_TEMPLATE = "https://arxiv.org/pdf/{arxiv_id}.pdf"
 CANDIDATE_ID_KEYS = ("id", "arxivId", "arxiv_id")
 GITHUB_URL_KEYS = ("url", "repoUrl", "repository")

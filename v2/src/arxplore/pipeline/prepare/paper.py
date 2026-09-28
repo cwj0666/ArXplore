@@ -133,8 +133,7 @@ async def prepare_paper(candidate: PrepareCandidate, context: PrepareContext, *,
     if not arxiv_id:
         raise ValueError(EMPTY_CANDIDATE_MESSAGE)
     db = context.db
-
-    await papers.save_paper(db, candidate.to_upsert())
+    paper = candidate.to_upsert()
 
     pdf_content = await context.pdfs.fetch(candidate.pdf_url)
     parsed = await context.parser.parse(pdf_content, fallback_text=candidate.abstract)
@@ -145,6 +144,7 @@ async def prepare_paper(candidate: PrepareCandidate, context: PrepareContext, *,
     metrics: JsonObject = {**parsed.quality_metrics, **summarize_chunks(chunks)}
     content_hash = compute_content_hash(parsed.text, parsed.sections)
 
+    await papers.save_paper(db, paper)
     existing = await fulltexts.get_fulltext_state(db, arxiv_id)
     existing_chunk_count = existing.chunk_count if existing else 0
     decision = decide_fulltext_save(existing, source=parsed.source, content_hash=content_hash, force=force)

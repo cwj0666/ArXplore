@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -10,12 +10,15 @@ import respx
 from arxplore.db.repositories import papers
 from arxplore.domain.papers import PaperUpsert
 from arxplore.pipeline.enrich import enrich_papers_metadata
+from arxplore.pipeline.prepare.mapping import select_candidates
+from arxplore.pipeline.prepare.paper import PrepareContext, prepare_paper
 from arxplore.sources import arxiv as arxiv_module
 from arxplore.sources.arxiv import ArxivClient
 
 pytestmark = pytest.mark.integration
 
 ARXIV_URL = "https://export.arxiv.org/api/query"
+DAY = date(2026, 9, 15)
 
 
 def _entry(arxiv_id: str) -> str:
@@ -166,3 +169,41 @@ async def test_other_http_errors_are_raised(pool) -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         await enrich_papers_metadata(pool, _client(), batch_size=25)
+
+
+ENRICHED_COLUMNS = """
+    SELECT title, authors, abstract, primary_category, categories, pdf_url, published_at, updated_at, source
+    FROM papers WHERE arxiv_id = %s
+"""
+
+
+@respx.mock
+async def test_prepare_does_not_overwrite_what_enrich_filled(pool, probe, kit) -> None:
+    candidate = select_candidates(DAY, [kit.hf_item("2609.00001", upvotes=5)]).candidates[0]
+    context = PrepareContext(db=pool, pdfs=kit.FakePdfSource(), parser=kit.FakeParser())
+    await prepare_paper(candidate, context)
+    respx.get(ARXIV_URL).mock(side_effect=lambda request: _feed(request, {"2609.00001"}))
+    await enrich_papers_metadata(pool, _client(), batch_size=25)
+    enriched = await probe.row(ENRICHED_COLUMNS, ("2609.00001",))
+
+    newer = select_candidates(DAY, [kit.hf_item("2609.00001", title="HF retitled", upvotes=21)]).candidates[0]
+    await prepare_paper(newer, context, force=True)
+
+    assert await probe.row(ENRICHED_COLUMNS, ("2609.00001",)) == enriched
+    assert enriched is not None and enriched["source"] == "hf_daily_papers+arxiv"
+    assert await probe.scalar("SELECT upvotes FROM papers WHERE arxiv_id = '2609.00001'") == 21
+    assert await papers.list_papers_missing_arxiv_metadata(pool, limit=10) == []
+
+
+@respx.mock
+async def test_a_second_enrich_refreshes_an_enriched_row(pool, probe) -> None:
+    await _hf_paper(pool, "2609.00001", day=10, primary_category=None)
+    respx.get(ARXIV_URL).mock(side_effect=lambda request: _feed(request, {"2609.00001"}))
+    await enrich_papers_metadata(pool, _client(), batch_size=25)
+    await probe.execute("UPDATE papers SET categories = '[]'::jsonb, title = 'stale' WHERE arxiv_id = '2609.00001'")
+
+    await enrich_papers_metadata(pool, _client(), batch_size=25)
+
+    row = await probe.row(ENRICHED_COLUMNS, ("2609.00001",))
+    assert row is not None
+    assert (row["title"], row["categories"]) == ("arXiv title 2609.00001", ["cs.LG", "cs.AI"])
