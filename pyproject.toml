@@ -4,6 +4,9 @@ pythonpath = [".", "backend"]
 DJANGO_SETTINGS_MODULE = "arxplore_web.test_settings"
 django_find_project = false
 addopts = "-ra"
+markers = [
+    "golden: compares an implementation with captured golden data under tests/golden",
+]
 
 [tool.ruff]
 line-length = 120
