@@ -1,5 +1,7 @@
 import importlib
 import os
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict
 
 IMPLEMENTATION_ENV = "GOLDEN_IMPL"
@@ -33,6 +35,25 @@ class ParserAdapter(Protocol):
     def summarize_chunks(self, chunks: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
+@dataclass(frozen=True)
+class HttpResult:
+    status: int
+    headers: list[tuple[str, str]]
+    body: bytes
+
+
+class HttpAdapter(Protocol):
+    def describe(self) -> dict[str, str]: ...
+
+    def request(self, method: str, path: str, *, headers: list[tuple[str, str]], body: bytes | None) -> HttpResult: ...
+
+    def reset_state(self) -> None: ...
+
+    def openai_key(self, configured: bool) -> AbstractContextManager[None]: ...
+
+    def close(self) -> None: ...
+
+
 class RetrievalAdapter(Protocol):
     def describe(self) -> dict[str, str]: ...
 
@@ -53,7 +74,7 @@ def implementation_name() -> str:
     return os.environ.get(IMPLEMENTATION_ENV, "").strip() or DEFAULT_IMPLEMENTATION
 
 
-def load_adapter(kind: str, implementation: str | None = None) -> Any:
+def load_adapter(kind: str, implementation: str | None = None, **options: Any) -> Any:
     name = implementation or implementation_name()
     module_name = f"{__name__}.{name}"
     try:
@@ -65,7 +86,7 @@ def load_adapter(kind: str, implementation: str | None = None) -> Any:
     factory = getattr(module, f"{kind}_adapter", None)
     if factory is None:
         raise AdapterUnavailable(f"golden adapter {name!r} does not provide {kind!r}")
-    return factory()
+    return factory(**options)
 
 
 def load_parser_adapter(implementation: str | None = None) -> ParserAdapter:
@@ -74,3 +95,7 @@ def load_parser_adapter(implementation: str | None = None) -> ParserAdapter:
 
 def load_retrieval_adapter(implementation: str | None = None) -> RetrievalAdapter:
     return load_adapter("retrieval", implementation)
+
+
+def load_http_adapter(implementation: str | None = None, **options: Any) -> HttpAdapter:
+    return load_adapter("http", implementation, **options)

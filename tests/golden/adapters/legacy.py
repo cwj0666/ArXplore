@@ -3,6 +3,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib.metadata import version
+from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader
@@ -130,3 +131,81 @@ class LegacyRetrievalAdapter:
 
 def retrieval_adapter() -> LegacyRetrievalAdapter:
     return LegacyRetrievalAdapter()
+
+
+class LegacyHttpAdapter:
+    def __init__(self, *, frontend_dist: Path) -> None:
+        import django
+        import httpx
+        from django.conf import settings
+        from django.core.wsgi import get_wsgi_application
+
+        if os.environ.get("DJANGO_SETTINGS_MODULE") != "arxplore_web.settings":
+            raise RuntimeError("the HTTP golden runs the production settings module arxplore_web.settings")
+        application = get_wsgi_application()
+        settings.FRONTEND_DIST_DIR = frontend_dist
+        self._django_version = django.get_version()
+        self._client = httpx.Client(
+            transport=httpx.WSGITransport(app=application, remote_addr="127.0.0.1"), base_url="http://localhost"
+        )
+        self._check_environment()
+
+    @staticmethod
+    def _check_environment() -> None:
+        from src.shared.settings import get_settings
+
+        settings = get_settings()
+        problems = []
+        if os.environ.get("LAYOUT_PARSER_BASE_URL") != "" or settings.layout_parser_base_url:
+            problems.append("LAYOUT_PARSER_BASE_URL was refilled")
+        if settings.openai_api_key != os.environ.get("OPENAI_API_KEY") or not settings.openai_api_key:
+            problems.append("OPENAI_API_KEY in settings is not the harness key")
+        if problems:
+            raise RuntimeError("; ".join(problems))
+
+    def describe(self) -> dict[str, str]:
+        return {"implementation": "legacy", "framework": f"django {self._django_version}"}
+
+    def request(self, method: str, path: str, *, headers: list[tuple[str, str]], body: bytes | None) -> Any:
+        from tests.golden.adapters import HttpResult
+
+        response = self._client.request(method, path, headers=headers, content=body)
+        self._client.cookies.clear()
+        return HttpResult(
+            response.status_code,
+            [(name.lower(), value) for name, value in response.headers.multi_items()],
+            response.content,
+        )
+
+    def reset_state(self) -> None:
+        from django.core.cache import cache
+
+        cache.clear()
+
+    @contextmanager
+    def openai_key(self, configured: bool) -> Iterator[None]:
+        if configured:
+            yield
+            return
+        from src.shared.settings import get_settings
+
+        previous = os.environ.get("OPENAI_API_KEY", "")
+        os.environ["OPENAI_API_KEY"] = ""
+        get_settings.cache_clear()
+        try:
+            if get_settings().openai_api_key:
+                raise RuntimeError("the OpenAI key came back from a .env file; run the HTTP golden outside the repo")
+            yield
+        finally:
+            os.environ["OPENAI_API_KEY"] = previous
+            get_settings.cache_clear()
+
+    def close(self) -> None:
+        from src.integrations.db import close_all_pools
+
+        self._client.close()
+        close_all_pools()
+
+
+def http_adapter(*, frontend_dist: Path) -> LegacyHttpAdapter:
+    return LegacyHttpAdapter(frontend_dist=frontend_dist)
