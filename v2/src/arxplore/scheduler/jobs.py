@@ -12,7 +12,7 @@ from arxplore.db.pool import AnyPool, create_pool_from_settings, open_pool
 from arxplore.db.repositories.pipeline_state import DEFAULT_STATE_NAME
 from arxplore.pipeline.backfill import DEFAULT_BACKFILL_BATCH_DAYS, backfill_daily_papers
 from arxplore.pipeline.collect import DailyPapersSource, collect_daily_papers
-from arxplore.pipeline.dates import Today, container_today
+from arxplore.pipeline.dates import Today, zoned_today
 from arxplore.pipeline.enrich import DEFAULT_ENRICH_MAX_PAPERS, enrich_papers_metadata
 from arxplore.pipeline.langsmith_cleanup import DEFAULT_RETENTION_DAYS, CleanupOptions, cleanup_langsmith_runs
 from arxplore.sources.arxiv import ArxivClient
@@ -88,7 +88,7 @@ class JobResources:
     pool: AnyPool
     hf: DailyPapersSource
     arxiv: ArxivClient
-    today: Today = container_today
+    today: Today
     cleanup: CleanupRunner = field(default=cleanup_langsmith_runs)
 
 
@@ -215,4 +215,5 @@ async def open_job_resources(settings: AppSettings, *, role: str) -> AsyncIterat
             pool=pool,
             hf=HfDailyPapersClient.from_settings(settings, http=http),
             arxiv=ArxivClient.from_settings(settings, http=http),
+            today=zoned_today(settings.scheduler_timezone),
         )

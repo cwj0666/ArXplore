@@ -1,15 +1,14 @@
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 type Today = Callable[[], date]
 
 
-def container_today() -> date:
-    return date.today()
+def today_in(timezone: ZoneInfo, *, now: datetime | None = None) -> date:
+    return (now or datetime.now(timezone)).astimezone(timezone).date()
 
 
-def parse_optional_date(value: str | date | None) -> date | None:
-    if value is None or isinstance(value, date):
-        return value
-    normalized = value.strip()
-    return date.fromisoformat(normalized) if normalized else None
+def zoned_today(timezone_name: str) -> Today:
+    timezone = ZoneInfo(timezone_name)
+    return lambda: today_in(timezone)

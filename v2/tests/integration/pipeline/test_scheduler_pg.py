@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from arxplore.config import AppSettings
 from arxplore.db.repositories import scheduler_runs
@@ -22,6 +23,7 @@ from arxplore.scheduler.jobs import (
     MaintenanceParams,
     RetryPolicy,
     job_definition,
+    open_job_resources,
 )
 from arxplore.scheduler.runner import Scheduler, SchedulerLockedError, run_manual, run_scheduled
 from arxplore.sources.arxiv import ArxivClient
@@ -393,3 +395,20 @@ async def test_scheduled_collect_uses_the_configured_retry(pool, probe, pipeline
 
     assert calls["count"] == 2
     assert clock.now == START + timedelta(seconds=120)
+
+
+@pytest.mark.parametrize("zone", ["Asia/Seoul", "UTC"])
+async def test_job_resources_count_days_in_the_scheduler_timezone(pipeline_database, zone) -> None:
+    params = conninfo_to_dict(pipeline_database)
+    settings = AppSettings.model_validate(
+        {
+            "POSTGRES_HOST": f"{params.get('host', 'localhost')}:{params.get('port', 5432)}",
+            "APP_POSTGRES_DB": str(params["dbname"]),
+            "POSTGRES_USER": str(params.get("user", "")),
+            "POSTGRES_PASSWORD": "unused-by-trust-auth",
+            "SCHEDULER_TIMEZONE": zone,
+        }
+    )
+
+    async with open_job_resources(settings, role="test-scheduler") as resources:
+        assert resources.today() == datetime.now(ZoneInfo(zone)).date()
