@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from typing import Any
 
@@ -240,3 +241,75 @@ def test_the_scheduler_retries_collect_three_times_ten_minutes_apart_by_default(
         {"collect": RetryPolicy(retries=1, delay_seconds=30.0)},
     ]
     assert RetryPolicy(retries=3, delay_seconds=600.0) == COLLECT_RETRY
+
+
+class _Result:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+
+    def as_dict(self) -> dict[str, Any]:
+        return self.payload
+
+
+@pytest.fixture
+def corpus_calls(monkeypatch: pytest.MonkeyPatch, clean_env: Any) -> list[tuple[str, dict[str, Any]]]:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def run_with_fake_pool(operation: Any) -> dict[str, Any]:
+        return asyncio.run(operation("pool"))
+
+    async def fake_rechunk(pool: Any, **kwargs: Any) -> _Result:
+        calls.append(("rechunk", kwargs))
+        return _Result({"stage": "rechunk"})
+
+    async def fake_reparse(pool: Any, **kwargs: Any) -> _Result:
+        calls.append(("reparse", kwargs))
+        return _Result({"stage": "reparse"})
+
+    monkeypatch.setattr(commands, "_run_with_pool", run_with_fake_pool)
+    monkeypatch.setattr(commands, "rechunk_corpus", fake_rechunk)
+    monkeypatch.setattr(commands, "reparse_dates", fake_reparse)
+    return calls
+
+
+def test_rechunk_and_reparse_are_dry_runs_by_default(corpus_calls: list[tuple[str, dict[str, Any]]]) -> None:
+    assert runner.invoke(app, ["run", "rechunk"]).exit_code == 0
+    assert runner.invoke(app, ["run", "reparse"]).exit_code == 0
+    assert corpus_calls == [
+        ("rechunk", {"arxiv_ids": None, "apply": False}),
+        ("reparse", {"mode": "auto", "since": None, "until": None, "force": True, "apply": False}),
+    ]
+
+
+def test_rechunk_and_reparse_options(corpus_calls: list[tuple[str, dict[str, Any]]]) -> None:
+    result = runner.invoke(app, ["run", "rechunk", "--arxiv-id", "2609.00001", "--arxiv-id", "2609.00002", "--apply"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "reparse",
+            "--since",
+            "2026-09-11",
+            "--until",
+            "2026-09-24",
+            "--mode",
+            "backfill",
+            "--no-force",
+            "--apply",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert corpus_calls == [
+        ("rechunk", {"arxiv_ids": ["2609.00001", "2609.00002"], "apply": True}),
+        (
+            "reparse",
+            {
+                "mode": "backfill",
+                "since": date(2026, 9, 11),
+                "until": date(2026, 9, 24),
+                "force": False,
+                "apply": True,
+            },
+        ),
+    ]

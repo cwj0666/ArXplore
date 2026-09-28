@@ -1,13 +1,17 @@
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import date
 from typing import Annotated, Any
 
 import typer
 
 from arxplore.config import get_settings
-from arxplore.db.migrate import MigrationError
+from arxplore.db.migrate import MigrationError, verify_schema
+from arxplore.db.pool import Pool, create_pool_from_settings, open_pool
+from arxplore.domain.jobs import DEFAULT_JOB_MODE
+from arxplore.pipeline.corpus import rechunk_corpus, reparse_dates
 from arxplore.pipeline.embed import (
     EMBED_BACKLOG_BUDGET,
     EMBED_CHUNKS_PER_ROUND,
@@ -32,6 +36,7 @@ from arxplore.scheduler.runner import RunOutcome
 from arxplore.scheduler.service import run_job_manually
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+CORPUS_ROLE = "corpus"
 
 
 def configure_logging() -> None:
@@ -83,6 +88,23 @@ def _run_manual_job(job: str, params: Any, *, retry: RetryPolicy = NO_RETRY) -> 
     _echo_json(_outcome_payload(job, outcome))
     if outcome.status.value != "success":
         raise typer.Exit(code=1)
+
+
+def _run_with_pool(operation: Callable[[Pool], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+    configure_logging()
+    settings = get_settings()
+
+    async def session() -> dict[str, Any]:
+        pool = create_pool_from_settings(settings, role=CORPUS_ROLE)
+        async with open_pool(pool):
+            async with pool.connection() as connection:
+                await verify_schema(connection, embedding_dimensions=settings.openai_embedding_dimensions)
+            return await operation(pool)
+
+    try:
+        return asyncio.run(session())
+    except (MigrationError, ValueError) as exc:
+        raise _fail(str(exc)) from exc
 
 
 def register_worker(app: typer.Typer) -> None:
@@ -211,6 +233,45 @@ def register_run(app: typer.Typer) -> None:
             dry_run=dry_run,
         )
         _run_manual_job(LANGSMITH_CLEANUP_JOB, params)
+
+    @run_app.command("rechunk", help="Rebuild chunks from stored sections with the current chunker.")
+    def rechunk_command(
+        arxiv_ids: Annotated[
+            list[str] | None, typer.Option("--arxiv-id", help="Only this paper; repeat for more. Default: all.")
+        ] = None,
+        apply: Annotated[
+            bool, typer.Option("--apply", help="Replace changed chunks. Without it nothing is written.")
+        ] = False,
+    ) -> None:
+        async def operation(pool: Pool) -> dict[str, Any]:
+            return (await rechunk_corpus(pool, arxiv_ids=arxiv_ids, apply=apply)).as_dict()
+
+        _echo_json(_run_with_pool(operation))
+
+    @run_app.command("reparse", help="Queue collected dates for another parse, forced by default.")
+    def reparse_command(
+        since: Annotated[str | None, typer.Option("--since", help="First date, YYYY-MM-DD.")] = None,
+        until: Annotated[str | None, typer.Option("--until", help="Last date, YYYY-MM-DD.")] = None,
+        mode: Annotated[str, typer.Option("--mode", help="prepare_jobs mode to queue.")] = DEFAULT_JOB_MODE,
+        force: Annotated[
+            bool, typer.Option("--force/--no-force", help="Replace fulltexts even when the stored one is final.")
+        ] = True,
+        apply: Annotated[bool, typer.Option("--apply", help="Queue the jobs. Without it nothing is written.")] = False,
+    ) -> None:
+        since_date, until_date = parse_date_option(since), parse_date_option(until)
+
+        async def operation(pool: Pool) -> dict[str, Any]:
+            result = await reparse_dates(
+                pool,
+                mode=mode.strip() or DEFAULT_JOB_MODE,
+                since=since_date,
+                until=until_date,
+                force=force,
+                apply=apply,
+            )
+            return result.as_dict()
+
+        _echo_json(_run_with_pool(operation))
 
     app.add_typer(run_app, name="run")
 

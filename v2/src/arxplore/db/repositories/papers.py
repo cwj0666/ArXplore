@@ -96,6 +96,8 @@ WHERE arxiv_id = ANY(%(arxiv_ids)s)
 
 ARXIV_LOOKUP_MAX_EXPONENT = 16
 
+LIST_PAPER_IDS_SQL = "SELECT arxiv_id FROM papers ORDER BY arxiv_id"
+
 GET_PAPER_SQL = """
 SELECT arxiv_id, title, authors, abstract, primary_category, categories, pdf_url,
        published_at, updated_at, upvotes, github_url, github_stars, citation_count
@@ -198,3 +200,10 @@ async def record_arxiv_lookups(
                     "max_exponent": ARXIV_LOOKUP_MAX_EXPONENT,
                 },
             )
+
+
+async def list_paper_ids(db: ConnectionSource) -> list[str]:
+    async with use_connection(db) as connection, connection.cursor(row_factory=dict_row) as cursor:
+        await cursor.execute(LIST_PAPER_IDS_SQL)
+        rows = await cursor.fetchall()
+    return [str(row["arxiv_id"]) for row in rows]
