@@ -19,6 +19,7 @@ dependencies = [
     "pypdf>=6.19",
     "typer>=0.27",
     "uvicorn[standard]>=0.54",
+    "redis>=6",
 ]
 
 [project.scripts]
