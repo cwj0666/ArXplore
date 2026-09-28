@@ -3,9 +3,10 @@ from typing import Any
 import pytest
 
 from tests.golden import g5_http, g5_runner
-from tests.golden.store import diff, format_problems, read_golden
+from tests.golden.store import diff, format_problems, read_golden, resolve_golden
 
-GOLDEN = read_golden(g5_http.GOLDEN_PATH) if g5_http.GOLDEN_PATH.is_file() else {"bundles": {}}
+GOLDEN_FILE = resolve_golden(g5_http.GOLDEN_PATH)
+GOLDEN = read_golden(GOLDEN_FILE) if GOLDEN_FILE.is_file() else {"bundles": {}}
 SCENARIO_IDS = [(bundle, scenario) for bundle in sorted(GOLDEN["bundles"]) for scenario in GOLDEN["bundles"][bundle]]
 FAKE_REQUEST_KEYS = ("llm_requests", "llm_statuses", "embedding_requests", "arxiv_requests", "fake_server_errors")
 

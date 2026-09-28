@@ -6,9 +6,10 @@ import pytest
 from tests.fakes.openai_server import FakeOpenAIServer
 from tests.golden import environment, g1_retrieval
 from tests.golden.adapters import AdapterUnavailable, implementation_name, load_retrieval_adapter
-from tests.golden.store import diff, format_problems, read_golden
+from tests.golden.store import diff, format_problems, read_golden, resolve_golden
 
-GOLDEN = read_golden(g1_retrieval.GOLDEN_PATH) if g1_retrieval.GOLDEN_PATH.is_file() else {}
+GOLDEN_FILE = resolve_golden(g1_retrieval.GOLDEN_PATH)
+GOLDEN = read_golden(GOLDEN_FILE) if GOLDEN_FILE.is_file() else {}
 ENTRY_IDS = g1_retrieval.golden_entry_ids(GOLDEN)
 
 

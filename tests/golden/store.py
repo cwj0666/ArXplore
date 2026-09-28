@@ -50,6 +50,18 @@ def read_golden(path: Path) -> Any:
     return json.loads(gzip.decompress(path.read_bytes()))
 
 
+def variant_path(path: Path, variant: str) -> Path:
+    stem = path.name.removesuffix(".json.gz")
+    return path.with_name(f"{stem}.{variant}.json.gz")
+
+
+def resolve_golden(path: Path, implementation: str | None = None) -> Path:
+    from tests.golden.adapters import implementation_name
+
+    candidate = variant_path(path, implementation or implementation_name())
+    return candidate if candidate.is_file() else path
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(normalize(value), ensure_ascii=False, indent=2, allow_nan=False)

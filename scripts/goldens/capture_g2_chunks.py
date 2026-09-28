@@ -5,7 +5,7 @@ from pathlib import Path
 
 from tests.golden import environment, g2_chunks
 from tests.golden.adapters import load_parser_adapter
-from tests.golden.store import write_golden
+from tests.golden.store import variant_path, write_golden
 
 
 def capture(out: Path) -> int:
@@ -33,8 +33,9 @@ def capture(out: Path) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.goldens.capture_g2_chunks")
     parser.add_argument("--out", type=Path, default=g2_chunks.GOLDEN_PATH)
+    parser.add_argument("--variant", help="write <name>.<variant>.json.gz next to the original golden")
     args = parser.parse_args(argv)
-    return capture(args.out)
+    return capture(variant_path(args.out, args.variant) if args.variant else args.out)
 
 
 if __name__ == "__main__":

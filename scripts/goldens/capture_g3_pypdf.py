@@ -7,7 +7,15 @@ from pathlib import Path
 
 from tests.golden import g3_pypdf
 from tests.golden.adapters import load_parser_adapter
-from tests.golden.store import diff, format_problems, read_json, sha256_bytes, write_golden, write_json
+from tests.golden.store import (
+    diff,
+    format_problems,
+    read_json,
+    sha256_bytes,
+    variant_path,
+    write_golden,
+    write_json,
+)
 
 USER_AGENT = "ArXplore-golden-capture/1.0 (parser regression fixtures; one PDF per request, >=3s apart)"
 REQUEST_INTERVAL_SECONDS = 3.5
@@ -52,7 +60,7 @@ def fetch() -> int:
     return 0
 
 
-def capture(out_dir: Path, implementation: str | None) -> int:
+def capture(out_dir: Path, implementation: str | None, variant: str | None) -> int:
     adapter = load_parser_adapter(implementation)
     for entry in g3_pypdf.load_manifest():
         path = g3_pypdf.pdf_path(entry)
@@ -69,7 +77,8 @@ def capture(out_dir: Path, implementation: str | None) -> int:
         problems = diff(g3_pypdf.parsed_part(record), replay)
         if problems:
             raise SystemExit(format_problems(f"{entry['arxiv_id']} page replay", problems))
-        written = write_golden(g3_pypdf.golden_path(entry, out_dir), record)
+        path = g3_pypdf.golden_path(entry, out_dir)
+        written = write_golden(variant_path(path, variant) if variant else path, record)
         print(
             f"{entry['arxiv_id']}v{entry['version']}: pages={len(record['pages'])}"
             f" sections={len(record['parse']['sections'])} chunks={len(record['chunks'])}"
@@ -85,10 +94,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     capture_parser = commands.add_parser("capture", help="parse the PDFs and write the G3 golden files")
     capture_parser.add_argument("--out", type=Path, default=g3_pypdf.GOLDEN_DIR)
     capture_parser.add_argument("--implementation")
+    capture_parser.add_argument("--variant", help="write <name>.<variant>.json.gz next to the original golden")
     args = parser.parse_args(argv)
     if args.command == "fetch":
         return fetch()
-    return capture(args.out, args.implementation)
+    return capture(args.out, args.implementation, args.variant)
 
 
 if __name__ == "__main__":

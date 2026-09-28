@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from tests.golden import g3_pypdf
-from tests.golden.store import diff, format_problems, read_golden, sha256_bytes
+from tests.golden.store import diff, format_problems, read_golden, resolve_golden, sha256_bytes
 
 ENTRIES = g3_pypdf.load_manifest()
 IDS = [entry["arxiv_id"] for entry in ENTRIES]
@@ -11,7 +11,7 @@ PDF_HINT = f"set {g3_pypdf.PDF_DIR_ENV} or run python -m scripts.goldens.capture
 
 
 def load_golden(entry: dict[str, Any]) -> dict[str, Any]:
-    return read_golden(g3_pypdf.golden_path(entry))
+    return read_golden(resolve_golden(g3_pypdf.golden_path(entry)))
 
 
 def assert_matches(label: str, expected: Any, actual: Any) -> None:

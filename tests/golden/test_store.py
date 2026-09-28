@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from tests.golden.store import canonical_json, diff, normalize, read_golden, write_golden
+from tests.golden.store import canonical_json, diff, normalize, read_golden, resolve_golden, variant_path, write_golden
 
 
 def test_canonical_json_sorts_keys_and_escapes_non_ascii():
@@ -67,3 +67,15 @@ def test_write_golden_keeps_an_existing_file_with_the_same_content(tmp_path):
     assert path.read_bytes() == original
     assert write_golden(path, {"a": 2}) != original
     assert read_golden(path) == {"a": 2}
+
+
+def test_variant_goldens_are_used_only_when_present(tmp_path):
+    original = tmp_path / "g2_chunks.json.gz"
+    variant = variant_path(original, "v2")
+
+    assert variant == tmp_path / "g2_chunks.v2.json.gz"
+    assert variant_path(tmp_path / "2609.12345.json.gz", "v2").name == "2609.12345.v2.json.gz"
+    assert resolve_golden(original, "v2") == original
+    write_golden(variant, {"a": 1})
+    assert resolve_golden(original, "v2") == variant
+    assert resolve_golden(original, "legacy") == original

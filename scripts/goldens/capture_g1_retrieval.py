@@ -11,7 +11,7 @@ from typing import Any
 from tests.fakes.openai_server import EmbeddingVectors, FakeOpenAIServer, embedding_key, write_embedding_table
 from tests.golden import environment, g1_retrieval
 from tests.golden.adapters import load_retrieval_adapter
-from tests.golden.store import read_golden, sha256_bytes, write_golden
+from tests.golden.store import read_golden, sha256_bytes, variant_path, write_golden
 
 REAL_API_BASE = "https://api.openai.com/v1"
 EMBEDDING_MODEL = "text-embedding-3-large"
@@ -158,6 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("embed", help="dry-run every G1 path, then embed the exact inputs once with the real API")
     capture_parser = commands.add_parser("capture", help="run every G1 path against the stored query embeddings")
     capture_parser.add_argument("--out", type=Path, default=g1_retrieval.GOLDEN_PATH)
+    capture_parser.add_argument("--variant", help="write <name>.<variant>.json.gz next to the original golden")
     capture_parser.add_argument("--exact", action="store_true", help="disable index scans (exact vector search)")
     capture_parser.add_argument(
         "--vectors",
@@ -171,7 +172,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "embed":
         return embed()
     if args.command == "capture":
-        return capture(args.out, exact=args.exact, vectors_source=args.vectors)
+        out = variant_path(args.out, args.variant) if args.variant else args.out
+        return capture(out, exact=args.exact, vectors_source=args.vectors)
     return compare_eval_csv(args.golden)
 
 

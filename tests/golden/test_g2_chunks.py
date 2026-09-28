@@ -3,9 +3,10 @@ from typing import Any
 import pytest
 
 from tests.golden import g2_chunks
-from tests.golden.store import diff, format_problems, read_golden
+from tests.golden.store import diff, format_problems, read_golden, resolve_golden
 
-GOLDEN = read_golden(g2_chunks.GOLDEN_PATH) if g2_chunks.GOLDEN_PATH.is_file() else {"papers": {}}
+GOLDEN_FILE = resolve_golden(g2_chunks.GOLDEN_PATH)
+GOLDEN = read_golden(GOLDEN_FILE) if GOLDEN_FILE.is_file() else {"papers": {}}
 PAPER_IDS = sorted(GOLDEN["papers"])
 
 
