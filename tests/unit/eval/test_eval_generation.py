@@ -440,6 +440,46 @@ class TestRagasScorer:
         assert disabled.adapted == []
         assert await disabled.score([]) == []
 
-    def test_missing_ragas_is_reported(self) -> None:
-        with pytest.raises(RagasUnavailableError, match="uv sync --group eval"):
-            ragas_module("arxplore_eval_missing_ragas_module")
+    def test_a_missing_package_is_reported_as_not_installed(self) -> None:
+        with pytest.raises(RagasUnavailableError) as excinfo:
+            ragas_module("arxplore_eval_missing_ragas_module.metrics")
+        message = str(excinfo.value)
+        assert "arxplore_eval_missing_ragas_module가 설치되어 있지 않습니다" in message
+        assert "uv sync --frozen --group eval" in message
+
+    @pytest.mark.parametrize(
+        ("body", "error"),
+        [
+            ("import langchain_community_missing.chat_models.vertexai\n", "ModuleNotFoundError"),
+            ("raise AttributeError('module has no attribute Schema')\n", "AttributeError"),
+        ],
+    )
+    def test_a_failing_import_names_the_real_error(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch, body: str, error: str
+    ) -> None:
+        name = f"arxplore_eval_broken_ragas_{error.lower()}"
+        package = tmp_path / name
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "metrics.py").write_text(body, encoding="utf-8")
+        monkeypatch.syspath_prepend(str(tmp_path))
+
+        with pytest.raises(RagasUnavailableError) as excinfo:
+            ragas_module(f"{name}.metrics")
+
+        message = str(excinfo.value)
+        assert f"설치되어 있지만 {name}.metrics을(를) 불러오지 못했습니다" in message
+        assert f"{error}:" in message
+        assert "설치되어 있지 않습니다" not in message
+        assert isinstance(excinfo.value.__cause__, ImportError | AttributeError)
+
+    def test_require_ragas_checks_every_module_the_scorer_uses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from arxplore_eval import generation
+
+        loaded: list[str] = []
+        monkeypatch.setattr(generation, "ragas_module", loaded.append)
+
+        generation.require_ragas()
+
+        assert loaded == list(generation.RAGAS_MODULES)
+        assert "ragas.metrics.collections" in loaded

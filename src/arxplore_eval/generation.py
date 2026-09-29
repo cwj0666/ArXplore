@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import importlib
+import importlib.util
 import math
 import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -509,18 +510,33 @@ class RagasUnavailableError(RuntimeError):
     pass
 
 
+RAGAS_PACKAGE = "ragas"
+RAGAS_MODULES = (
+    RAGAS_PACKAGE,
+    "ragas.llms",
+    "ragas.embeddings",
+    "ragas.metrics.collections",
+    "ragas.prompt.metrics.base_prompt",
+)
+EVAL_SYNC_COMMAND = "uv sync --frozen --group eval"
+
+
 def ragas_module(name: str) -> ModuleType:
+    package = name.partition(".")[0]
+    if importlib.util.find_spec(package) is None:
+        raise RagasUnavailableError(f"{package}가 설치되어 있지 않습니다. `{EVAL_SYNC_COMMAND}`로 설치하세요.")
     try:
         return importlib.import_module(name)
-    except ModuleNotFoundError as exc:
-        raise RagasUnavailableError("ragas가 설치되어 있지 않습니다. `uv sync --group eval`로 설치하세요.") from exc
-
-
-RAGAS_PACKAGE = "ragas"
+    except Exception as exc:
+        raise RagasUnavailableError(
+            f"{package}는 설치되어 있지만 {name}을(를) 불러오지 못했습니다: {type(exc).__name__}: {exc}. "
+            f"eval 그룹 의존성 버전을 확인하세요(`{EVAL_SYNC_COMMAND}`)."
+        ) from exc
 
 
 def require_ragas() -> None:
-    ragas_module(RAGAS_PACKAGE)
+    for name in RAGAS_MODULES:
+        ragas_module(name)
 
 
 type JudgeProgressFn = Callable[[int, int, MetricRequest], None]
