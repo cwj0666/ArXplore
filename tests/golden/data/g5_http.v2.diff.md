@@ -117,4 +117,4 @@
   - `summary:summary_cached`: 같은 이유로 새로 만든다. `cached`가 false가 되고 `summary`가 가짜 서버 답으로 바뀐다. G4에 gpt-5-mini 호출 13회가 생긴다.
   - `analyze:analyze_without_key`(두 번째 응답), `summary:summary_without_key`(첫 번째 응답): 여전히 200 `cached: true`다. 다만 값은 같은 번들에서 먼저 도는 `analyze_cached`, `summary_cached`가 번들 DB 사본에 버전 2로 저장한 결과다. 두 시나리오의 나머지 응답(404, 503, 400)은 같다.
   - 그 밖의 시나리오는 그대로다. 생성 시나리오(`analyze_generate_then_cached`, `summary_generate_*`)는 캐시가 없던 논문이라 달라지지 않는다.
-- 알려진 문제: `summary_cached`는 LLM 기록 방식이 기본값 `sequence`라서 요청이 도착한 순서대로 비교한다. 이제 이 시나리오도 버킷을 병렬로 도는 요약 그래프를 타므로, 버킷 사이 요청 순서가 실행마다 바뀌어 G4 비교가 가끔 실패한다(이 커밋의 변형으로 5회 중 3회 실패). 하네스(`tests/golden/g5_http.py`)에서 이 시나리오를 `llm_layout="summary_graph"`로 바꾼 뒤 변형을 다시 잡아야 한다.
+- G4 비교 방식: `summary_cached`도 이제 버킷을 병렬로 도는 요약 그래프를 타므로, 버킷 사이 요청 순서가 실행마다 바뀐다. 처음에는 이 시나리오의 LLM 기록 방식이 기본값 `sequence`(도착 순서 그대로)라서 G4 비교가 가끔 실패했다(5회 중 3회). 하네스 4f1473b가 이 시나리오를 `llm_layout="summary_graph"`로 바꿨다. 이제 호출을 섹션 분류별·버킷별로 묶어 비교한다. 버킷 안의 섹션 호출은 차례로 돌아 순서가 고정된다. 이 기록 방식으로 변형을 다시 잡은 뒤 G5를 7회 연속 돌려 매번 121개가 통과했다. 다시 잡은 변형에서 달라진 것은 이 시나리오의 `llm_requests` 형식뿐이다(섹션 호출 limitations 1·other 9, 버킷 호출 limitations 1·other 1, 최종 호출 1).
