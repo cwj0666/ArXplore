@@ -3,10 +3,16 @@
 `python scripts/worklog.py index`가 생성한다. 손으로 고치지 않는다.
 각 항목의 **트러블슈팅** 절을 그대로 옮긴다. 고칠 때는 항목 파일을 고치고 `index`를 다시 실행한다.
 
-항목 23개, 사례 29건.
+항목 29개, 사례 40건.
 
 | phase | 날짜 | 제목 | 영역 |
 |---|---|---|---|
+| 5 | 2026-09-29 | [LLM 계층 create_agent 이식과 FastAPI 전환](phase-5/2026-09-29_07_LLM-계층-create_agent-이식과-FastAPI-전환.md) | agent, backend |
+| 5 | 2026-09-29 | [Airflow를 cron 스케줄러로 바꾸고 prepare 파이프라인 수정](phase-5/2026-09-29_06_Airflow를-cron-스케줄러로-바꾸고-prepare-파이프라인-수정.md) | pipeline, infra |
+| 5 | 2026-09-29 | [파싱·청킹 동등 이식과 청크·정규화·HURIDOCS 수정](phase-5/2026-09-29_05_파싱·청킹-동등-이식과-청크·정규화·HURIDOCS-수정.md) | pipeline, retrieval |
+| 5 | 2026-09-29 | [검색 단계 공개 함수 이식과 벡터 1단계 실행 계획 확인](phase-5/2026-09-29_04_검색-단계-공개-함수-이식과-벡터-1단계-실행-계획-확인.md) | retrieval, eval |
+| 5 | 2026-09-29 | [psycopg 3 async 저장소, 번호 마이그레이션과 상시 LISTEN](phase-5/2026-09-29_03_psycopg-3-async-저장소,-번호-마이그레이션과-상시-LISTEN.md) | backend, pipeline |
+| 5 | 2026-09-29 | [골든 6종과 가짜 OpenAI 서버로 옛·새 구현 동등성 검증](phase-5/2026-09-29_02_골든-6종과-가짜-OpenAI-서버로-옛·새-구현-동등성-검증.md) | tooling, eval |
 | 5 | 2026-09-29 | [전면 리팩토링 결정과 진행 방식](phase-5/2026-09-29_01_전면-리팩토링-결정과-진행-방식.md) | backend, pipeline, infra, frontend, eval, docs |
 | 4 | 2026-09-26 | [상세 챗 사용자 메시지 인젝션 회귀와 프롬프트 규칙](phase-4/2026-09-26_07_상세-챗-사용자-메시지-인젝션-회귀와-프롬프트-규칙.md) | agent, eval |
 | 4 | 2026-09-26 | [HURIDOCS 코퍼스 재구축과 수식·표 파싱 끄기](phase-4/2026-09-26_05_HURIDOCS-코퍼스-재구축과-수식·표-파싱-끄기.md) | pipeline, infra |
@@ -32,6 +38,211 @@
 | 0 | 2026-09-25 | [PDF 파서 믹스인 참조 복구](phase-0/2026-09-25_01_PDF-파서-믹스인-참조-복구.md) | pipeline |
 
 ## Phase 5
+
+### [LLM 계층 create_agent 이식과 FastAPI 전환](phase-5/2026-09-29_07_LLM-계층-create_agent-이식과-FastAPI-전환.md)
+
+phase 5 · 2026-09-29 · agent, backend
+
+**트러블슈팅** — 동률 규칙 없이 SQL로 쪽을 나누면 목록이 겹치고 빠짐
+
+- 증상: F18 초안(SQL `LIMIT/OFFSET`)으로 최신순 목록 14쪽을 끝까지 넘기며 arxiv_id를 모으니 275행 중 고유 논문이 259편이었다.
+  16편은 두 번 나왔고 16편은 한 번도 나오지 않았다.
+- 원인: 정렬 키 `COALESCE(published_at, updated_at_utc)`가 275편에 26종뿐이라 같은 값 안의 순서가 정해져 있지 않았다. SQL은
+  동률 구간의 순서를 보장하지 않으므로, 쪽마다 따로 도는 `LIMIT/OFFSET` 질의는 동률 구간을 서로 다른 순서로 돌려줄 수 있고
+  그러면 쪽 경계에서 겹치고 빠진다. 옛 구현은 요청마다 최근 1,500편을 같은 질의로 가져와 파이썬에서 쪽을 나눴고, 같은 날짜
+  안 순서는 힙 순서에 달려 있었다(d00ef58).
+- 확인 방법: 골든 DB와 같은 275편이 든 `v2_test_api_smoke`에서 `/papers/list.json`을 마지막 쪽까지 넘기며 중복과 누락을 셌다
+  (`g5_http.v2.diff.md`의 F18 절).
+- 해결: d00ef58(F32)에서 최근 논문 조회를 `db/repositories/listing.py`로 옮기고 정렬에 `arxiv_id DESC`를 더했다. caa7e59(F18)는
+  같은 정렬로 SQL에서 세고 쪽을 나눈다. 정렬 2가지(최신순, 추천순) × 검색어 3가지(없음, `diffusion`, `language model`)에서
+  중복 0, 누락 0이고, 쪽을 이어 붙인 결과가 한 번에 정렬한 결과와 순서까지 같다.
+- 재발 방지: `v2/tests/integration/api/test_api_listing_pg.py`의 `test_pages_over_tied_dates_neither_repeat_nor_skip_papers`,
+  `test_recent_papers_break_date_ties_by_arxiv_id_descending`
+
+### [Airflow를 cron 스케줄러로 바꾸고 prepare 파이프라인 수정](phase-5/2026-09-29_06_Airflow를-cron-스케줄러로-바꾸고-prepare-파이프라인-수정.md)
+
+phase 5 · 2026-09-29 · pipeline, infra
+
+**트러블슈팅** — F08의 "완료" 조건에 content_hash를 넣은 이유
+
+- 증상: 운영에서 관찰한 것이 아니라 F08을 설계하며 확인한 위험이다. 파싱 전 건너뛰기는 한 번 잘못 판정하면 force 전까지
+  그 논문을 다시 파싱하지 않는다. 저장이 본문과 청크 교체 사이에서 멈춘 논문은 source가 layout_pdf이고 옛 청크도 있어서,
+  source 순위와 청크 유무만 보면 완료로 판정된다.
+- 원인: prepare는 본문을 해시 없이 저장하고(해시 컬럼이 비워진다), 청크를 바꾼 뒤, 마지막에 content_hash를 기록한다
+  (0aab1db, phase-3 2026-09-25_05). 해시가 비어 있으면 마지막 저장이 청크 교체 전에 멈췄다는 뜻이고, 그 청크는 새 본문과
+  맞지 않을 수 있다.
+- 확인 방법: `pipeline/prepare/paper.py`에서 저장 순서(`save_fulltext(..., content_hash=None)` → `save_chunks` →
+  `update_content_hash`)를, fulltexts 저장소 upsert에서 해시가 덮어써지는 것(`content_hash = EXCLUDED.content_hash`)을
+  확인했다. 해시를 지운 layout_pdf 본문이 다시 파싱되는지는 통합 테스트로 봤다.
+- 해결: 32e087a에서 final 조건을 "source가 최상위(layout_pdf) + 청크 있음 + content_hash 있음 + force 아님"으로 정했다
+  (`policy.fulltext_is_final`). 해시가 없으면 파싱을 건너뛰지 않고 기존 source 순위·해시 규칙으로 다시 판정한다.
+- 재발 방지: `v2/tests/unit/pipeline/test_pipeline_prepare_policy.py::test_only_a_complete_layout_fulltext_is_final`(해시 없음,
+  청크 0, force, 낮은 source는 final 아님)과 `v2/tests/integration/pipeline/test_pipeline_prepare_pg.py`의
+  `test_lower_ranked_source_keeps_the_stored_fulltext`(해시를 지운 layout_pdf 본문을 다시 파싱한다)
+
+사례 2 — 주말 반복 목록과 이미 처리한 논문의 중복 파싱
+
+- 증상: phase-4 코퍼스 재구축에서 고유 논문 275편을 위해 raw 375행을 모두 파싱했고, 09-12·09-13 날짜 잡(각 26편)은 약
+  530초씩 파싱만 하고 저장할 것이 없었다(phase-4 2026-09-26_05 사례 3).
+- 원인: prepare는 PDF를 받아 파싱한 뒤에야 source 순위와 content_hash로 unchanged를 판정했다. HF Daily Papers 페이지는
+  주말에 금요일 목록을 되풀이했다.
+- 확인 방법: F11을 확인하며 JSON API가 토요일 2026-09-12에 빈 목록을 돌려주는 것을 봤다. F08 뒤 차등 날짜(layout 10편,
+  초록 폴백 2편)를 변화 없이 다시 돌려 받은 PDF 수를 셌다.
+- 해결: F11(1b0b198)로 수집을 JSON API로 바꿔 주말은 빈 목록이 된다. F08(32e087a)로 final인 layout 논문은 다운로드와 파싱을
+  건너뛴다. 차등 날짜의 변화 없는 재실행이 PDF를 12개 대신 2개(layout이 아닌 2편)만 받고, 저장된 행과 결과는 같다.
+- 재발 방지: `v2/tests/integration/pipeline/test_pipeline_prepare_pg.py::test_a_final_layout_fulltext_skips_download_and_parse`,
+  `v2/tests/unit/pipeline/test_pipeline_sources.py::test_a_weekend_day_is_an_empty_list`. prepare 결과의 `parse_skipped`로
+  건너뛴 논문을 셀 수 있다.
+
+### [파싱·청킹 동등 이식과 청크·정규화·HURIDOCS 수정](phase-5/2026-09-29_05_파싱·청킹-동등-이식과-청크·정규화·HURIDOCS-수정.md)
+
+phase 5 · 2026-09-29 · pipeline, retrieval
+
+**트러블슈팅** — 공백 없는 PDF에서 F04가 섹션 제목을 붙여 버림
+
+- 증상: F04(e07339c) 뒤 G3 pypdf 변형에서 2609.12397의 섹션 제목 7개가 붙은 채 남았다(`2 Related Work` → `2 RelatedWork`,
+  `4.1 Experimental Setup` → `4.1 ExperimentalSetup`). `3.2.3 VQAandFunctionCallsScoring`은 24자를 넘는 단어 때문에 제목에서
+  빠져 앞 섹션에 붙었고, 섹션이 14개에서 13개가 됐다.
+- 원인: 이 논문(ICML 2단)은 pypdf 추출 텍스트에 단어 사이 공백이 거의 없다(`ine‑grainedandsemanticallyaccurateassessment…`).
+  옛 구현의 camelCase 분리가 대문자 경계만큼은 공백을 되살려 제목이 읽혔는데, F04가 분리를 공용 정규화에서 통째로 없앴다.
+- 확인 방법: G3 pypdf 변형을 F03 기대값과 비교해 논문별로 제목이 바뀐 섹션을 셌다(`g3_pypdf.v2.diff.md`의 F04 표). 같은
+  논문의 HURIDOCS 응답은 공백이 정상이라 layout 경로에는 문제가 없었다.
+- 해결: a4b9c3a(F04 보완)에서 camelCase 분리를 pypdf 쪽 텍스트(`pdf_text.text_from_pages`)에서만, 쪽 정리와
+  `normalize_text` 뒤에 한 번 한다. 옛 구현이 처음 분리하던 자리다. 브랜드 예외 6개는 분리가 넣은 공백만 되돌려 원문의
+  `Hugging Face`는 그대로 둔다. G3 pypdf 섹션이 10편 중 9편에서 옛 구현과 같아졌고 나머지 1편은 원문 `Hugging Face` 한 곳만
+  다르다. F03 기대값 대비 청크는 831개 중 1개만 다르고, G2와 G3 layout 변형은 그대로다.
+- 재발 방지: `v2/tests/unit/parsing/test_parsing_pdf_text.py`의 `test_glued_pypdf_headings_still_become_sections`,
+  `test_text_from_pages_splits_words_that_pypdf_glued_together`가 pypdf 경로를,
+  `test_parsing_layout.py::test_build_layout_text_keeps_camel_case_names`와
+  `test_parsing_chunker.py::test_chunk_text_keeps_camel_case_names`가 layout·청커가 이름을 지키는지 검사한다. G3 pypdf 변형이
+  이 논문의 섹션 제목을 고정한다.
+
+사례 2 — HURIDOCS 타임아웃 재시도와 긴 파싱이 잡 stale 임계를 넘음
+
+- 증상: F33 첫 커밋(e32370d)은 타임아웃도 재시도했다. HURIDOCS 타임아웃이 600초라 네 번 호출하면 최대 2,400초로, prepare
+  잡의 stale 임계 900초를 넘는다. 그러면 다른 worker가 잡을 stale로 되돌려 가져갈 수 있다. 재시도가 없어도 논문 하나의
+  파싱이 900초를 넘으면 같은 일이 생긴다. 수식 파싱을 켠 논문 하나가 11분 넘게 걸린 기록이 있다(phase-4
+  2026-09-26_05).
+- 원인: worker는 논문을 시작하기 전에만 heartbeat를 보냈다. 옛 구현을 그대로 옮긴 동작이다(0aab1db). 논문 하나의 처리
+  시간이 stale 임계를 넘는 경우를 막는 장치가 없었다.
+- 확인 방법: stale 창 1초, 파싱 2.5초로 줄인 통합 테스트로 재현했다. 주기적 heartbeat가 없으면 같은 파싱이 claim을
+  잃었다.
+- 해결: 4dafc6d에서 타임아웃은 재시도하지 않고 바로 pypdf로 내려가게 했다(422, 5xx, 연결 오류만 재시도). 326ced2에서 diff
+  문서의 재시도 대상도 최종 동작으로 고쳤다. ab8c2c6에서 논문을 처리하는 동안 백그라운드 작업이 `min(60초, stale 임계 / 3)`
+  마다 heartbeat를 보내고, heartbeat가 claim을 잃었다고 알리면 그 논문 작업을 취소해 기존 lost-claim 경로(stage heartbeat)로
+  끝낸다. 30초 파싱 중에 claim을 빼앗기면 1초 안에 그 논문을 멈춘다. 옛 worker와의 차등 실행 결과는 이전과 같았다.
+- 재발 방지: `v2/tests/unit/parsing/test_parsing_layout_client.py::test_timeouts_are_not_retried`,
+  `v2/tests/integration/pipeline/test_pipeline_queue_pg.py`의 `test_a_parse_longer_than_the_stale_window_keeps_its_claim`,
+  `test_without_the_periodic_heartbeat_the_same_parse_loses_its_claim`, `test_a_claim_taken_during_a_long_parse_stops_that_paper`,
+  `v2/tests/unit/pipeline/test_pipeline_results.py::test_the_heartbeat_interval_is_a_third_of_the_stale_window_up_to_a_minute`
+
+### [검색 단계 공개 함수 이식과 벡터 1단계 실행 계획 확인](phase-5/2026-09-29_04_검색-단계-공개-함수-이식과-벡터-1단계-실행-계획-확인.md)
+
+phase 5 · 2026-09-29 · retrieval, eval
+
+**트러블슈팅** — 정확 검색으로 돌려도 G1 결과가 같았던 이유(벡터 1단계 전체 스캔)
+
+- 증상: G1을 정확 검색(`GOLDEN_EXACT_SEARCH=1`, `enable_indexscan=off`)으로 돌려도 HNSW 인덱스가 있는 기본 실행과 결과가
+  같았다. 옛 구현 캡처(e7a663f)와 v2 이식(04e19a7, 351/351) 모두 그랬다. HNSW는 근사 검색이라 인덱스를 다시 만들면 결과가
+  바뀔 수 있어 두 벌을 확인하기로 한 것이었다.
+- 원인: 이 코퍼스에서는 제품 경로의 벡터 1단계가 HNSW를 쓰지 않는다. 플래너는 1단계 후보 184개까지는 HNSW를 쓰고
+  192개부터 전체 스캔과 정렬을 고른다. 제품 경로의 후보는 vector 검색(limit 5) 240개, hybrid 600개라 둘 다 임베딩
+  13,328개를 모두 읽는 정확 검색이다. G1 평가 경로(k=10)의 후보 수는 같은 규칙(`candidate_fetch_limit`,
+  `hybrid_branch_limit`)에서 이보다 많다.
+- 확인 방법: `arxplore-eval explain`(6fa2ff2)으로 골든 코퍼스에서 후보 수를 바꿔 가며 벡터 1단계 계획을 봤다. lexical
+  계획은 GIN 인덱스 두 개를 모두 쓴다.
+- 해결: 코드는 바꾸지 않았다. 지금 제품의 벡터 결과가 정확 검색이라는 점을 기록하고, G1 정확 검색 변형이 같게 나오는
+  이유로 삼는다.
+- 재발 방지: `arxplore-eval explain`이 계획에 쓰인 검색 인덱스와 Seq Scan을 보고하므로 코퍼스나 후보 규칙이 바뀌면 다시
+  확인한다. `v2/tests/integration/eval/test_eval_explain_pg.py`가 두 채널 계획, 읽기 전용 트랜잭션, 기대 인덱스 이름을
+  검사한다.
+
+### [psycopg 3 async 저장소, 번호 마이그레이션과 상시 LISTEN](phase-5/2026-09-29_03_psycopg-3-async-저장소,-번호-마이그레이션과-상시-LISTEN.md)
+
+phase 5 · 2026-09-29 · backend, pipeline
+
+**트러블슈팅** — 통합 테스트가 다른 작업자의 공용 DB를 지움
+
+- 증상: `V2_TEST_DATABASE_URL` 없이 v2 통합 테스트를 돌리자, 다른 작업자들이 쓰던 공용 DB `v2_test`의 public 스키마가
+  지워졌다.
+- 원인: 통합 테스트 fixture는 테스트마다 public 스키마를 지우고 다시 만든다. 변수가 없으면 기본값
+  `postgresql://arxplore@localhost:55432/v2_test`(ec568c1)로 떨어졌다. 이름이 `v2_test`로 시작하는지는 검사했지만, 기본
+  DB 자체가 여러 작업자의 공용이었다.
+- 확인 방법: `v2/tests/integration/conftest.py`의 `_configured_url`이 빈 변수에서 기본 URL을 돌려주는 것을 확인했다.
+- 해결: 0d7e5d0에서 기본 URL을 없앴다. 변수가 없으면 통합 테스트를 건너뛰고, `V2_TEST_REQUIRE_DB`가 있으면 실패한다.
+  DB 이름이 `v2_test`로 시작해야 한다는 검사는 그대로다.
+- 재발 방지: 작업자마다 `v2_test_repo_legacy`, `v2_test_api_smoke`처럼 전용 `v2_test*` DB를 명시한다. CI 통합 잡은 변수와
+  `V2_TEST_REQUIRE_DB=1`을 함께 줘 DB가 없으면 건너뛰지 않고 실패한다.
+
+사례 2 — 병렬 이식이 마이그레이션을 더하면서 생긴 번호 문제
+
+- 증상: API·LLM 이식(P4·P5)과 파이프라인 이식(P3)이 각자 마이그레이션을 더하자, 패키지 마이그레이션 검사
+  (`test_versions_and_names`)가 새 파일마다 실패했다.
+- 원인: 검사가 패키지의 마이그레이션 목록 전체를 0001~0003으로 고정하고 있었다. 또 로더는 같은 번호가 둘이면 거부하고,
+  실행기는 이미 적용된 버전보다 낮은 대기 파일을 `MigrationOrderError`로 거부한다(9d68734). 두 작업이 번호를 나누지 않고
+  각자 다음 번호를 쓰면 한쪽 파일은 적용할 수 없다.
+- 확인 방법: 실패한 검사의 기대 목록과, 두 거부를 재현하는 단위 테스트 `test_rejects_duplicate_versions`,
+  `test_pending_migration_older_than_applied_one_is_rejected`를 확인했다.
+- 해결: af5acfd에서 검사를 앞 세 파일 고정 + 번호 유일·증가·파일 이름 접두어 일치로 바꿨다. 번호는 미리 나눴다. 0004는
+  P4·P5(F22, 93aca17), 0005부터는 P3(0005 `scheduler_runs` 57324fa, 0006 F14 0ccb57a)가 쓰고, 0005는 0004가 커밋된 뒤에
+  커밋했다.
+- 재발 방지: `test_versions_and_names`가 번호 규칙을 검사하고, 실행기는 순서가 어긋난 대기 파일을 적용 전에 거부한다.
+
+### [골든 6종과 가짜 OpenAI 서버로 옛·새 구현 동등성 검증](phase-5/2026-09-29_02_골든-6종과-가짜-OpenAI-서버로-옛·새-구현-동등성-검증.md)
+
+phase 5 · 2026-09-29 · tooling, eval
+
+**트러블슈팅** — 병렬 요약 그래프 때문에 G4 비교가 가끔 실패함
+
+- 증상: AI 캐시 프롬프트 버전을 2로 올린 뒤(424bab6) `GOLDEN_IMPL=v2`로 G5를 돌리면 `summary:summary_cached`의 G4
+  비교가 5회 중 3회 실패했다.
+- 원인: 버전 1 캐시를 쓰지 않게 되면서 이 시나리오도 요약 그래프를 탔다. 그래프는 섹션 버킷을 병렬로 돌리므로 가짜
+  서버에 요청이 도착하는 순서가 실행마다 바뀐다. 다른 요약 시나리오는 P0부터 호출을 버킷별로 묶어 기록했지만, 이
+  시나리오는 옛 구현에서 캐시가 맞아 LLM 호출이 없었으므로 도착 순서(`sequence`) 그대로 기록하고 있었다.
+- 확인 방법: 같은 코드로 G5를 반복 실행해 실패 빈도를 셌고, 기록 방식이 시나리오별 `llm_layout`에 달려 있음을
+  `tests/golden/g5_http.py`에서 확인했다(`g5_http.v2.diff.md`의 F22 후속 절).
+- 해결: 4f1473b에서 `summary_cached`를 `llm_layout="summary_graph"`로 기록한다. 호출을 섹션 분류별·버킷별로 묶으며, 버킷
+  안의 섹션 호출은 차례로 돌아 순서가 고정된다. LLM 호출이 없으면 빈 목록을 그대로 두므로 옛 골든은 바뀌지 않았다
+  (legacy 121/121). a8323a1에서 v2 변형을 다시 캡처했고 G5가 7회 연속 121개 통과했다.
+- 재발 방지: 요약 그래프를 탈 수 있는 시나리오는 `Scenario(..., llm_layout="summary_graph")`로 둔다. 이 규칙과 다시
+  잡은 변형의 형식은 `g5_http.v2.diff.md`에 적었다.
+
+사례 2 — langchain-openai가 base URL 환경변수에 따라 `stream_options`를 다르게 보냄
+
+- 증상: 가짜 서버에 붙인 옛 구현의 스트리밍 요청에는 `stream_options`가 없다. 운영처럼 base URL을 주지 않으면 같은
+  호출에 `{"include_usage": true}`가 붙는다. 기록을 그대로 비교하면 운영과 같은 요청을 보내는 새 구현이 G4에서 다르게
+  나온다.
+- 원인: langchain-openai `ChatOpenAI`는 `stream_usage`, base URL, 클라이언트 인자가 모두 없고 `OPENAI_BASE_URL` 환경변수도
+  없을 때만 `stream_usage=True`로 켠다. `OPENAI_API_BASE`는 초기화 때 `openai_api_base`로 읽혀 같은 효과를 낸다. 가짜
+  서버를 붙이는 환경(`FakeOpenAIServer.environ()`)이 두 변수를 모두 주므로 사용량 요청이 꺼진다.
+- 확인 방법: 루트 `.venv`(langchain-openai 1.1.0)와 `v2/.venv`(1.6.6)에서 환경변수 없이, `OPENAI_BASE_URL`만,
+  `OPENAI_API_BASE`만 준 세 경우로 `ChatOpenAI`를 만들어 `stream_usage`가 각각 True, None, None임을 확인했다. 두 버전의
+  초기화 코드도 같은 조건을 쓴다.
+- 해결: G4는 `stream_options`를 뺀 본문을 비교한다(`tests/golden/g5_http.py`의 `_without_stream_options`, 7984ccf). 새
+  구현의 모델 팩토리는 `stream_usage=True`를 명시해 base URL과 무관하게 운영과 같은 요청을 보낸다
+  (`v2/src/arxplore/llm/models.py`, 4ebcb40).
+- 재발 방지: `v2/tests/unit/llm/test_llm_models.py::test_created_model_uses_explicit_endpoint_key_and_usage_streaming`이 명시
+  설정을 검사한다. 가짜 서버가 `include_usage`에 사용량 청크로 답하는지는
+  `tests/fakes/test_openai_server.py::test_streaming_splits_content_into_fixed_pieces_and_reports_usage`가 본다.
+
+사례 3 — 같은 골든 내용인데 gzip 바이트가 인터프리터마다 다름
+
+- 증상: 같은 골든 내용을 두 구현의 인터프리터로 압축하면 gzip 바이트가 다르다. 옛 구현이 캡처한 원본
+  (`g1_retrieval.json.gz` 등)은 루트 `.venv`(Python 3.12)에서 다시 압축하면 파일과 같고 `v2/.venv`(Python 3.14)에서는
+  다르다. v2 변형 파일은 반대다.
+- 원인: deflate 본문이 아니라 gzip 헤더의 OS 바이트가 다르다. Python 3.12의 `gzip.compress(..., mtime=0)`은 zlib가 만든
+  헤더를 그대로 써서 OS 바이트가 3이고, 3.14의 `gzip.compress`는 헤더의 OS 바이트를 255로 덮어쓴다. 두 환경은 zlib 버전도
+  다르지만 deflate 본문은 같았으므로 zlib 버전 차이는 원인이 아니었다.
+- 확인 방법: 원본과 v2 변형 골든(G1·G2·G5와 G3 pypdf 일부)을 풀어 두 `.venv`에서 같은 설정(compresslevel 9, mtime 0)으로
+  다시 압축하고 파일 바이트, 헤더, raw deflate(`wbits=-15`) 본문을 비교했다. 차이는 헤더의 OS 바이트 하나뿐이었고, 원인은
+  두 인터프리터의 `gzip.compress` 소스에서 확인했다.
+- 해결: 하네스 뼈대(a26c69a)부터 골든은 푼 내용으로 비교한다. `write_golden`은 기존 파일을 풀어 정규화 JSON이 같으면
+  파일을 그대로 두고, 테스트는 `read_golden`으로 푼 값을 비교한다. G1 질의 임베딩 표의 지문도 푼 바이트의 sha256이다
+  (`scripts/goldens/capture_g1_retrieval.py`의 `table_digest`). 그래서 OS 바이트가 3인 원본과 255인 변형이 섞여 있어도
+  비교 결과는 같다.
+- 재발 방지: `tests/golden/test_store.py::test_write_golden_keeps_an_existing_file_with_the_same_content`가 다른 압축
+  수준·mtime으로 만든 파일도 내용이 같으면 그대로 두는지 검사한다. `.json.gz` 골든의 파일 바이트나 sha256을 비교에 쓰는
+  테스트는 없다.
 
 ### [전면 리팩토링 결정과 진행 방식](phase-5/2026-09-29_01_전면-리팩토링-결정과-진행-방식.md)
 
