@@ -274,6 +274,7 @@ FastAPI 앱(`api.app.create_app`)의 경로는 다음과 같다. 요청·응답 
 | `POST /papers/<id>/chat/`, `/chat/stream/` | 상세 챗(JSON, SSE) | llm |
 | `POST /papers/assistant/chat/`, `/stream/` | 에이전트(JSON, SSE) | llm |
 
+- **논문 id**: 경로의 `<id>`로 논문을 찾고, 없으면 `sources.arxiv.normalize_arxiv_id`로 arXiv URL 접두·`.pdf`·버전 접미(`v3`)를 떼어 다시 찾는다. detail, analyze, summary, 상세 챗은 그 뒤 찾은 논문의 `arxiv_id`로 캐시·본문·청크를 읽고 쓴다.
 - **오류**: 모든 오류가 `{"error": 문구}`다. 요청 검증 실패는 400 "잘못된 요청입니다.", 405는 빈 본문과 `Allow`, 모르는 경로는 JSON 404, 서버 `OPENAI_API_KEY`가 없으면 생성·챗은 503이다.
 - **CSRF**: `/bootstrap.json`이 `csrftoken` 쿠키(1년, `Path=/`, `SameSite=Lax`, JS가 읽으므로 HttpOnly 아님, `SECURE_COOKIES`면 Secure)를 심는다. 변경 요청은 `X-CSRFToken` 헤더가 쿠키와 같아야 하고, Origin 헤더가 있으면 같은 출처이거나 `CSRF_TRUSTED_ORIGINS`에 있어야 한다. 실패는 403 JSON이다.
 - **rate limit**: 벽시계 분 단위 고정 창, 키 `ratelimit:{scope}:ip:{ip}:{창 시작}`, TTL 65초. LLM을 부르는 6개 경로가 llm 버킷(`RATE_LIMIT_LLM_PER_MINUTE`)을 공유하고 `detail.json`은 detail 버킷(`RATE_LIMIT_DETAIL_PER_MINUTE`)이다. 메서드·CSRF 검사 뒤에 센다. 클라이언트 IP는 `RATE_LIMIT_IP_HEADER`의 첫 값, 소켓 주소, `unknown` 순이다. 저장소는 프로세스 메모리이고 `REDIS_URL`이 있으면 Redis다. 초과하면 429 `{"error", "retry_after"}`와 `Retry-After`다.

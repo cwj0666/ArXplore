@@ -77,15 +77,15 @@ class GenerationService:
 
     async def analysis(self, arxiv_id: str) -> AnalysisPayload:
         paper = await find_paper(self.store, arxiv_id)
-        cached = await self.store.get_overview(arxiv_id, prompt_version=ANALYSIS_PROMPT_VERSION)
+        cached = await self.store.get_overview(paper.arxiv_id, prompt_version=ANALYSIS_PROMPT_VERSION)
         if cached is not None and cached.overview:
             return AnalysisPayload(overview=cached.overview, key_findings=cached.key_findings or [], cached=True)
         self.require_api_key()
-        fulltext = await self.store.get_fulltext(arxiv_id)
+        fulltext = await self.store.get_fulltext(paper.arxiv_id)
         analysis = await self.detail_writer.analyze(detail_input(paper, fulltext), model=OVERVIEW_MODEL)
         if analysis.overview:
             await self.store.save_overview(
-                arxiv_id,
+                paper.arxiv_id,
                 overview=analysis.overview,
                 key_findings=analysis.key_findings,
                 model=OVERVIEW_MODEL,
@@ -97,12 +97,12 @@ class GenerationService:
         normalized_model = validate_summary_model(model)
         paper = await find_paper(self.store, arxiv_id)
         cached = await self.store.get_detailed_summary(
-            arxiv_id, normalized_model, prompt_version=SUMMARY_PROMPT_VERSION
+            paper.arxiv_id, normalized_model, prompt_version=SUMMARY_PROMPT_VERSION
         )
         if cached is not None and cached.summary:
             return SummaryPayload(summary=cached.summary, cached=True, model=normalized_model)
         self.require_api_key()
-        fulltext = await self.store.get_fulltext(arxiv_id)
+        fulltext = await self.store.get_fulltext(paper.arxiv_id)
         summary = await self.summary_writer.summarize(
             title=paper.title,
             authors=paper.authors,
@@ -112,6 +112,6 @@ class GenerationService:
         )
         if summary:
             await self.store.save_detailed_summary(
-                arxiv_id, summary=summary, model=normalized_model, prompt_version=SUMMARY_PROMPT_VERSION
+                paper.arxiv_id, summary=summary, model=normalized_model, prompt_version=SUMMARY_PROMPT_VERSION
             )
         return SummaryPayload(summary=summary, cached=False, model=normalized_model)

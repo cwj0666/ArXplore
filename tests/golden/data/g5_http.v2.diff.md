@@ -118,3 +118,12 @@
   - `analyze:analyze_without_key`(두 번째 응답), `summary:summary_without_key`(첫 번째 응답): 여전히 200 `cached: true`다. 다만 값은 같은 번들에서 먼저 도는 `analyze_cached`, `summary_cached`가 번들 DB 사본에 버전 2로 저장한 결과다. 두 시나리오의 나머지 응답(404, 503, 400)은 같다.
   - 그 밖의 시나리오는 그대로다. 생성 시나리오(`analyze_generate_then_cached`, `summary_generate_*`)는 캐시가 없던 논문이라 달라지지 않는다.
 - G4 비교 방식: `summary_cached`도 이제 버킷을 병렬로 도는 요약 그래프를 타므로, 버킷 사이 요청 순서가 실행마다 바뀐다. 처음에는 이 시나리오의 LLM 기록 방식이 기본값 `sequence`(도착 순서 그대로)라서 G4 비교가 가끔 실패했다(5회 중 3회). 하네스 4f1473b가 이 시나리오를 `llm_layout="summary_graph"`로 바꿨다. 이제 호출을 섹션 분류별·버킷별로 묶어 비교한다. 버킷 안의 섹션 호출은 차례로 돌아 순서가 고정된다. 이 기록 방식으로 변형을 다시 잡은 뒤 G5를 7회 연속 돌려 매번 121개가 통과했다. 다시 잡은 변형에서 달라진 것은 이 시나리오의 `llm_requests` 형식뿐이다(섹션 호출 limitations 1·other 9, 버킷 호출 limitations 1·other 1, 최종 호출 1).
+
+## F38: analyze·summary가 찾은 논문의 id로 캐시와 본문을 읽고 쓴다
+
+- `find_paper`는 경로 id(`2609.28470v3`)로 논문이 없으면 정규화한 id로 다시 찾는다. 그런데 analyze·summary는 캐시 조회, fulltext 조회, 캐시 저장에 경로 id를 그대로 썼다. 이제 셋 다 찾은 논문의 `arxiv_id`를 쓴다.
+- 수정 전 버전 붙은 id의 동작(가짜 서버로 재현)
+  - 키가 있으면 analyze는 500이었다. fulltext를 못 찾아, 본문 없이는 개요를 만들지 않는 검사(`MissingPaperContextError`)에 걸렸다. summary는 LLM을 부르지 않고 200 빈 요약을 돌려줬다.
+  - 키가 없으면 같은 논문의 캐시가 있어도 503이었다.
+- 이제 버전 붙은 id도 버전 없는 id와 같다. 키가 없을 때는 캐시가 있으면 `cached: true`, 없으면 503이다. 생성 결과는 정규화한 id의 행에 저장된다.
+- G5·G4 차이: 없음. analyze·summary를 버전 붙은 id로 부르는 시나리오가 없다(버전 id는 `detail.json`과 상세 챗 스트림에만 있고, 두 경로는 원래 찾은 논문의 id를 썼다).

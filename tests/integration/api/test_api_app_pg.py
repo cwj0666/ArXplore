@@ -93,6 +93,36 @@ async def test_generated_overview_and_summary_are_cached_in_postgres(
         assert await cursor.fetchall() == [("gpt-5-mini",)]
 
 
+async def test_versioned_ids_use_the_cache_and_fulltext_of_the_paper(
+    api_database: str, api_settings: Callable[..., AppSettings], fake_openai: Any
+) -> None:
+    fake_openai.chat_handler = lambda request: "생성된 결과"
+    versioned = f"{MAIN_ID}v3"
+
+    async with serve(api_settings(OPENAI_API_KEY="  ")) as client:
+        uncached_overview = await post(client, f"/papers/{versioned}/analyze/")
+        uncached_summary = await post(client, f"/papers/{versioned}/summary/", {"model": "gpt-5"})
+    async with serve(api_settings()) as client:
+        overview = (await post(client, f"/papers/{versioned}/analyze/")).json()
+        summary = (await post(client, f"/papers/{versioned}/summary/", {"model": "gpt-5"})).json()
+        again = (await post(client, f"/papers/{versioned}/analyze/")).json()
+    async with serve(api_settings(OPENAI_API_KEY="  ")) as client:
+        cached_overview = (await post(client, f"/papers/{versioned}/analyze/")).json()
+        cached_summary = (await post(client, f"/papers/{versioned}/summary/", {"model": "gpt-5"})).json()
+        plain_overview = (await post(client, f"/papers/{MAIN_ID}/analyze/")).json()
+
+    assert (uncached_overview.status_code, uncached_summary.status_code) == (503, 503)
+    assert (overview["overview"], overview["cached"]) == ("생성된 결과", False)
+    assert summary == {"summary": "생성된 결과", "cached": False, "model": "gpt-5"}
+    assert again == cached_overview == plain_overview == {**overview, "cached": True}
+    assert cached_summary == {**summary, "cached": True}
+    async with await psycopg.AsyncConnection.connect(api_database) as connection:
+        overviews = await connection.execute("SELECT arxiv_id FROM paper_ai_overviews")
+        summaries = await connection.execute("SELECT arxiv_id, model FROM paper_ai_detailed_summaries")
+        assert await overviews.fetchall() == [(MAIN_ID,)]
+        assert await summaries.fetchall() == [(MAIN_ID, "gpt-5")]
+
+
 async def test_results_cached_before_the_version_bump_are_regenerated(
     api_database: str, api_settings: Callable[..., AppSettings], fake_openai: Any
 ) -> None:
