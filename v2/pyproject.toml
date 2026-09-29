@@ -29,6 +29,8 @@ arxplore-eval = "arxplore_eval.cli:app"
 [dependency-groups]
 dev = [
     "mypy>=1.18",
+    "numpy>=2.5",
+    "pillow>=12.3",
     "pytest>=9",
     "pytest-asyncio>=1.4",
     "respx>=0.22",

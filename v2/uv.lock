@@ -155,6 +155,8 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "numpy" },
+    { name = "pillow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "respx" },
@@ -188,6 +190,8 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.18" },
+    { name = "numpy", specifier = ">=2.5" },
+    { name = "pillow", specifier = ">=12.3" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-asyncio", specifier = ">=1.4" },
     { name = "respx", specifier = ">=0.22" },
