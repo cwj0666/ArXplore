@@ -1,17 +1,18 @@
 # G6 화면 골든 v2 변형: 원본과 다른 점
 
-변형 파일은 `g6_ui.v2/<화면>.{txt,aria.yml,png}`이고 v2 프론트(`v2/frontend`) 캡처와 비교할 때만 쓰인다. 원본 `g6_ui/`는 옛 프론트 기준으로 그대로 둔다. 변형이 없는 화면은 원본과 비교한다.
+변형 파일은 `g6_ui.v2/<화면>.{txt,aria.yml,png}`이고 v2 캡처와 비교할 때만 쓰인다. 원본 `g6_ui/`는 옛 프론트와 옛 Django 백엔드 기준으로 그대로 둔다. 변형이 없는 화면은 원본과 비교한다.
 
 다시 만드는 명령(저장소 루트, 먼저 `cd v2/frontend && npm ci && npm run build`)
-- 비교: `.venv/bin/python -m tests.golden.ui.g6_v2` 또는 `.venv/bin/python -m pytest tests/golden/ui/test_g6_ui_v2.py`
-- 변형 저장: `.venv/bin/python -m tests.golden.ui.g6_v2 --out <폴더> --write-variant <화면...>`. 원본과 바이트가 다른 파일만 저장하고, 비교할 때는 파일마다 변형이 있으면 변형을, 없으면 원본을 쓴다.
+- 비교: `v2/.venv/bin/python -m tests.golden.ui.g6_v2` 또는 `v2/.venv/bin/python -m pytest tests/golden/ui/test_g6_ui_v2.py`
+- 변형 저장: `v2/.venv/bin/python -m tests.golden.ui.g6_v2 --out <폴더> --write-variant <화면...>`. 원본과 바이트가 다른 파일만 저장하고, 비교할 때는 파일마다 변형이 있으면 변형을, 없으면 원본을 쓴다.
 
 캡처 방식
-- v2 빌드를 `vite preview`로 띄우고 API는 옛 Django 백엔드로 프록시한다. DB는 `arxplore_tpl`에서 복사한 `v2_test_ui_g6`, LLM은 가짜 OpenAI 서버다.
+- 하네스와 같은 환경의 `arxplore` 명령으로 DB 사본에 `migrate`를 돌린 뒤 `arxplore api`를 `SERVE_FRONTEND_DIST=true`로 띄운다. FastAPI가 v2 빌드와 API를 한 주소에서 낸다. DB는 `arxplore_tpl`에서 복사한 `v2_test_ui_g6`, LLM은 가짜 OpenAI 서버다.
+- 서버는 `.env`가 없는 임시 폴더에서 돌고, 그 폴더의 `frontend/dist`가 v2 빌드를 가리킨다.
 - 캡처 스크립트는 `--impl v2`로 돈다. 클래스 이름에 기대던 선택자 두 개(요약 모델 대화상자의 생성 버튼, PDF 패널 표시 대기)만 역할·id 기반으로 바꾼다.
 - 비교 기준: innerText와 ARIA 스냅샷은 바이트가 같아야 하고, PNG는 달라진 픽셀 수가 0이어야 한다.
 
-이식 동등성: ae59715(동등 이식) 시점에 v2는 11개 화면 모두 원본과 innerText, ARIA 스냅샷, PNG 바이트가 같았다.
+이식 동등성: ae59715(동등 이식) 시점에 v2는 11개 화면 모두 원본과 innerText, ARIA 스냅샷, PNG 바이트가 같았다. 이때와 F19·F29 변형은 v2 빌드를 `vite preview`로 띄우고 API를 옛 Django 백엔드로 프록시해 잡았다. 백엔드를 FastAPI로 바꾼 뒤 달라진 화면은 마지막 절에 적는다.
 
 ## F19: 검색 0건 문구
 
@@ -52,3 +53,21 @@ G6 11개 화면은 이 수정 전후로 innerText, ARIA 스냅샷, PNG가 모두
 - 코드 블록 innerText 끝에 줄바꿈 한 개가 더 붙는다(화면 픽셀은 같다).
 
 옛 앱과 나란히 비교한 상세 챗·어시스턴트 알림 상태(굵게, 인라인 코드, 번호 목록, 코드 블록, 제목, 링크, 인용 목록)는 픽셀이 같다.
+
+## FastAPI 백엔드: 목록 동률 순서(F32)와 핵심 포인트 번호(F20)
+
+캡처 백엔드를 옛 Django에서 FastAPI로 바꾸자 11개 화면 중 7개가 달라졌다. 프론트 빌드는 같으므로 차이는 모두 이미 G5 변형에 기록된 백엔드 수정에서 온다. 두 번 캡처한 결과는 바이트 단위로 같았다.
+
+- `list_default`, `list_search`: F32
+  - 목록은 게시일 내림차순이다. 이 코퍼스는 게시일 값이 275편에 26종뿐이라 같은 날짜의 논문이 많다. 옛 구현은 같은 날짜 안의 순서를 힙 순서에 맡겼고, FastAPI는 `arxiv_id` 내림차순으로 정한다.
+  - `list_default`는 첫 쪽 경계에 같은 날짜 구간이 걸려 있어 구성도 바뀐다. `2609.25636`, `2609.26355`, `2609.26457`이 2쪽으로 가고 `2609.26780`, `2609.26793`, `2609.26796`이 1쪽으로 온다.
+  - `list_search`(`?q=diffusion`)는 같은 21편의 순서만 바뀐다. 검색어가 한 단어라 F18(모든 토큰 포함, 순서 무관)은 결과 집합을 바꾸지 않는다.
+  - 두 화면의 카드 순서는 G5 v2 변형의 `pages:list_default`, `pages:list_query` 응답 순서와 같다.
+  - 카드 위치가 바뀌므로 innerText, ARIA, PNG가 모두 달라진다. 변형 ARIA에는 F29의 카드 링크 구조도 그대로 들어 있다.
+- `detail_analysis`, `summary_model_dialog`, `summary_result`, `pdf_split_view`, `detail_chat_answer`: F20
+  - 가짜 LLM의 핵심 포인트 응답에는 `3. 3.5% 정확도 향상이 이 논문의 핵심 결과입니다.` 줄이 있다. 옛 구현은 번호를 지우면서 `3.5`의 `3.`까지 잘라 `5% 정확도 향상...`을 보였고, 이제는 `3.5% 정확도 향상...`을 보인다.
+  - 다섯 화면 모두 innerText와 ARIA에서 이 한 줄만 바뀌고, PNG는 그 글자 영역 2,834픽셀만 다르다. `pdf_split_view` 변형 ARIA에는 F29의 닫기 버튼 이름도 들어 있다.
+- 그대로인 화면: `list_no_results`, `not_found_route`, `detail_not_found`, `assistant_answer`
+- 화면에 드러나지 않는 수정
+  - F21은 상세 요약의 LLM 호출 수만 바꾼다. 화면의 요약은 마지막 병합 호출의 응답이라 같다.
+  - AI 캐시 프롬프트 버전 2는 G6에 드러나지 않는다. 골든 DB에서 개요가 캐시된 논문은 4편(`2609.06011`, `2609.24815`, `2609.28470`, `2609.28473`)이고 G6 상세 논문 `2609.27980`은 캐시가 없어, 옛 구현도 개요와 핵심 포인트를 가짜 LLM으로 새로 만들었다. 버전 1 캐시를 다시 만드는 동작은 G5 `analyze:analyze_cached`, `summary:summary_cached`에 기록되어 있다.

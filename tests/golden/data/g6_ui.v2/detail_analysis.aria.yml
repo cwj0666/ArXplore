@@ -1,0 +1,49 @@
+- link "뒤로가기":
+  - /url: /
+- link "ArXplore":
+  - /url: /
+- button "PDF 분할 보기"
+- button "PDF 전체 화면"
+- button "상세요약 생성하기"
+- main:
+  - 'heading "Six Layers Less: Encoder Pruning for Whisper with Label-Free Recovery" [level=1]'
+  - strong: 저자
+  - text: Rasmus Aagaard, Nicki Skafte Detlefsen 2026-09-23 4
+  - region "개요":
+    - heading "개요" [level=2]
+    - paragraph: 이 논문은 잡음이 섞인 선호 데이터에서 정책을 정렬하는 방법을 다룹니다.
+    - paragraph: 두 번째 문단에서는 실험 설정과 결과를 설명합니다. 결과는 기존 방법보다 안정적입니다.
+  - region "핵심 포인트":
+    - heading "핵심 포인트" [level=2]
+    - list:
+      - listitem: 3.5% 향상을 보고합니다.
+      - listitem: 3.5% 정확도 향상이 이 논문의 핵심 결과입니다.
+      - listitem: 두 번째 핵심 포인트는 충분히 길게 적었습니다.
+      - listitem: "세 번째 핵심 포인트: 결과 해석."
+      - listitem: 다섯 번째 포인트는 문장부호가 없습니다.
+      - listitem: 여섯 번째 포인트입니다!
+  - region "초록":
+    - heading "초록" [level=2]
+    - text: "Pruning large pre-trained transformer-based ASR models such as OpenAI's Whisper has seen great adoption, as pruning the decoder led to significant end-to-end transcription speedups. For instance, the {\\tt whisper-large-v3-turbo} variant reduced the decoder from 32 to 4 layers, while Distill-Whisper similarly reduced the decoder to only 2 layers. Although some attention has been put towards reducing the size of the encoder, no approach has seen wide adoption. This could be due to the need for custom inference implementations to take advantage of the compressed model. We present an approach that ranks encoder layers by the leave-one-layer-out change in Word Error Rate (WER). The six layers that cause the least change are removed, corresponding to 18.5% of the encoder stack. The pruned model requires no custom inference code as it is simply a more shallow encoder with fewer layers. We further distill using unlabeled monolingual speech data to recover performance degradation caused by the zero-shot layer pruning. Mean WER across four languages increases to 20.1% after distillation, compared to 21.9% zero-shot, going from a baseline of 18.2%. We release all of our code (https://github.com/rasgaard/whisper-encoder-layer-prune) and the pruned model (https://huggingface.co/rasgaard/whisper-large-v3-turbo-encoder-pruned)."
+- text: 관련 논문
+- link "Feature Recovery for Object Understanding After Irreversible Fire Damage 2026-09-10 Aditi Tiwari, Sofia Stoica, Savya Khosla, David Forsyth, Heng Ji Objects in post-fire environments often undergo irreversible physical transformations that change their geometry, material state, and visual appearance. Detecting and identifying t...":
+  - /url: /papers/2609.12078/
+  - text: Feature Recovery for Object Understanding After Irreversible Fire Damage 2026-09-10 Aditi Tiwari, Sofia Stoica, Savya Khosla, David Forsyth, Heng Ji
+  - paragraph: Objects in post-fire environments often undergo irreversible physical transformations that change their geometry, material state, and visual appearance. Detecting and identifying t...
+- 'link "EvoOntology: A Self-Evolving Ontology Layer for Data Agents 2026-09-14 Meiduo Chong, Shaolei Zhang, Ju Fan, Xiaoyong Du Data agents aim to fulfill natural-language instructions over heterogeneous data, including tables, files, and databases. However, data agents face a challenging agent-data gap: he..."':
+  - /url: /papers/2609.15779/
+  - text: "EvoOntology: A Self-Evolving Ontology Layer for Data Agents 2026-09-14 Meiduo Chong, Shaolei Zhang, Ju Fan, Xiaoyong Du"
+  - paragraph: "Data agents aim to fulfill natural-language instructions over heterogeneous data, including tables, files, and databases. However, data agents face a challenging agent-data gap: he..."
+- 'link "SoL-Pi: Recursively Scaling Auto-Research Loops for Efficient Agent Harness 2026-09-17 Haozhe Liu, Tian Ye, Sensen Gao, Qihang Cao, Yitong Li, Mingchen Zhuge, Duomin Wang, Ruihua Zhang, Ping Luo, Jiawang Bian, Lei Zhu, Ligeng Zhu, Enze Xie, Song Han As coding agents move from supervised code completion to unattended, around-the-clock exploration, their work expands from isolated predictions into long trajectories of reasoning,..."':
+  - /url: /papers/2609.20519/
+  - text: "SoL-Pi: Recursively Scaling Auto-Research Loops for Efficient Agent Harness 2026-09-17 Haozhe Liu, Tian Ye, Sensen Gao, Qihang Cao, Yitong Li, Mingchen Zhuge, Duomin Wang, Ruihua Zhang, Ping Luo, Jiawang Bian, Lei Zhu, Ligeng Zhu, Enze Xie, Song Han"
+  - paragraph: As coding agents move from supervised code completion to unattended, around-the-clock exploration, their work expands from isolated predictions into long trajectories of reasoning,...
+- 'link "Paint-Anything: Unified Any-Color Control for Image Generation and Editing 2026-09-17 Ji Xie, Dewei Zhou, Xinyu Huang, Zhennan Chen, Xun Wang Professional design requires any-color control: the ability to specify an object''s target color with any 24-bit hex value for image generation and editing. Prior work has explored ..."':
+  - /url: /papers/2609.20816/
+  - text: "Paint-Anything: Unified Any-Color Control for Image Generation and Editing 2026-09-17 Ji Xie, Dewei Zhou, Xinyu Huang, Zhennan Chen, Xun Wang"
+  - paragraph: "Professional design requires any-color control: the ability to specify an object's target color with any 24-bit hex value for image generation and editing. Prior work has explored ..."
+- 'link "Video DeltaNet: A Video-Native Hybrid Attention for Livestream Video Generation 2026-09-17 Haocheng Xi, Yiming Xie, Hexu Zhao, Yiwen Zhang, Michael Liu, Thomas Creavin, Kurt Keutzer, Xiuyu Li, Zhaoyang Lv, Chenfeng Xu, Haiwen Feng Video diffusion models repeatedly process long spatiotemporal token sequences during denoising, making attention a major computational bottleneck. Linear attention offers an appeal..."':
+  - /url: /papers/2609.20744/
+  - text: "Video DeltaNet: A Video-Native Hybrid Attention for Livestream Video Generation 2026-09-17 Haocheng Xi, Yiming Xie, Hexu Zhao, Yiwen Zhang, Michael Liu, Thomas Creavin, Kurt Keutzer, Xiuyu Li, Zhaoyang Lv, Chenfeng Xu, Haiwen Feng"
+  - paragraph: Video diffusion models repeatedly process long spatiotemporal token sequences during denoising, making attention a major computational bottleneck. Linear attention offers an appeal...
+- button "AI 채팅 열기"

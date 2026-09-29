@@ -16,18 +16,18 @@
 - region "논문 목록":
   - article:
     - text: 논문원본 바로가기
+    - link "On the Diffusibility of High-Dimensional Latents":
+      - /url: https://arxiv.org/pdf/2609.28473.pdf
+    - link "On the Diffusibility of High-Dimensional Latents 상세 보기":
+      - /url: /papers/2609.28473/
+      - text: Representation Autoencoders (RAEs) enable diffusion models to operate in the feature spaces of pretrained visual encoders. However, many off-the-shelf encoders are not optimized for faithful reconstru... ArXplore로 분석하기 2026-09-23 7
+  - article:
+    - text: 논문원본 바로가기
     - 'link "StudentBench: AI and human tutoring yield equivalent GRE learning..."':
       - /url: https://arxiv.org/pdf/2609.28470.pdf
     - 'link "StudentBench: AI and human tutoring yield equivalent GRE learning gains 상세 보기"':
       - /url: /papers/2609.28470/
       - text: Artificial intelligence offers an unprecedented opportunity to augment human capabilities, yet progress at the frontier has focused primarily on advancing model capabilities. We introduce StudentBench... ArXplore로 분석하기 2026-09-23 3
-  - article:
-    - text: 논문원본 바로가기
-    - 'link "Uranus: Building the Next-Generation Simulation Infrastructure fo..."':
-      - /url: https://arxiv.org/pdf/2609.24815.pdf
-    - 'link "Uranus: Building the Next-Generation Simulation Infrastructure for Embodied AI 상세 보기"':
-      - /url: /papers/2609.24815/
-      - text: Scalable simulation is essential for robot data generation, policy training, evaluation, and safe iteration, yet real-world interaction is costly and conventional simulators require labor-intensive co... ArXplore로 분석하기 2026-09-23 2
   - article:
     - text: 논문원본 바로가기
     - 'link "The Past Frames the Future: Memory for Autoregressive Video Gener..."':
@@ -44,11 +44,11 @@
       - text: Vision-Language-Action models provide a strong foundation for general-purpose robot control, yet a vast majority of policies do not preserve and leverage episode-level information beyond the current o... ArXplore로 분석하기 2026-09-23 10
   - article:
     - text: 논문원본 바로가기
-    - link "Hunyuan-A13B Technical Report":
-      - /url: https://arxiv.org/pdf/2609.27284.pdf
-    - link "Hunyuan-A13B Technical Report 상세 보기":
-      - /url: /papers/2609.27284/
-      - text: We present Hunyuan-A13B, an open-source large language model based on a Mixture-of-Experts architecture. It contains 80 billion total parameters but activates only 13 billion during inference, balanci... ArXplore로 분석하기 2026-09-23 10
+    - 'link "Six Layers Less: Encoder Pruning for Whisper with Label-Free Reco..."':
+      - /url: https://arxiv.org/pdf/2609.27980.pdf
+    - 'link "Six Layers Less: Encoder Pruning for Whisper with Label-Free Recovery 상세 보기"':
+      - /url: /papers/2609.27980/
+      - text: Pruning large pre-trained transformer-based ASR models such as OpenAI's Whisper has seen great adoption, as pruning the decoder led to significant end-to-end transcription speedups. For instance, the ... ArXplore로 분석하기 2026-09-23 4
   - article:
     - text: 논문원본 바로가기
     - 'link "All modalities are equal, but video is more equal: Closing the Cr..."':
@@ -58,18 +58,11 @@
       - text: Video is a rich representation of a physical event, capturing appearance, geometry, motion, and temporal evolution. Other modalities, such as 3D body motion or audio, encode narrower aspects of the sa... ArXplore로 분석하기 2026-09-23 8
   - article:
     - text: 논문원본 바로가기
-    - 'link "WhatWorkedBench: Benchmarking Experimental Understanding in AI Ag..."':
-      - /url: https://arxiv.org/pdf/2609.27490.pdf
-    - 'link "WhatWorkedBench: Benchmarking Experimental Understanding in AI Agents 상세 보기"':
-      - /url: /papers/2609.27490/
-      - text: AI research agents need reliable knowledge of how their experiments change outcomes. We introduce WhatWorkedBench to measure experimental understanding, the accuracy of predictions about component cha... ArXplore로 분석하기 2026-09-23 9
-  - article:
-    - text: 논문원본 바로가기
-    - 'link "Verifiable Hidden Dynamics Play: Generating Agentic RL Environmen..."':
-      - /url: https://arxiv.org/pdf/2609.27321.pdf
-    - 'link "Verifiable Hidden Dynamics Play: Generating Agentic RL Environments from Solved Mechanisms 상세 보기"':
-      - /url: /papers/2609.27321/
-      - text: Language-model agents increasingly face long-horizon tasks with evolving state, interdependent decisions, and delayed outcomes. Scaling their training requires diverse agentic environments, dependable... ArXplore로 분석하기 2026-09-23 12
+    - 'link "FLEET: From Logits Entropy to Enhanced Trajectories in Text Gener..."':
+      - /url: https://arxiv.org/pdf/2609.27657.pdf
+    - 'link "FLEET: From Logits Entropy to Enhanced Trajectories in Text Generation 상세 보기"':
+      - /url: /papers/2609.27657/
+      - text: Solutions based on large language models (LLMs) often rely on temperature sampling to improve accuracy and stability by aggregating multiple samples from the completion distribution. However, this mem... ArXplore로 분석하기 2026-09-23 4
   - article:
     - text: 논문원본 바로가기
     - 'link "InternW0: A Foundational Physical World Model for Efficient Real-..."':
@@ -79,32 +72,11 @@
       - text: "Physical intelligence requires more than predicting how the world may evolve: predictions must remain actionable as the world continues to change. We introduce InternW0, the first instantiation of the... ArXplore로 분석하기 2026-09-23 6"
   - article:
     - text: 논문원본 바로가기
-    - 'link "FLEET: From Logits Entropy to Enhanced Trajectories in Text Gener..."':
-      - /url: https://arxiv.org/pdf/2609.27657.pdf
-    - 'link "FLEET: From Logits Entropy to Enhanced Trajectories in Text Generation 상세 보기"':
-      - /url: /papers/2609.27657/
-      - text: Solutions based on large language models (LLMs) often rely on temperature sampling to improve accuracy and stability by aggregating multiple samples from the completion distribution. However, this mem... ArXplore로 분석하기 2026-09-23 4
-  - article:
-    - text: 논문원본 바로가기
-    - 'link "Six Layers Less: Encoder Pruning for Whisper with Label-Free Reco..."':
-      - /url: https://arxiv.org/pdf/2609.27980.pdf
-    - 'link "Six Layers Less: Encoder Pruning for Whisper with Label-Free Recovery 상세 보기"':
-      - /url: /papers/2609.27980/
-      - text: Pruning large pre-trained transformer-based ASR models such as OpenAI's Whisper has seen great adoption, as pruning the decoder led to significant end-to-end transcription speedups. For instance, the ... ArXplore로 분석하기 2026-09-23 4
-  - article:
-    - text: 논문원본 바로가기
-    - link "On the Diffusibility of High-Dimensional Latents":
-      - /url: https://arxiv.org/pdf/2609.28473.pdf
-    - link "On the Diffusibility of High-Dimensional Latents 상세 보기":
-      - /url: /papers/2609.28473/
-      - text: Representation Autoencoders (RAEs) enable diffusion models to operate in the feature spaces of pretrained visual encoders. However, many off-the-shelf encoders are not optimized for faithful reconstru... ArXplore로 분석하기 2026-09-23 7
-  - article:
-    - text: 논문원본 바로가기
-    - 'link "EmbodiedSWE: Coding Agents for Long Horizon Dexterous Robotics"':
-      - /url: https://arxiv.org/pdf/2609.27308.pdf
-    - 'link "EmbodiedSWE: Coding Agents for Long Horizon Dexterous Robotics 상세 보기"':
-      - /url: /papers/2609.27308/
-      - text: We study coding agents for long-horizon, dexterous robotics and ask whether their solutions can provide scalable supervision for learning general robot policies. To test this, we develop EMBODIEDSWE-B... ArXplore로 분석하기 2026-09-23 3
+    - 'link "WhatWorkedBench: Benchmarking Experimental Understanding in AI Ag..."':
+      - /url: https://arxiv.org/pdf/2609.27490.pdf
+    - 'link "WhatWorkedBench: Benchmarking Experimental Understanding in AI Agents 상세 보기"':
+      - /url: /papers/2609.27490/
+      - text: AI research agents need reliable knowledge of how their experiments change outcomes. We introduce WhatWorkedBench to measure experimental understanding, the accuracy of predictions about component cha... ArXplore로 분석하기 2026-09-23 9
   - article:
     - text: 논문원본 바로가기
     - 'link "Just-in-Time Memory: Learning to Curate Task-Adaptive Memory for ..."':
@@ -114,32 +86,32 @@
       - text: "Agentic memory systems reuse past experience to improve future performance, yet most existing designs curate memory at write time: once a task is completed, its trajectory is distilled into a fixed ar... ArXplore로 분석하기 2026-09-23 35"
   - article:
     - text: 논문원본 바로가기
-    - 'link "RoboFollow: Unveiling the Instruction Following Mirage in Embodie..."':
-      - /url: https://arxiv.org/pdf/2609.25636.pdf
-    - 'link "RoboFollow: Unveiling the Instruction Following Mirage in Embodied Agents 상세 보기"':
-      - /url: /papers/2609.25636/
-      - text: Modern embodied agents achieve impressive success rates, yet their actual instruction-following ability is far weaker than these numbers suggest. We trace this illusion to a structural property we ter... ArXplore로 분석하기 2026-09-22 13
+    - 'link "Verifiable Hidden Dynamics Play: Generating Agentic RL Environmen..."':
+      - /url: https://arxiv.org/pdf/2609.27321.pdf
+    - 'link "Verifiable Hidden Dynamics Play: Generating Agentic RL Environments from Solved Mechanisms 상세 보기"':
+      - /url: /papers/2609.27321/
+      - text: Language-model agents increasingly face long-horizon tasks with evolving state, interdependent decisions, and delayed outcomes. Scaling their training requires diverse agentic environments, dependable... ArXplore로 분석하기 2026-09-23 12
   - article:
     - text: 논문원본 바로가기
-    - 'link "PACT: From Credit Assignment to Critic Alignment"':
-      - /url: https://arxiv.org/pdf/2609.26355.pdf
-    - 'link "PACT: From Credit Assignment to Critic Alignment 상세 보기"':
-      - /url: /papers/2609.26355/
-      - text: Reinforcement learning has become a central component of large language model (LLM) post-training, yet token-level credit lacks a generally accepted mathematical definition, leaving its relationship t... ArXplore로 분석하기 2026-09-22 15
+    - 'link "EmbodiedSWE: Coding Agents for Long Horizon Dexterous Robotics"':
+      - /url: https://arxiv.org/pdf/2609.27308.pdf
+    - 'link "EmbodiedSWE: Coding Agents for Long Horizon Dexterous Robotics 상세 보기"':
+      - /url: /papers/2609.27308/
+      - text: We study coding agents for long-horizon, dexterous robotics and ask whether their solutions can provide scalable supervision for learning general robot policies. To test this, we develop EMBODIEDSWE-B... ArXplore로 분석하기 2026-09-23 3
   - article:
     - text: 논문원본 바로가기
-    - 'link "Agensh: Scaling Organizational Intelligence to 1,024 Agents"':
-      - /url: https://arxiv.org/pdf/2609.26781.pdf
-    - 'link "Agensh: Scaling Organizational Intelligence to 1,024 Agents 상세 보기"':
-      - /url: /papers/2609.26781/
-      - text: A multi-agent system can reduce latency on complex tasks by executing work concurrently. Several pioneering harness frameworks support multi-agent systems. However, the scalability of current multi-ag... ArXplore로 분석하기 2026-09-22 25
+    - link "Hunyuan-A13B Technical Report":
+      - /url: https://arxiv.org/pdf/2609.27284.pdf
+    - link "Hunyuan-A13B Technical Report 상세 보기":
+      - /url: /papers/2609.27284/
+      - text: We present Hunyuan-A13B, an open-source large language model based on a Mixture-of-Experts architecture. It contains 80 billion total parameters but activates only 13 billion during inference, balanci... ArXplore로 분석하기 2026-09-23 10
   - article:
     - text: 논문원본 바로가기
-    - link "Recursive self-improvement of AI research agents":
-      - /url: https://arxiv.org/pdf/2609.26457.pdf
-    - link "Recursive self-improvement of AI research agents 상세 보기":
-      - /url: /papers/2609.26457/
-      - text: AI agents are beginning to automate research and development across the AI stack, from improving training efficiency to optimizing inference. A natural next step is to improve the research efficiency ... ArXplore로 분석하기 2026-09-22 27
+    - 'link "Uranus: Building the Next-Generation Simulation Infrastructure fo..."':
+      - /url: https://arxiv.org/pdf/2609.24815.pdf
+    - 'link "Uranus: Building the Next-Generation Simulation Infrastructure for Embodied AI 상세 보기"':
+      - /url: /papers/2609.24815/
+      - text: Scalable simulation is essential for robot data generation, policy training, evaluation, and safe iteration, yet real-world interaction is costly and conventional simulators require labor-intensive co... ArXplore로 분석하기 2026-09-23 2
   - article:
     - text: 논문원본 바로가기
     - link "The Linear Representation Hypothesis Needs a Group Action":
@@ -149,11 +121,32 @@
       - text: To make claims about representations that generalize beyond a particular trained model, we need to specify when two representations should count as equivalent. The Linear Representation Hypothesis is ... ArXplore로 분석하기 2026-09-22 3
   - article:
     - text: 논문원본 바로가기
-    - 'link "Capable yet Parsimonious: Extracting and Characterizing Hidden Ch..."':
-      - /url: https://arxiv.org/pdf/2609.26637.pdf
-    - 'link "Capable yet Parsimonious: Extracting and Characterizing Hidden Chain-of-Thought in Frontier Models 상세 보기"':
-      - /url: /papers/2609.26637/
-      - text: The rapid capability gains of frontier language models are widely attributed to improved reasoning abilities, yet this cannot be verified as raw CoT traces in closed-source systems are hidden. By regi... ArXplore로 분석하기 2026-09-22 14
+    - 'link "Flash-dLLM: IO-Aware KV Caching and Parallel Decoding for Fast, M..."':
+      - /url: https://arxiv.org/pdf/2609.26796.pdf
+    - 'link "Flash-dLLM: IO-Aware KV Caching and Parallel Decoding for Fast, Memory-Efficient Diffusion LLMs 상세 보기"':
+      - /url: /papers/2609.26796/
+      - text: Diffusion Large Language Models (dLLMs) have recently emerged as a promising alternative to autoregressive LLMs by enabling non-autoregressive text generation. However, their practical deployment rema... ArXplore로 분석하기 2026-09-22 36
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "HARMONY: Hierarchical Agentic Reasoning for MONocular Image-to-Sc..."':
+      - /url: https://arxiv.org/pdf/2609.26793.pdf
+    - 'link "HARMONY: Hierarchical Agentic Reasoning for MONocular Image-to-Scene Synthesis 상세 보기"':
+      - /url: /papers/2609.26793/
+      - text: "Compositional 3D scene reconstruction has recently been explored from two directions: agentic reasoning that provides semantic understanding of spatial relationships but lacks precise alignment with i... ArXplore로 분석하기 2026-09-22 7"
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Agensh: Scaling Organizational Intelligence to 1,024 Agents"':
+      - /url: https://arxiv.org/pdf/2609.26781.pdf
+    - 'link "Agensh: Scaling Organizational Intelligence to 1,024 Agents 상세 보기"':
+      - /url: /papers/2609.26781/
+      - text: A multi-agent system can reduce latency on complex tasks by executing work concurrently. Several pioneering harness frameworks support multi-agent systems. However, the scalability of current multi-ag... ArXplore로 분석하기 2026-09-22 25
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "SpeakerMem-R1: Speaker-Centered Dual-Track Memory for Multi-Party..."':
+      - /url: https://arxiv.org/pdf/2609.26780.pdf
+    - 'link "SpeakerMem-R1: Speaker-Centered Dual-Track Memory for Multi-Party Dialogue 상세 보기"':
+      - /url: /papers/2609.26780/
+      - text: "Long-term conversational memory in multi-party settings requires more than retrieving relevant content from long-term conversations: it must distinguish who said what, whom each statement concerns, ho... ArXplore로 분석하기 2026-09-22 84"
   - article:
     - text: 논문원본 바로가기
     - 'link "StableVQ: Practical Guidelines for Stable Vector-Quantized Tokeni..."':
@@ -161,6 +154,13 @@
     - 'link "StableVQ: Practical Guidelines for Stable Vector-Quantized Tokenizer Training 상세 보기"':
       - /url: /papers/2609.26774/
       - text: Vector Quantization (VQ) is fundamental to discrete visual tokenizers that power modern autoregressive and masked image generation models. While recent shared-projection codebook methods have substant... ArXplore로 분석하기 2026-09-22 55
+  - article:
+    - text: 논문원본 바로가기
+    - 'link "Capable yet Parsimonious: Extracting and Characterizing Hidden Ch..."':
+      - /url: https://arxiv.org/pdf/2609.26637.pdf
+    - 'link "Capable yet Parsimonious: Extracting and Characterizing Hidden Chain-of-Thought in Frontier Models 상세 보기"':
+      - /url: /papers/2609.26637/
+      - text: The rapid capability gains of frontier language models are widely attributed to improved reasoning abilities, yet this cannot be verified as raw CoT traces in closed-source systems are hidden. By regi... ArXplore로 분석하기 2026-09-22 14
 - navigation "페이지 이동":
   - text: 1 / 14
   - link "다음 페이지":

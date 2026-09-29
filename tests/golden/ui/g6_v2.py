@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import shutil
 import socket
 import subprocess
@@ -24,6 +23,8 @@ UI_DIR = Path(__file__).resolve().parent
 REPO_ROOT = UI_DIR.parents[2]
 V2_FRONTEND = REPO_ROOT / "v2" / "frontend"
 V2_DIST = V2_FRONTEND / "dist"
+APP_COMMAND = Path(sys.executable).parent / "arxplore"
+SERVED_DIST = Path("frontend") / "dist"
 VARIANT_DIR = DATA_DIR / "g6_ui.v2"
 COPY_PREFIX = "v2_test_ui_"
 PORT_RANGE = range(18200, 18300)
@@ -99,57 +100,58 @@ def running(command: list[str], *, cwd: Path, env: dict[str, str], log_path: Pat
                 process.wait(timeout=30)
 
 
-def web_environ(django_port: int) -> dict[str, str]:
+def app_environ(server: FakeOpenAIServer, database_url: str) -> dict[str, str]:
     return {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/tmp"),
-        "API_PROXY_TARGET": f"http://127.0.0.1:{django_port}",
+        **g5_runner.runner_environ(),
+        **g5_runner.bundle_app_environ(server, database_url),
+        "RATE_LIMIT_ENABLED": "false",
+        "SERVE_FRONTEND_DIST": "true",
     }
+
+
+def serve_dist_from(workdir: Path) -> None:
+    link = workdir / SERVED_DIST
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(V2_DIST, target_is_directory=True)
+
+
+def migrate(workdir: Path, env: dict[str, str]) -> None:
+    completed = subprocess.run(
+        [str(APP_COMMAND), "migrate"], cwd=workdir, env=env, capture_output=True, text=True, check=False
+    )
+    if completed.returncode:
+        raise RuntimeError(f"arxplore migrate failed:\n{(completed.stdout + completed.stderr)[-3000:]}")
 
 
 def capture_v2(out_dir: Path) -> dict[str, object]:
     if not (V2_DIST / "index.html").is_file():
         raise FileNotFoundError(f"{V2_DIST} is missing; run npm ci && npm run build in v2/frontend")
+    if not APP_COMMAND.is_file():
+        raise FileNotFoundError(f"{APP_COMMAND} is missing; run the capture with the project environment")
     pdf = g6_ui.detail_pdf()
     out_dir.mkdir(parents=True, exist_ok=True)
     taken: set[int] = set()
     fake_port = free_port(taken)
-    django_port = free_port(taken)
-    web_port = free_port(taken)
+    api_port = free_port(taken)
     with ExitStack() as stack:
         workdir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="v2-g6-")))
+        serve_dist_from(workdir)
         copy_url = stack.enter_context(database_copy(f"{COPY_PREFIX}g6"))
         server = stack.enter_context(FakeOpenAIServer(chat_handler=g6_ui.ui_reply, port=fake_port))
-        django_env = {
-            **g5_runner.runner_environ(),
-            **g5_runner.bundle_app_environ(server, copy_url),
-            **environment.LEGACY_DJANGO_ENV,
-            "RATE_LIMIT_ENABLED": "false",
-        }
-        django_log = workdir / "django.log"
-        django = stack.enter_context(
+        env = app_environ(server, copy_url)
+        migrate(workdir, env)
+        api_log = workdir / "api.log"
+        api = stack.enter_context(
             running(
-                [sys.executable, str(REPO_ROOT / "backend" / "manage.py"), "runserver", f"127.0.0.1:{django_port}"]
-                + ["--insecure", "--noreload"],
+                [str(APP_COMMAND), "api", "--host", "127.0.0.1", "--port", str(api_port)],
                 cwd=workdir,
-                env=django_env,
-                log_path=django_log,
+                env=env,
+                log_path=api_log,
             )
         )
-        wait_until_ready(f"http://127.0.0.1:{django_port}/bootstrap.json", django, django_log, "Django")
-        web_log = workdir / "web.log"
-        web = stack.enter_context(
-            running(
-                [str(V2_FRONTEND / "node_modules" / ".bin" / "vite"), "preview", "--host", "127.0.0.1"]
-                + ["--port", str(web_port), "--strictPort"],
-                cwd=V2_FRONTEND,
-                env=web_environ(django_port),
-                log_path=web_log,
-            )
-        )
-        base_url = f"http://127.0.0.1:{web_port}"
-        wait_until_ready(f"{base_url}/", web, web_log, "vite preview")
-        wait_until_ready(f"{base_url}/bootstrap.json", web, web_log, "vite preview proxy")
+        base_url = f"http://127.0.0.1:{api_port}"
+        wait_until_ready(f"{base_url}/bootstrap.json", api, api_log, "arxplore api")
+        wait_until_ready(f"{base_url}/", api, api_log, "arxplore api frontend")
         subprocess.run(
             ["node", str(g6_ui.CAPTURE_SCRIPT), "--base-url", base_url, "--out", str(out_dir), "--pdf", str(pdf)]
             + ["--paper", g6_ui.DETAIL_PAPER, "--missing-paper", g6_ui.MISSING_PAPER, "--impl", "v2"],
