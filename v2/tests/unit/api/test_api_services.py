@@ -159,6 +159,16 @@ class TestRelatedPapers:
         ]
         assert store.recent_limits == [300]
 
+    async def test_equal_scores_votes_and_dates_are_ordered_by_arxiv_id_descending(self, helpers: ModuleType) -> None:
+        source = scored(helpers, "2401.00001", **SOURCE_OVERRIDES)
+        store = helpers.MemoryStore(
+            papers=[scored(helpers, arxiv_id, categories=["cs.CL"]) for arxiv_id in ("x-2", "x-9", "x-1", "x-5")]
+        )
+
+        related = await find_related_papers(store, helpers.FakeArxiv(), source, limit=4)
+
+        assert [paper.arxiv_id for paper in related] == ["x-9", "x-5", "x-2", "x-1"]
+
     async def test_external_search_only_fills_the_gap(self, helpers: ModuleType) -> None:
         source = scored(helpers, "2401.00001", **SOURCE_OVERRIDES)
         arxiv = helpers.FakeArxiv(

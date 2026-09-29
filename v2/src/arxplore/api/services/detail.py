@@ -155,7 +155,7 @@ def rank_local_related(paper: Paper, candidates: Sequence[Paper], seen_ids: set[
         seen_ids.add(candidate_id)
     return sorted(
         related,
-        key=lambda item: (item.relation_score, item.upvotes, item.published_at or ""),
+        key=lambda item: (item.relation_score, item.upvotes, item.published_at or "", item.arxiv_id),
         reverse=True,
     )
 

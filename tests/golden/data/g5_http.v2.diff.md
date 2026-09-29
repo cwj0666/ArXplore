@@ -67,3 +67,16 @@
 - 검사 조건과 순서는 그대로다. 405가 먼저이고 rate limit 카운트보다 앞이다. 보안 헤더 4종도 그대로 붙는다.
 - G5 차이는 1개 시나리오 `pages:csrf_failures`의 앞 네 응답이다. 상태 403은 같고, content-type이 `text/html`에서 `application/json`으로, 본문이 HTML에서 위 JSON으로 바뀐다. 다섯 번째 응답(신뢰 Origin, 404)은 같다.
 - G4 차이: 없음.
+
+## F32: 목록·관련 논문 정렬에 arxiv_id 동률 규칙
+
+- 최근 논문 조회를 새 저장소 모듈 `db/repositories/listing.py`로 옮겼다. 정렬은 `COALESCE(published_at, updated_at_utc) DESC, arxiv_id DESC`다. 목록(최근 1,500편), 관련 논문 후보(300편), 트렌딩 도구(10편)가 모두 이 조회를 쓴다.
+- 추천순 목록과 트렌딩 도구의 추천수 정렬은 안정 정렬이다. 그래서 추천수가 같으면 위 순서(날짜, 다음 arxiv_id 내림차순)를 따른다.
+- 관련 논문은 정렬 키 `(점수, 추천수, 발행일)`에 `arxiv_id`를 더했다. 모두 같으면 arxiv_id 내림차순이다.
+- 이전에는 `published_at` 값이 275편에 26종뿐이어서 같은 날짜 안의 순서가 힙 순서에 달려 있었다.
+- G5 차이(이전 v2 변형 대비 7개 시나리오, 목록 응답 9개)
+  - 기본 목록 1쪽(`list_default`, `list_page_invalid`의 세 응답, `list_unknown_sort_and_mode`): 같은 날짜 안에서 arxiv_id 내림차순으로 바뀌어 18자리가 움직인다. 경계에서 `2609.25636`, `2609.26355`, `2609.26457`이 2쪽으로 가고 `2609.26780`, `2609.26793`, `2609.26796`이 1쪽으로 온다.
+  - 2쪽(`list_page_two`, `detail_bucket_is_separate`의 목록 응답): 10편이 바뀐다.
+  - `list_query`(diffusion 23건): 1쪽 구성은 같고 순서만 11자리 바뀐다.
+  - 추천순 `list_query_upvotes_mode`와 상세의 관련 논문은 달라지지 않는다.
+- G4 차이: `agent_trending_then_link`의 트렌딩 도구 결과. 최근 10편에서 `2609.27321`, `2609.27284`가 빠지고 `2609.27980`, `2609.28470`이 들어온다. 1위 논문 `2609.28466`과 답변은 같다.

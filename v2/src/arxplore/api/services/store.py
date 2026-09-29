@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol
 
 from arxplore.db.pool import AnyPool
-from arxplore.db.repositories import fulltexts, generation_cache, papers
+from arxplore.db.repositories import fulltexts, generation_cache, listing, papers
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import AiOverview, DetailedSummary, Paper, PaperFulltext
 
@@ -37,7 +37,7 @@ class PostgresPaperStore:
         return await papers.get_paper(self.pool, arxiv_id)
 
     async def list_recent_papers(self, *, limit: int) -> Sequence[Paper]:
-        return await papers.list_recent_papers(self.pool, limit=limit)
+        return await listing.list_recent_papers(self.pool, limit=limit)
 
     async def get_fulltext(self, arxiv_id: str) -> PaperFulltext | None:
         return await fulltexts.get_fulltext(self.pool, arxiv_id)
