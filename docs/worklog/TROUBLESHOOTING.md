@@ -3,10 +3,11 @@
 `python scripts/worklog.py index`가 생성한다. 손으로 고치지 않는다.
 각 항목의 **트러블슈팅** 절을 그대로 옮긴다. 고칠 때는 항목 파일을 고치고 `index`를 다시 실행한다.
 
-항목 29개, 사례 40건.
+항목 30개, 사례 41건.
 
 | phase | 날짜 | 제목 | 영역 |
 |---|---|---|---|
+| 5 | 2026-09-29 | [v2를 저장소 루트로 올리고 옛 구현 삭제, 골든 하네스를 v2 기본으로 정리](phase-5/2026-09-29_11_v2를-저장소-루트로-올리고-옛-구현-삭제,-골든-하네스를-v2-기본으로-정리.md) | infra, tooling, docs |
 | 5 | 2026-09-29 | [LLM 계층 create_agent 이식과 FastAPI 전환](phase-5/2026-09-29_07_LLM-계층-create_agent-이식과-FastAPI-전환.md) | agent, backend |
 | 5 | 2026-09-29 | [Airflow를 cron 스케줄러로 바꾸고 prepare 파이프라인 수정](phase-5/2026-09-29_06_Airflow를-cron-스케줄러로-바꾸고-prepare-파이프라인-수정.md) | pipeline, infra |
 | 5 | 2026-09-29 | [파싱·청킹 동등 이식과 청크·정규화·HURIDOCS 수정](phase-5/2026-09-29_05_파싱·청킹-동등-이식과-청크·정규화·HURIDOCS-수정.md) | pipeline, retrieval |
@@ -38,6 +39,21 @@
 | 0 | 2026-09-25 | [PDF 파서 믹스인 참조 복구](phase-0/2026-09-25_01_PDF-파서-믹스인-참조-복구.md) | pipeline |
 
 ## Phase 5
+
+### [v2를 저장소 루트로 올리고 옛 구현 삭제, 골든 하네스를 v2 기본으로 정리](phase-5/2026-09-29_11_v2를-저장소-루트로-올리고-옛-구현-삭제,-골든-하네스를-v2-기본으로-정리.md)
+
+phase 5 · 2026-09-29 · infra, tooling, docs
+
+**트러블슈팅** — 가짜 서버의 스트림 중단 테스트가 새 환경에서 실패
+
+- 증상: 골든 하네스를 프로젝트 환경(Python 3.14)으로 돌리자 `tests/fakes/test_openai_server.py::test_a_reply_can_abort_the_stream_after_some_events`가
+  실패했다. 옛 환경(Python 3.12)에서는 통과하던 테스트다.
+- 원인: openai 3.3은 httpx 대신 httpx2로 요청을 보낸다. 가짜 서버가 스트림을 끊으면 `httpx2.RemoteProtocolError`가 올라오는데,
+  테스트는 `httpx.HTTPError`나 `openai.APIError`만 기다렸다.
+- 확인 방법: 실패 트레이스백의 예외 모듈과 `openai` 배포본의 의존성(`Requires-Dist: httpx2`), `httpx2.RemoteProtocolError`의
+  MRO를 확인했다.
+- 해결: 74ed1a3에서 `httpx2.HTTPError`도 기대 예외로 받는다. 프로젝트 환경에서 가짜 서버 테스트 27개가 통과한다.
+- 재발 방지: 가짜 서버와 골든 하네스 테스트가 CI python 잡에서 프로젝트 환경으로 돈다(31f1a77).
 
 ### [LLM 계층 create_agent 이식과 FastAPI 전환](phase-5/2026-09-29_07_LLM-계층-create_agent-이식과-FastAPI-전환.md)
 
