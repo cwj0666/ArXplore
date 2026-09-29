@@ -202,11 +202,21 @@ def test_a_short_tail_stays_a_separate_chunk_when_absorbing_would_exceed_max_cha
     assert chunks[1]["chunk_text"].endswith("large language models. and a short tail")
 
 
-def test_a_short_section_is_absorbed_into_the_previous_section_with_the_same_title():
+def test_a_short_section_stays_separate_even_when_the_previous_section_has_the_same_title():
     chunks = build_chunks("body", [section("2 Method", BODY_PARAGRAPH[:500]), section("2 Method", "and a short tail")])
 
-    assert len(chunks) == 1
-    assert chunks[0]["chunk_text"] == BODY_PARAGRAPH[:500].strip() + "\nand a short tail"
+    assert [(chunk["metadata"]["section_index"], chunk["chunk_text"]) for chunk in chunks] == [
+        (0, BODY_PARAGRAPH[:500].strip()),
+        (1, "and a short tail"),
+    ]
+
+
+def test_absorption_stays_within_a_section():
+    text = BODY_PARAGRAPH[:1700] + "and a short tail"
+
+    chunks = build_chunks("body", [section("2 Method", text), section("3 Results", "tiny")])
+
+    assert [chunk["chunk_text"] for chunk in chunks] == [text, "tiny"]
 
 
 def test_a_short_first_sentence_is_kept():

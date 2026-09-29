@@ -151,7 +151,7 @@ def _next_chunk_start(text: str, *, start: int, end: int, overlap_chars: int) ->
 def _should_absorb(drafts: Sequence[_ChunkDraft], new: _ChunkDraft) -> bool:
     if not drafts:
         return False
-    if drafts[-1].section_title != new.section_title:
+    if drafts[-1].section_index != new.section_index:
         return False
     new_text = new.text
     if len(new_text) >= TINY_CHUNK_CHARS and not (
@@ -168,9 +168,7 @@ def _should_absorb(drafts: Sequence[_ChunkDraft], new: _ChunkDraft) -> bool:
 
 
 def _merged_text(previous: _ChunkDraft, new: _ChunkDraft, section_text: str) -> str:
-    if previous.section_index == new.section_index:
-        return section_text[previous.char_start : new.char_end].strip()
-    return f"{previous.text.rstrip()}\n{new.text.lstrip()}".strip()
+    return section_text[previous.char_start : new.char_end].strip()
 
 
 def _absorb(previous: _ChunkDraft, new: _ChunkDraft, merged_text: str) -> None:
