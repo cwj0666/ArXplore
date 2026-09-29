@@ -12,7 +12,7 @@
 
 - 마이그레이션 `0004_ai_cache_prompt_version`이 `paper_ai_overviews`와 `paper_ai_detailed_summaries`에 `prompt_version INTEGER NOT NULL DEFAULT 1`(양수 CHECK)을 더한다. 기존 행은 모두 버전 1이 된다.
 - 조회는 `prompt_version`이 현재 버전과 같은 행만 캐시로 본다. 다른 버전의 행은 없는 것으로 보고 새로 만들며, 저장할 때 같은 행을 덮어쓰고 버전을 바꾼다. 행 키(`arxiv_id`, 요약은 `arxiv_id, model`)는 그대로다.
-- 현재 버전은 개요·핵심 포인트 `ANALYSIS_PROMPT_VERSION = 1`, 상세 요약 `SUMMARY_PROMPT_VERSION = 1`이다. 옛 프롬프트와 같으므로 기존 캐시가 그대로 쓰인다.
+- 이 커밋의 버전은 개요·핵심 포인트 `ANALYSIS_PROMPT_VERSION = 1`, 상세 요약 `SUMMARY_PROMPT_VERSION = 1`이다. 옛 프롬프트와 같으므로 기존 캐시가 그대로 쓰인다. 두 버전은 뒤의 "F22 후속" 커밋에서 2로 올렸다.
 - G5·G4 차이: 없음. 골든 DB 복사본에 0004를 적용한 뒤에도 60/60, 60/60이 같다. 캐시가 있는 `analyze_cached`, `summary_cached`, `*_without_key`의 캐시 응답이 그대로 나온다.
 
 ## F20: 핵심 포인트 번호 제거가 소수를 자르지 않게
@@ -106,3 +106,15 @@
   - `list_query_word_order`(`models diffusion`): 0편에서 12편이 된다. 위 시나리오와 같은 12편이 같은 순서로 나온다.
   - 한 단어 검색 `list_query`(`diffusion` 23편), 기본 목록, 쪽 넘김, 추천순은 그대로다.
 - G4 차이: 없음.
+
+## F22 후속: 프롬프트 버전 2
+
+- `ANALYSIS_PROMPT_VERSION`(개요·핵심 포인트)과 `SUMMARY_PROMPT_VERSION`(상세 요약)을 1에서 2로 올렸다. 이미 캐시된 결과도 F20·F21이 반영된 결과로 다시 만들기 위해서다. 프롬프트 문자열과 생성 과정은 그대로다.
+- 버전 1 행은 캐시로 보지 않는다. 0004 전에 쓰인 행과 그 뒤 이 커밋 전까지 저장된 행이 모두 버전 1이다. 키가 있으면 첫 요청 때 새로 만들고 같은 행을 버전 2로 덮어쓴다. 키가 없으면 캐시 응답 대신 503이다. F20·F21 절에 적은, 캐시된 결과를 다시 만들지 않는다는 설명은 이 커밋부터 맞지 않는다.
+- 비용: 버전 1 캐시가 있는 논문은 처음 요청할 때 다시 생성한다. 개요·핵심 포인트는 LLM 2회다. 상세 요약은 모델마다 섹션 수에 따라 여러 번이고, 골든 논문 `2609.28470`은 13회다.
+- G5·G4 차이(이전 v2 변형 대비 4개 시나리오, 모두 골든 DB에 캐시가 있는 `2609.28470`)
+  - `analyze:analyze_cached`: 버전 1 캐시를 쓰지 않고 새로 만든다. `cached`가 true에서 false가 되고, `overview`와 `key_findings`(5개에서 1개)가 가짜 서버 답으로 바뀐다. G4에 gpt-5-mini 호출 2회가 생긴다.
+  - `summary:summary_cached`: 같은 이유로 새로 만든다. `cached`가 false가 되고 `summary`가 가짜 서버 답으로 바뀐다. G4에 gpt-5-mini 호출 13회가 생긴다.
+  - `analyze:analyze_without_key`(두 번째 응답), `summary:summary_without_key`(첫 번째 응답): 여전히 200 `cached: true`다. 다만 값은 같은 번들에서 먼저 도는 `analyze_cached`, `summary_cached`가 번들 DB 사본에 버전 2로 저장한 결과다. 두 시나리오의 나머지 응답(404, 503, 400)은 같다.
+  - 그 밖의 시나리오는 그대로다. 생성 시나리오(`analyze_generate_then_cached`, `summary_generate_*`)는 캐시가 없던 논문이라 달라지지 않는다.
+- 알려진 문제: `summary_cached`는 LLM 기록 방식이 기본값 `sequence`라서 요청이 도착한 순서대로 비교한다. 이제 이 시나리오도 버킷을 병렬로 도는 요약 그래프를 타므로, 버킷 사이 요청 순서가 실행마다 바뀌어 G4 비교가 가끔 실패한다(이 커밋의 변형으로 5회 중 3회 실패). 하네스(`tests/golden/g5_http.py`)에서 이 시나리오를 `llm_layout="summary_graph"`로 바꾼 뒤 변형을 다시 잡아야 한다.

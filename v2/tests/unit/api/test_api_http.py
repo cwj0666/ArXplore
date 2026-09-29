@@ -15,6 +15,8 @@ from arxplore.api.errors import (
     STREAM_ERROR_MESSAGE,
     UNSUPPORTED_MODEL_MESSAGE,
 )
+from arxplore.llm.detail import ANALYSIS_PROMPT_VERSION
+from arxplore.llm.summary_graph import SUMMARY_PROMPT_VERSION
 from arxplore.sources.arxiv import ArxivPaper
 
 SECURITY_HEADERS = {
@@ -373,15 +375,15 @@ class TestGeneration:
         assert first.json() == {"overview": "새 개요", "key_findings": ["첫 번째 핵심 포인트입니다."], "cached": False}
         assert second.json() == {**first.json(), "cached": True}
         assert [body["model"] for body in harness.llm_requests()] == ["gpt-5-mini", "gpt-5-mini"]
-        assert harness.store.overviews[(ids["main"], 1)].model == "gpt-5-mini"
+        assert harness.store.overviews[(ids["main"], ANALYSIS_PROMPT_VERSION)].model == "gpt-5-mini"
 
-    async def test_results_cached_under_another_prompt_version_are_regenerated(
+    async def test_results_cached_under_version_1_are_regenerated(
         self, harness: Any, helpers: ModuleType, ids: dict[str, str]
     ) -> None:
         stale = helpers.AiOverview(overview="stale", key_findings=[], model="gpt-5-mini", generated_at=None)
-        harness.store.overviews = {(ids["main"], 99): stale}
+        harness.store.overviews = {(ids["main"], 1): stale}
         harness.store.summaries = {
-            (ids["main"], "gpt-5", 99): helpers.DetailedSummary(summary="stale", model="gpt-5", generated_at=None)
+            (ids["main"], "gpt-5", 1): helpers.DetailedSummary(summary="stale", model="gpt-5", generated_at=None)
         }
 
         async with harness.client() as client:
@@ -390,8 +392,8 @@ class TestGeneration:
 
         assert overview.json()["cached"] is False
         assert summary.json()["cached"] is False
-        assert (ids["main"], 1) in harness.store.overviews
-        assert (ids["main"], "gpt-5", 1) in harness.store.summaries
+        assert harness.store.overviews[(ids["main"], ANALYSIS_PROMPT_VERSION)].overview != "stale"
+        assert harness.store.summaries[(ids["main"], "gpt-5", SUMMARY_PROMPT_VERSION)].summary != "stale"
 
     async def test_overview_errors(self, harness: Any, ids: dict[str, str]) -> None:
         async with harness.client(OPENAI_API_KEY=" ") as client:
@@ -436,7 +438,9 @@ class TestGeneration:
         assert first.json()["cached"] is False and first.json()["model"] == "gpt-5"
         assert again.json() == {**first.json(), "cached": True}
         assert {body["model"] for body in harness.llm_requests()} == {"gpt-5"}
-        assert harness.store.summaries[(ids["main"], "gpt-5", 1)].summary == first.json()["summary"]
+        assert (
+            harness.store.summaries[(ids["main"], "gpt-5", SUMMARY_PROMPT_VERSION)].summary == first.json()["summary"]
+        )
 
     async def test_generation_failures_are_generic(self, harness: Any, ids: dict[str, str]) -> None:
         def fail(request: Any) -> Any:

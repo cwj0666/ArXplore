@@ -11,6 +11,8 @@ from fastapi import FastAPI
 from arxplore.api.app import create_app
 from arxplore.config import AppSettings
 from arxplore.db.migrate import SchemaNotReadyError
+from arxplore.llm.detail import ANALYSIS_PROMPT_VERSION
+from arxplore.llm.summary_graph import SUMMARY_PROMPT_VERSION
 
 pytestmark = pytest.mark.integration
 
@@ -89,6 +91,39 @@ async def test_generated_overview_and_summary_are_cached_in_postgres(
     async with await psycopg.AsyncConnection.connect(api_database) as connection:
         cursor = await connection.execute("SELECT model FROM paper_ai_overviews WHERE arxiv_id = %s", (MAIN_ID,))
         assert await cursor.fetchall() == [("gpt-5-mini",)]
+
+
+async def test_results_cached_before_the_version_bump_are_regenerated(
+    api_database: str, api_settings: Callable[..., AppSettings], fake_openai: Any
+) -> None:
+    fake_openai.chat_handler = lambda request: "새로 만든 결과"
+    async with await psycopg.AsyncConnection.connect(api_database, autocommit=True) as connection:
+        await connection.execute(
+            "INSERT INTO paper_ai_overviews (arxiv_id, overview, model) VALUES (%s, 'old', 'gpt-5-mini')", (MAIN_ID,)
+        )
+        await connection.execute(
+            "INSERT INTO paper_ai_detailed_summaries (arxiv_id, model, summary) VALUES (%s, 'gpt-5', 'old')", (MAIN_ID,)
+        )
+
+    async with serve(api_settings(OPENAI_API_KEY="  ")) as client:
+        stale_overview = await post(client, f"/papers/{MAIN_ID}/analyze/")
+        stale_summary = await post(client, f"/papers/{MAIN_ID}/summary/", {"model": "gpt-5"})
+    async with serve(api_settings()) as client:
+        overview = (await post(client, f"/papers/{MAIN_ID}/analyze/")).json()
+        summary = (await post(client, f"/papers/{MAIN_ID}/summary/", {"model": "gpt-5"})).json()
+
+    assert (stale_overview.status_code, stale_summary.status_code) == (503, 503)
+    assert (overview["overview"], overview["cached"]) == ("새로 만든 결과", False)
+    assert (summary["summary"], summary["cached"]) == ("새로 만든 결과", False)
+    async with await psycopg.AsyncConnection.connect(api_database) as connection:
+        overviews = await connection.execute(
+            "SELECT overview, prompt_version FROM paper_ai_overviews WHERE arxiv_id = %s", (MAIN_ID,)
+        )
+        summaries = await connection.execute(
+            "SELECT summary, prompt_version FROM paper_ai_detailed_summaries WHERE arxiv_id = %s", (MAIN_ID,)
+        )
+        assert await overviews.fetchall() == [("새로 만든 결과", ANALYSIS_PROMPT_VERSION)]
+        assert await summaries.fetchall() == [("새로 만든 결과", SUMMARY_PROMPT_VERSION)]
 
 
 async def test_paper_chat_streams_over_lexical_retrieval(

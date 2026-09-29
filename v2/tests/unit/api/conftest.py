@@ -21,7 +21,9 @@ from arxplore.config import AppSettings, RetrievalMode
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import AiOverview, DetailedSummary, Paper, PaperFulltext
 from arxplore.domain.retrieval import RetrievalContext, RetrievalHit, RetrievalResult
+from arxplore.llm.detail import ANALYSIS_PROMPT_VERSION
 from arxplore.llm.models import ChatModelFactory
+from arxplore.llm.summary_graph import SUMMARY_PROMPT_VERSION
 from arxplore.llm.tracing import Tracer
 from arxplore.sources.arxiv import ArxivPaper
 
@@ -242,12 +244,12 @@ def seeded_store() -> MemoryStore:
         },
         chunks={MAIN_ID: [make_chunk(MAIN_ID, 1, "first chunk"), make_chunk(MAIN_ID, 2, "second chunk", None)]},
         overviews={
-            (CACHED_ID, 1): AiOverview(
+            (CACHED_ID, ANALYSIS_PROMPT_VERSION): AiOverview(
                 overview="cached overview", key_findings=["k1"], model="gpt-5-mini", generated_at=None
             )
         },
         summaries={
-            (CACHED_ID, "gpt-5-mini", 1): DetailedSummary(
+            (CACHED_ID, "gpt-5-mini", SUMMARY_PROMPT_VERSION): DetailedSummary(
                 summary="cached summary", model="gpt-5-mini", generated_at=None
             )
         },

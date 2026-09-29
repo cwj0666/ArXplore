@@ -95,7 +95,7 @@ async def test_leaving_during_an_overview_cancels_it_and_caches_nothing(
 
     assert statuses(sent) == [499]
     assert slow_model.calls == 1
-    assert (ids["main"], 1) not in harness.store.overviews
+    assert all(arxiv_id != ids["main"] for arxiv_id, _ in harness.store.overviews)
 
 
 async def test_leaving_during_a_summary_cancels_the_graph(
@@ -105,7 +105,7 @@ async def test_leaving_during_a_summary_cancels_the_graph(
         sent = await call_and_disconnect(app, f"/papers/{ids['main']}/summary/", {"model": "gpt-5"}, slow_model)
 
     assert statuses(sent) == [499]
-    assert not harness.store.summaries.keys() - {(ids["cached"], "gpt-5-mini", 1)}
+    assert all(arxiv_id != ids["main"] for arxiv_id, _, _ in harness.store.summaries)
 
 
 @pytest.mark.parametrize("path", ["/papers/{main}/chat/", "/papers/assistant/chat/"])

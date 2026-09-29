@@ -15,7 +15,7 @@ from arxplore.llm.tracing import Tracer
 from arxplore.parsing.roles import FRONT_MATTER_ROLE, REFERENCES_ROLE, TOC_ROLE, section_role
 from arxplore.text import collapse_whitespace
 
-SUMMARY_PROMPT_VERSION = 1
+SUMMARY_PROMPT_VERSION = 2
 FALLBACK_TEXT_MAX_CHARS = 12000
 SECTION_TEXT_MAX_CHARS = 3200
 MERGED_SUMMARY_MAX_CHARS = 22000
