@@ -110,3 +110,26 @@ F33 대비(G3-layout 재생)
 1. 2609.09143: `C.6 …` 섹션 본문에 `Elimitations`로 붙어 있던 제목이 `E Limitations` 섹션이 된다.
 2. 2609.27158: 섹션 제목 `5 Asymmetry Audit …`가 원문대로 `5 A Symmetry Audit …`가 된다.
 3. 2609.22319: 논문 제목(Front Matter 본문) `Embedding Physics Priors in Robot Learning: Asurvey`가 `…: A Survey`가 된다.
+
+## F35: 러닝 헤더는 여러 쪽에 반복되는 줄만
+
+- 공용 `normalize_text`에서 쪽 번호 모양 줄을 지우던 정규식 3개를 없앴다.
+  - `\n머리글 12\n` 꼴의 러닝 헤더
+  - `12•…`, `…•12` 꼴의 bullet 머리글·바닥글
+  - 이 정규식들은 쪽 정보 없이 모든 텍스트(layout 본문, 섹션, 청커)에서 숫자로 끝나는 짧은 줄을 지웠다.
+- pypdf 쪽 정리에서 줄 하나만 보고 판정하던 규칙(`looks_like_running_header_footer`)도 없앴다.
+- 대신 pypdf 쪽 텍스트(`pdf_text.text_from_pages`)에서 여러 쪽에 반복되는 줄만 지운다.
+  - 대상은 쪽마다 비지 않은 첫 2줄과 마지막 2줄이다.
+  - 숫자를 `#`로 바꾼 같은 줄이 `max(3, 쪽 수의 40%)`쪽 이상에 나오면 러닝 헤더·바닥글로 보고, 그 쪽들의 가장자리에서 지운다.
+  - 숫자뿐인 줄(쪽 번호)은 예전처럼 따로 지운다.
+- layout 경로는 HURIDOCS가 `Page header`/`Page footer`로 표시한 segment만 버린다.
+  - G3-layout 표본에서 여러 쪽에 반복된 머리글·바닥글은 모두 이렇게 표시돼 있었다.
+
+F34 대비(G3-layout 재생)
+- 텍스트가 바뀐 청크는 4편 7개다: 2609.27980 1, 2609.10539 2, 2609.27158 1, 2609.25199 3. 섹션 수와 청크 수는 같다.
+- 예전에 `normalize_text`가 지우던 본문 줄 6개가 남는다.
+
+예시
+1. 2609.27980: 저자 줄 `Rasmus Aagaard 1, 2, Nicki Skafte Detlefsen 1`
+2. 2609.10539: 프롬프트 예시 제목 `Example 1`, `Example 2`, `Example 3`
+3. 2609.25199: 표 행 `Comparison Pairs Same verdict Same PR 69 37 Same reviewed revision 0 0`

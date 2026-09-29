@@ -5,7 +5,7 @@ import pytest
 from arxplore.parsing.pdf_text import (
     extract_page_texts,
     extract_pdf_text,
-    looks_like_running_header_footer,
+    find_running_lines,
     merge_lines,
     normalize_page_text,
     parse_pdf_bytes,
@@ -26,9 +26,6 @@ from arxplore.parsing.pdf_text import (
         "*Equal contribution",
         "/uni00000031/uni00000032",
         "a /uni00000031 b /uni00000032 c /uni00000033",
-        "Journal of Things•12",
-        "3•Journal Name Here",
-        "Large Language Models for Science 14",
         "Contents",
         "2.1 Setup . . . . . . 7",
     ],
@@ -79,11 +76,66 @@ def test_split_inline_heading_line():
     assert split_inline_heading_line("Plain body text") == ["Plain body text"]
 
 
-def test_looks_like_running_header_footer():
-    assert looks_like_running_header_footer("Proceedings of Things 2026 7")
-    assert looks_like_running_header_footer("We train 12")
-    assert not looks_like_running_header_footer("The loss drops to 0.5.")
-    assert not looks_like_running_header_footer("Abbreviations 12")
+def body_lines(page: int) -> list[str]:
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    return [f"The {letters[page % 26]}{letters[offset]} paragraph continues on this page." for offset in range(6)]
+
+
+def page_with(page: int, *, top: list[str], bottom: list[str]) -> str:
+    return "\n".join([*top, *body_lines(page), *bottom])
+
+
+def test_find_running_lines_needs_the_same_edge_line_on_enough_pages():
+    pages = [
+        page_with(page, top=["Published as a conference paper at ICLR 2026"], bottom=[str(page + 1)])
+        for page in range(10)
+    ]
+
+    assert find_running_lines(pages) == frozenset({"Published as a conference paper at ICLR #"})
+    assert find_running_lines(pages[:2]) == frozenset()
+
+
+def test_find_running_lines_ignores_lines_repeated_only_on_a_few_pages():
+    pages = [page_with(page, top=["Frontier proprietary models"] if page < 3 else [], bottom=[]) for page in range(10)]
+
+    assert find_running_lines(pages) == frozenset()
+
+
+def test_find_running_lines_ignores_repeated_lines_in_the_middle_of_pages():
+    pages = ["\n".join([*body_lines(page)[:3], "Repeated middle line", *body_lines(page)[3:]]) for page in range(5)]
+
+    assert find_running_lines(pages) == frozenset()
+
+
+def test_find_running_lines_matches_page_numbers_inside_the_line():
+    pages = [page_with(page, top=[f"The Authors {page * 2 + 1}"], bottom=[]) for page in range(6)]
+
+    assert find_running_lines(pages) == frozenset({"The Authors #"})
+
+
+def test_text_from_pages_drops_running_headers_and_keeps_body_lines_ending_in_numbers():
+    unique_top = ["Table 3 shows accuracy of 95", "Example 1", "Rasmus Aagaard 1, 2, Nicki Skafte Detlefsen 1"]
+    pages = [
+        page_with(
+            page,
+            top=["Journal Title 12(3)", *unique_top[page : page + 1]],
+            bottom=["Prepared using sagej.cls"],
+        )
+        for page in range(5)
+    ]
+
+    text = text_from_pages(pages)
+
+    assert "Journal Title" not in text
+    assert "sagej" not in text
+    for line in unique_top:
+        assert line in text
+
+
+def test_a_running_line_is_only_dropped_at_the_page_edges():
+    pages = ["\n".join(["Preprint", *body_lines(page)[:3], "Preprint", *body_lines(page)[3:]]) for page in range(4)]
+
+    assert text_from_pages(pages).count("Preprint") == 4
 
 
 @pytest.mark.parametrize(

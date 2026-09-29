@@ -1,7 +1,9 @@
 import io
 import logging
+import math
 import re
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Iterable, Sequence
 
 from pypdf import PdfReader
 
@@ -18,10 +20,12 @@ _ARXIV_STAMP_LINE = re.compile(r"^arXiv:\d{4}\.\d{4,5}v?\d*")
 _EQUAL_CONTRIBUTION_LINE = re.compile(r"^\*?Equal contribution", re.IGNORECASE)
 _UNICODE_GLYPH_LINE = re.compile(r"^(?:/uni\d{8})+$")
 _UNICODE_GLYPH = re.compile(r"/uni\d{8}")
-_BULLET_PAGE_NUMBER_END = re.compile(r"•\d{1,3}$")
-_PAGE_NUMBER_BULLET_TITLE = re.compile(r"\d+•[A-Z][A-Za-z .'-]+")
-_TITLE_WITH_PAGE_NUMBER = re.compile(r"[A-Z][A-Za-z0-9:,\-\u2013' ]{8,100}\d{1,3}$")
 _SENTENCE_END = (".", "?", "!", ":", ";")
+_DIGIT_RUN = re.compile(r"\d+")
+_LETTER = re.compile(r"[^\W\d_]")
+RUNNING_LINE_EDGE_LINES = 2
+RUNNING_LINE_MIN_PAGES = 3
+RUNNING_LINE_MIN_PAGE_SHARE = 0.4
 _CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z])(?=[A-Z][A-Za-z-]{2,})")
 _SPLIT_MARK = "\x00"
 UNSPLIT_BRAND_NAMES = (
@@ -37,17 +41,27 @@ _UNSPLIT_BRANDS = tuple(
 )
 
 
-def looks_like_running_header_footer(line: str) -> bool:
-    compact = collapse_whitespace(line)
-    if _BULLET_PAGE_NUMBER_END.search(compact):
-        return True
-    if _PAGE_NUMBER_BULLET_TITLE.fullmatch(compact):
-        return True
-    if _TITLE_WITH_PAGE_NUMBER.fullmatch(compact):
-        words = compact[:-3].split()
-        if 2 <= len(words) <= 16:
-            return True
-    return False
+def running_line_key(line: str) -> str:
+    return _DIGIT_RUN.sub("#", collapse_whitespace(line))
+
+
+def _page_lines(text: str) -> list[str]:
+    return [line.strip() for line in text.replace("\x00", " ").splitlines()]
+
+
+def _edge_line_indexes(lines: Sequence[str]) -> set[int]:
+    filled = [index for index, line in enumerate(lines) if line]
+    return {*filled[:RUNNING_LINE_EDGE_LINES], *filled[-RUNNING_LINE_EDGE_LINES:]}
+
+
+def find_running_lines(page_texts: Sequence[str]) -> frozenset[str]:
+    pages_with_line: Counter[str] = Counter()
+    for text in page_texts:
+        lines = _page_lines(text)
+        keys = {running_line_key(lines[index]) for index in _edge_line_indexes(lines)}
+        pages_with_line.update(key for key in keys if _LETTER.search(key))
+    threshold = max(RUNNING_LINE_MIN_PAGES, math.ceil(RUNNING_LINE_MIN_PAGE_SHARE * len(page_texts)))
+    return frozenset(key for key, count in pages_with_line.items() if count >= threshold)
 
 
 def _is_dropped_page_line(line: str) -> bool:
@@ -58,7 +72,6 @@ def _is_dropped_page_line(line: str) -> bool:
         or _EQUAL_CONTRIBUTION_LINE.match(line)
         or _UNICODE_GLYPH_LINE.match(line)
         or len(_UNICODE_GLYPH.findall(line)) >= 3
-        or looks_like_running_header_footer(line)
         or looks_like_toc_line(line)
     )
 
@@ -95,12 +108,15 @@ def merge_lines(previous: str, current: str) -> str:
     return previous.rstrip() + " " + current.lstrip()
 
 
-def normalize_page_text(text: str) -> str:
+def normalize_page_text(text: str, running_lines: frozenset[str] = frozenset()) -> str:
+    lines = _page_lines(text)
+    edges = _edge_line_indexes(lines) if running_lines else set()
     filtered_lines: list[str] = []
-    for raw_line in text.replace("\x00", " ").splitlines():
-        line = raw_line.strip()
+    for index, line in enumerate(lines):
         if not line:
             filtered_lines.append("")
+            continue
+        if index in edges and running_line_key(line) in running_lines:
             continue
         if _is_dropped_page_line(line):
             continue
@@ -128,7 +144,9 @@ def split_camel_case(text: str) -> str:
 
 
 def text_from_pages(page_texts: Iterable[str]) -> str:
-    pages = [normalized for normalized in map(normalize_page_text, page_texts) if normalized]
+    raw_pages = list(page_texts)
+    running_lines = find_running_lines(raw_pages)
+    pages = [normalized for page in raw_pages if (normalized := normalize_page_text(page, running_lines))]
     return split_camel_case(normalize_text("\n\n".join(pages)))
 
 

@@ -21,9 +21,6 @@ SHORT_TITLE_REJECTED_OPENINGS = ("This ", "These ", "We ", "Our ", "In ", "To ",
 
 _NUL = "\x00"
 _HYPHENATED_LINE_BREAK = re.compile(r"(?<=\w)-\n(?=\w)")
-_BULLET_PAGE_NUMBER_HEADER = re.compile(r"\n\d+•[A-Z][^\n]{0,100}\n")
-_BULLET_PAGE_NUMBER_FOOTER = re.compile(r"\n[A-Z][^\n]{0,100}•\d+\n")
-_PAGE_NUMBERED_RUNNING_HEADER = re.compile(r"\n[A-Z][A-Za-z0-9][A-Za-z0-9 :,\-\u2013'.]{3,80}\s+\d{1,3}\n")
 _HORIZONTAL_WHITESPACE = re.compile(r"[ \t]+")
 _EXCESS_BLANK_LINES = re.compile(r"\n{3,}")
 
@@ -50,9 +47,6 @@ def collapse_whitespace(text: str) -> str:
 def _normalize_once(text: str) -> str:
     normalized = text.replace(_NUL, " ")
     normalized = _HYPHENATED_LINE_BREAK.sub("", normalized)
-    normalized = _BULLET_PAGE_NUMBER_HEADER.sub("\n", normalized)
-    normalized = _BULLET_PAGE_NUMBER_FOOTER.sub("\n", normalized)
-    normalized = _PAGE_NUMBERED_RUNNING_HEADER.sub("\n", normalized)
     normalized = _HORIZONTAL_WHITESPACE.sub(" ", normalized)
     normalized = _EXCESS_BLANK_LINES.sub("\n\n", normalized)
     return normalized.strip()

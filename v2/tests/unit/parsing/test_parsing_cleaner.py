@@ -15,18 +15,19 @@ def test_normalize_text_replaces_nul_and_joins_hyphenated_line_breaks():
     assert normalize_text("exam-\nple\x00text and state-\n of") == "example text and state-\n of"
 
 
-def test_normalize_text_drops_bullet_page_number_headers_and_footers():
-    text = "Body one\n12•Some Conference Header\nBody two\nShort Title•13\nBody three"
-
-    assert normalize_text(text) == "Body one\nBody two\nBody three"
-
-
-def test_normalize_text_drops_a_running_header_that_ends_with_a_page_number():
-    assert normalize_text("Body one\nLarge Language Models 12\nBody two") == "Body one\nBody two"
-
-
-def test_normalize_text_drops_a_title_line_followed_by_a_page_number_line():
-    assert normalize_text("Body one\nLarge Language Models\n12\nBody two") == "Body one\nBody two"
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Table 3 shows accuracy of 95",
+        "Example 1",
+        "Rasmus Aagaard 1, 2, Nicki Skafte Detlefsen 1",
+        "Large Language Models 12",
+        "12•Some Conference Header",
+        "Short Title•13",
+    ],
+)
+def test_normalize_text_keeps_lines_that_merely_end_with_a_number(line):
+    assert normalize_text(f"Body one\n{line}\nBody two") == f"Body one\n{line}\nBody two"
 
 
 def test_normalize_text_compresses_horizontal_whitespace_and_blank_lines():
@@ -41,18 +42,6 @@ def test_normalize_text_keeps_brand_names_as_written():
     text = "arXiv GitHub LiDAR ModelScope DeepSeek HuggingFace Hugging Face"
 
     assert normalize_text(text) == text
-
-
-def test_normalize_text_removes_consecutive_running_headers_in_one_call():
-    text = "Body one\nLarge Language Models 12\nLarge Language Models 13\nLarge Language Models 14\nBody two"
-
-    assert normalize_text(text) == "Body one\nBody two"
-
-
-def test_normalize_text_removes_a_header_that_only_fits_after_whitespace_is_compressed():
-    header = "Proceedings\tof\tthe\tConference 12"
-
-    assert normalize_text(f"Body one\n{header}\nBody two") == "Body one\nBody two"
 
 
 def random_page_like_text(rng: random.Random) -> str:
