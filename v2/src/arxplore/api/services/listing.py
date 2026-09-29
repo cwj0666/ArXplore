@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from arxplore.api.services.store import PaperStore
+from arxplore.db.repositories.listing import ListSort, search_tokens
 from arxplore.domain.papers import Paper
 
-MAX_RECENT_PAPERS = 1500
 PAPERS_PER_PAGE = 21
 SEARCH_MODE = "search"
 AI_MODE = "ai"
@@ -39,8 +39,8 @@ def normalize_mode(mode: str) -> str:
     return mode if mode in VALID_SEARCH_MODES else SEARCH_MODE
 
 
-def normalize_sort(sort: str) -> str:
-    return SORT_UPVOTES if sort == SORT_UPVOTES else SORT_LATEST
+def normalize_sort(sort: str) -> ListSort:
+    return "upvotes" if sort == SORT_UPVOTES else "latest"
 
 
 def parse_page_number(raw: Any) -> int:
@@ -58,29 +58,22 @@ def page_window(total_items: int, requested: int, per_page: int = PAPERS_PER_PAG
     return PageWindow(number=number, num_pages=num_pages, start=start, stop=min(start + per_page, total_items))
 
 
-def matches_query(paper: Paper, lowered_query: str) -> bool:
-    return lowered_query in (paper.title or "").lower() or lowered_query in (paper.abstract or "").lower()
-
-
-def sort_by_upvotes(papers: Sequence[Paper]) -> list[Paper]:
-    return sorted(papers, key=lambda paper: paper.upvotes or 0, reverse=True)
-
-
 async def list_papers(store: PaperStore, *, query: str, sort: str, mode: str, page: Any) -> PaperPage:
-    papers = list(await store.list_recent_papers(limit=MAX_RECENT_PAPERS))
     normalized_query = query.strip()
     normalized_sort = normalize_sort(sort)
-    if normalized_query:
-        lowered = normalized_query.lower()
-        papers = [paper for paper in papers if matches_query(paper, lowered)]
-    if normalized_sort == SORT_UPVOTES:
-        papers = sort_by_upvotes(papers)
-    window = page_window(len(papers), parse_page_number(page))
+    tokens = search_tokens(normalized_query)
+    total = await store.count_papers(tokens)
+    window = page_window(total, parse_page_number(page))
+    papers: Sequence[Paper] = []
+    if window.stop > window.start:
+        papers = await store.list_papers_page(
+            tokens, sort=normalized_sort, limit=window.stop - window.start, offset=window.start
+        )
     return PaperPage(
-        papers=papers[window.start : window.stop],
+        papers=list(papers),
         page=window.number,
         page_size=PAPERS_PER_PAGE,
-        total_items=len(papers),
+        total_items=total,
         total_pages=window.num_pages,
         query=normalized_query,
         sort=normalized_sort,

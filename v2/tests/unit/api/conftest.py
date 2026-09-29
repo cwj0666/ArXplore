@@ -131,6 +131,24 @@ class MemoryStore:
         self.recent_limits.append(limit)
         return self.papers[:limit]
 
+    def _matching(self, tokens: Sequence[str]) -> list[Paper]:
+        self._check()
+        lowered = [token.lower() for token in tokens]
+        return [
+            paper
+            for paper in self.papers
+            if all(token in paper.title.lower() or token in paper.abstract.lower() for token in lowered)
+        ]
+
+    async def count_papers(self, tokens: Sequence[str]) -> int:
+        return len(self._matching(tokens))
+
+    async def list_papers_page(self, tokens: Sequence[str], *, sort: str, limit: int, offset: int) -> Sequence[Paper]:
+        papers = self._matching(tokens)
+        if sort == "upvotes":
+            papers = sorted(papers, key=lambda paper: paper.upvotes, reverse=True)
+        return papers[offset : offset + limit]
+
     async def get_fulltext(self, arxiv_id: str) -> PaperFulltext | None:
         return self.fulltexts.get(arxiv_id)
 

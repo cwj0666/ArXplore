@@ -80,3 +80,29 @@
   - `list_query`(diffusion 23건): 1쪽 구성은 같고 순서만 11자리 바뀐다.
   - 추천순 `list_query_upvotes_mode`와 상세의 관련 논문은 달라지지 않는다.
 - G4 차이: `agent_trending_then_link`의 트렌딩 도구 결과. 최근 10편에서 `2609.27321`, `2609.27284`가 빠지고 `2609.27980`, `2609.28470`이 들어온다. 1위 논문 `2609.28466`과 답변은 같다.
+
+## F18: 목록 검색을 SQL 토큰 AND로
+
+- `/papers/list.json`은 이제 최근 1,500편을 파이썬으로 거르지 않는다. `db/repositories/listing.py`의 `count_papers`와 `list_papers_page`가 SQL에서 거르고, 세고, 정렬하고, 쪽을 나눈다(`COUNT(*)`, `LIMIT/OFFSET`). 1,500편 제한이 없어져 오래된 논문도 검색된다.
+- 검색어는 공백으로 나눈 토큰이다. 대소문자를 무시해 중복 토큰을 한 번만 쓰고, 그 앞 20개까지만 쓴다. 토큰마다 제목이나 초록 중 한 곳에 있어야 하고 모든 토큰이 맞아야 한다. 순서는 상관없다. 비교는 `ILIKE ... ESCAPE '\'`라 `%`, `_`, `\`는 글자 그대로 찾는다.
+- 정렬은 F32와 같다. 최신순은 `COALESCE(published_at, updated_at_utc) DESC, arxiv_id DESC`이고, 추천순은 그 앞에 `upvotes DESC`를 둔다. 쪽 번호 처리, 쪽당 21편, 응답 필드는 그대로다. 응답의 `query`는 여전히 앞뒤 공백만 지운 입력 문자열이다.
+- 관련 논문 후보(300편)와 트렌딩 도구(10편)는 계속 최근 논문 조회 `list_recent_papers`를 쓴다.
+- 쪽 넘김 측정: 골든 DB와 같은 275편(`published_at` 26종)이 든 `v2_test_api_smoke`에서 `/papers/list.json`을 마지막 쪽까지 넘기며 arxiv_id를 모았다.
+
+| 정렬 | 검색어 | 쪽 | total_items | 모은 행 | 중복 | 누락 |
+|---|---|---|---|---|---|---|
+| latest | (없음) | 14 | 275 | 275 | 0 | 0 |
+| latest | `diffusion` | 2 | 23 | 23 | 0 | 0 |
+| latest | `language model` | 6 | 114 | 114 | 0 | 0 |
+| upvotes | (없음) | 14 | 275 | 275 | 0 | 0 |
+| upvotes | `diffusion` | 2 | 23 | 23 | 0 | 0 |
+| upvotes | `language model` | 6 | 114 | 114 | 0 | 0 |
+
+  - 여섯 경우 모두 쪽을 이어 붙인 결과가 한 번에 정렬한 전체 결과와 순서까지 같다.
+  - F32 동률 규칙 없이 이 수정만 올렸을 때는 최신순 14쪽에서 275행 중 고유 논문이 259편이었다(16편 중복, 16편 누락).
+  - `language model`은 예전 규칙(입력 문자열 전체의 부분 일치)으로 82편이고 지금은 114편이다.
+- G5 차이(이전 v2 변형 대비 2개 시나리오)
+  - `list_query_case_and_spaces`(`  Diffusion Models `): 5편에서 12편이 된다. 예전에는 `diffusion models`가 붙어 있는 논문만 찾았다. 새로 들어온 7편은 `2609.12945`, `2609.13287`, `2609.16034`, `2609.16372`, `2609.24657`, `2609.24788`, `2609.26796`이다.
+  - `list_query_word_order`(`models diffusion`): 0편에서 12편이 된다. 위 시나리오와 같은 12편이 같은 순서로 나온다.
+  - 한 단어 검색 `list_query`(`diffusion` 23편), 기본 목록, 쪽 넘김, 추천순은 그대로다.
+- G4 차이: 없음.

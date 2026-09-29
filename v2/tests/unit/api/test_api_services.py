@@ -64,26 +64,27 @@ class TestPagination:
 
 
 class TestListing:
-    async def test_substring_search_is_case_insensitive_and_order_sensitive(self, helpers: ModuleType) -> None:
+    async def test_every_token_must_appear_in_title_or_abstract_in_any_order(self, helpers: ModuleType) -> None:
         store = helpers.MemoryStore(
             papers=[
                 helpers.make_paper("a", title="Diffusion Models for Video", upvotes=1),
                 helpers.make_paper("b", title="Other", abstract="we study diffusion models", upvotes=7),
                 helpers.make_paper("c", title="Models of diffusion", upvotes=3),
+                helpers.make_paper("d", title="Diffusion only", upvotes=9),
+                helpers.make_paper("e", title="Video models", abstract="no match here", upvotes=2),
             ]
         )
 
-        result = await list_papers(store, query="  Diffusion Models ", sort="upvotes", mode="ai", page="1")
+        result = await list_papers(store, query="  models Diffusion diffusion ", sort="upvotes", mode="ai", page="1")
 
-        assert [paper.arxiv_id for paper in result.papers] == ["b", "a"]
+        assert [paper.arxiv_id for paper in result.papers] == ["b", "c", "a"]
         assert (result.query, result.sort, result.mode, result.total_items, result.total_pages) == (
-            "Diffusion Models",
+            "models Diffusion diffusion",
             "upvotes",
             "ai",
-            2,
+            3,
             1,
         )
-        assert store.recent_limits == [1500]
 
     async def test_unknown_sort_and_mode_fall_back(self, helpers: ModuleType) -> None:
         result = await list_papers(helpers.MemoryStore(), query="", sort="oldest", mode="weird", page="x")
@@ -96,7 +97,18 @@ class TestListing:
             [],
         )
 
-    async def test_upvote_sort_is_stable(self, helpers: ModuleType) -> None:
+    async def test_pages_come_from_the_store_without_a_recent_paper_cap(self, helpers: ModuleType) -> None:
+        store = helpers.MemoryStore(papers=[helpers.make_paper(f"p{index:04d}") for index in range(1600)])
+
+        last = await list_papers(store, query="", sort="latest", mode="search", page="999")
+        second = await list_papers(store, query="", sort="latest", mode="search", page="2")
+
+        assert (last.total_items, last.total_pages, last.page) == (1600, 77, 77)
+        assert [paper.arxiv_id for paper in last.papers] == [f"p{index:04d}" for index in range(1596, 1600)]
+        assert [paper.arxiv_id for paper in second.papers][:2] == ["p0021", "p0022"]
+        assert store.recent_limits == []
+
+    async def test_upvote_sort_keeps_the_latest_order_for_ties(self, helpers: ModuleType) -> None:
         store = helpers.MemoryStore(
             papers=[helpers.make_paper(name, upvotes=votes) for name, votes in [("a", 1), ("b", 5), ("c", 1), ("d", 5)]]
         )

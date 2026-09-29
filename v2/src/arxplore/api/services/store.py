@@ -3,6 +3,7 @@ from typing import Any, Protocol
 
 from arxplore.db.pool import AnyPool
 from arxplore.db.repositories import fulltexts, generation_cache, listing, papers
+from arxplore.db.repositories.listing import ListSort
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import AiOverview, DetailedSummary, Paper, PaperFulltext
 
@@ -11,6 +12,12 @@ class PaperStore(Protocol):
     async def get_paper(self, arxiv_id: str) -> Paper | None: ...
 
     async def list_recent_papers(self, *, limit: int) -> Sequence[Paper]: ...
+
+    async def count_papers(self, tokens: Sequence[str]) -> int: ...
+
+    async def list_papers_page(
+        self, tokens: Sequence[str], *, sort: ListSort, limit: int, offset: int
+    ) -> Sequence[Paper]: ...
 
     async def get_fulltext(self, arxiv_id: str) -> PaperFulltext | None: ...
 
@@ -38,6 +45,14 @@ class PostgresPaperStore:
 
     async def list_recent_papers(self, *, limit: int) -> Sequence[Paper]:
         return await listing.list_recent_papers(self.pool, limit=limit)
+
+    async def count_papers(self, tokens: Sequence[str]) -> int:
+        return await listing.count_papers(self.pool, tokens)
+
+    async def list_papers_page(
+        self, tokens: Sequence[str], *, sort: ListSort, limit: int, offset: int
+    ) -> Sequence[Paper]:
+        return await listing.list_papers_page(self.pool, tokens, sort=sort, limit=limit, offset=offset)
 
     async def get_fulltext(self, arxiv_id: str) -> PaperFulltext | None:
         return await fulltexts.get_fulltext(self.pool, arxiv_id)
