@@ -15,6 +15,8 @@ permissions:
 
 env:
   UV_VERSION: "0.12.10"
+  NODE_VERSION: "24"
+  GITLEAKS_VERSION: "8.30.1"
 
 jobs:
   python:
@@ -42,6 +44,9 @@ jobs:
 
       - name: Mypy
         run: uv run --frozen mypy
+
+      - name: OpenAPI schema matches frontend/openapi.json
+        run: uv run --frozen arxplore openapi | diff -u frontend/openapi.json -
 
       - name: Unit tests
         run: uv run --frozen pytest tests/unit
@@ -92,3 +97,94 @@ jobs:
 
       - name: Integration tests
         run: uv run --frozen pytest tests/integration
+
+  frontend:
+    name: Frontend (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  infra:
+    name: Infra (compose config, hadolint, shellcheck, nginx)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Write a dummy .env
+        run: |
+          cat > .env <<'DOTENV'
+          PROD_POSTGRES_HOST=postgres-local:5432
+          POSTGRES_HOST=localhost
+          SERVER_POSTGRES_PORT=15432
+          POSTGRES_DB=arxplore
+          APP_POSTGRES_DB=arxplore_app
+          POSTGRES_USER=arxplore
+          POSTGRES_PASSWORD=arxplore
+          OPENAI_API_KEY=sk-ci-dummy
+          TAILSCALE_SERVER_IP=127.0.0.1
+          DOTENV
+
+      - name: compose.yaml
+        run: docker compose -f compose.yaml --profile dev --profile parser --profile local-db config -q
+
+      - name: compose.server.yaml
+        run: docker compose -f compose.server.yaml config -q
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+          recursive: true
+          failure-threshold: warning
+
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh docker/postgres/init/*.sh
+
+      - name: nginx configuration
+        run: docker run --rm -v "$PWD/docker/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:stable-alpine nginx -t
+
+  security:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "$base/$archive"
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --check --ignore-missing "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "$archive" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Scan git history
+        run: gitleaks git --redact --verbose --exit-code 1 .
+
+  worklog:
+    name: Worklog index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: worklog check
+        run: python3 scripts/worklog.py check
