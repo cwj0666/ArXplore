@@ -1,10 +1,10 @@
 import typer
 
-from arxplore_eval.commands import candidates, fusion, generation, latency, queries, retrieval
+from arxplore_eval.commands import candidates, explain, fusion, generation, latency, queries, retrieval
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="ArXplore evaluation harness")
 
-for module in (retrieval, generation, fusion, latency, queries, candidates):
+for module in (retrieval, generation, fusion, latency, queries, candidates, explain):
     module.register(app)
 
 
