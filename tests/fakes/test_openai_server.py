@@ -8,6 +8,7 @@ from functools import reduce
 from pathlib import Path
 
 import httpx
+import httpx2
 import openai
 import pytest
 from langchain_openai import ChatOpenAI
@@ -456,7 +457,7 @@ def test_strict_embedding_table_rejects_unknown_inputs_and_records_every_input(s
 def test_a_reply_can_abort_the_stream_after_some_events(server):
     server.chat_handler = ScriptedChatHandler([ChatReply(content="partial answer text", abort_after_events=3)])
     received = []
-    with pytest.raises((httpx.HTTPError, openai.APIError)):
+    with pytest.raises((httpx.HTTPError, httpx2.HTTPError, openai.APIError)):
         for chunk in make_chat_model(server).stream("abort please"):
             received.append(chunk.content)
 
