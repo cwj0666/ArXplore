@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 IMPLEMENTATION_ENV = "GOLDEN_IMPL"
-DEFAULT_IMPLEMENTATION = "legacy"
+DEFAULT_IMPLEMENTATION = "v2"
 
 
 class AdapterUnavailable(LookupError):

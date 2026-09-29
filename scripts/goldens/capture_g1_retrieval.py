@@ -8,9 +8,15 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from tests.fakes.openai_server import EmbeddingVectors, FakeOpenAIServer, embedding_key, write_embedding_table
+from tests.fakes.openai_server import (
+    EmbeddingVectors,
+    FakeOpenAIServer,
+    embedding_key,
+    load_embedding_table,
+    write_embedding_table,
+)
 from tests.golden import environment, g1_retrieval
-from tests.golden.adapters import load_retrieval_adapter
+from tests.golden.adapters import implementation_name, load_retrieval_adapter
 from tests.golden.store import read_golden, sha256_bytes, variant_path, write_golden
 
 REAL_API_BASE = "https://api.openai.com/v1"
@@ -49,9 +55,7 @@ def table_digest() -> str:
     return sha256_bytes(gzip.decompress(g1_retrieval.EMBEDDING_TABLE_PATH.read_bytes()))
 
 
-def embed() -> int:
-    from dotenv import dotenv_values
-
+def dry_run_inputs() -> list[str]:
     sets = g1_retrieval.build_query_sets()
     recorder = EmbeddingVectors()
     with environment.loopback_only(), FakeOpenAIServer(embedding_handler=recorder) as server:
@@ -62,6 +66,23 @@ def embed() -> int:
     if not all(isinstance(text, str) and text for text in texts):
         raise SystemExit("the dry run sent a non-string or empty embedding input")
     print(f"dry run sent {len(recorder.inputs)} embedding inputs, {len(texts)} unique")
+    return texts
+
+
+def report_stored(texts: list[str]) -> int:
+    path = g1_retrieval.EMBEDDING_TABLE_PATH
+    stored = load_embedding_table(path) if path.is_file() else {}
+    missing = [text for text in texts if embedding_key(text) not in stored]
+    print(f"{len(texts) - len(missing)} of {len(texts)} unique inputs are in {path}")
+    return 1 if missing else 0
+
+
+def embed(*, dry_run: bool) -> int:
+    from dotenv import dotenv_values
+
+    texts = dry_run_inputs()
+    if dry_run:
+        return report_stored(texts)
 
     import openai
 
@@ -155,10 +176,19 @@ def compare_eval_csv(golden_path: Path) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.goldens.capture_g1_retrieval")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("embed", help="dry-run every G1 path, then embed the exact inputs once with the real API")
+    embed_parser = commands.add_parser(
+        "embed", help="dry-run every G1 path, then embed the exact inputs once with the real API"
+    )
+    embed_parser.add_argument(
+        "--dry-run", action="store_true", help="stop after the dry run and check the inputs against the stored table"
+    )
     capture_parser = commands.add_parser("capture", help="run every G1 path against the stored query embeddings")
     capture_parser.add_argument("--out", type=Path, default=g1_retrieval.GOLDEN_PATH)
-    capture_parser.add_argument("--variant", help="write <name>.<variant>.json.gz next to the original golden")
+    capture_parser.add_argument(
+        "--variant",
+        default=implementation_name(),
+        help="write <name>.<variant>.json.gz next to the original golden; an empty value writes the original",
+    )
     capture_parser.add_argument("--exact", action="store_true", help="disable index scans (exact vector search)")
     capture_parser.add_argument(
         "--vectors",
@@ -170,7 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     compare_parser.add_argument("--golden", type=Path, default=g1_retrieval.GOLDEN_PATH)
     args = parser.parse_args(argv)
     if args.command == "embed":
-        return embed()
+        return embed(dry_run=args.dry_run)
     if args.command == "capture":
         out = variant_path(args.out, args.variant) if args.variant else args.out
         return capture(out, exact=args.exact, vectors_source=args.vectors)

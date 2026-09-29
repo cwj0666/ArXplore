@@ -3,14 +3,13 @@ from typing import Any
 import pytest
 
 from tests.golden import g5_http, g5_runner
-from tests.golden.adapters import AdapterUnavailable, implementation_name
+from tests.golden.adapters import AdapterUnavailable
 from tests.golden.store import diff, format_problems, read_golden, resolve_golden
 
 GOLDEN_FILE = resolve_golden(g5_http.GOLDEN_PATH)
 GOLDEN = read_golden(GOLDEN_FILE) if GOLDEN_FILE.is_file() else {"bundles": {}}
 SCENARIO_IDS = [(bundle, scenario) for bundle in sorted(GOLDEN["bundles"]) for scenario in GOLDEN["bundles"][bundle]]
 FAKE_REQUEST_KEYS = ("llm_requests", "llm_statuses", "embedding_requests", "arxiv_requests", "fake_server_errors")
-COMPARE_RESPONSES = g5_http.response_comparison(implementation_name())
 
 
 @pytest.fixture(scope="module")
@@ -34,7 +33,7 @@ def test_http_responses_match_golden(g5_results, bundle, scenario):
     expected = GOLDEN["bundles"][bundle][scenario]["responses"]
     actual = g5_results[bundle]["scenarios"][scenario]["responses"]
 
-    problems = COMPARE_RESPONSES(expected, actual)
+    problems = g5_http.compare_responses_v2(expected, actual)
     assert not problems, format_problems(f"G5 {bundle}:{scenario}", problems)
 
 

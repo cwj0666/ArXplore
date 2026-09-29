@@ -78,4 +78,4 @@ def test_variant_goldens_are_used_only_when_present(tmp_path):
     assert resolve_golden(original, "v2") == original
     write_golden(variant, {"a": 1})
     assert resolve_golden(original, "v2") == variant
-    assert resolve_golden(original, "legacy") == original
+    assert resolve_golden(original, "other") == original

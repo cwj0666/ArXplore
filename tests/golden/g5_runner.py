@@ -9,7 +9,13 @@ from typing import Any
 
 from tests.fakes.openai_server import FakeOpenAIServer
 from tests.golden import environment, g5_http
-from tests.golden.adapters import IMPLEMENTATION_ENV, AdapterUnavailable, HttpAdapter, load_adapter
+from tests.golden.adapters import (
+    IMPLEMENTATION_ENV,
+    AdapterUnavailable,
+    HttpAdapter,
+    implementation_name,
+    load_adapter,
+)
 from tests.golden.store import GOLDEN_ROOT, read_golden, write_golden
 
 REPO_ROOT = GOLDEN_ROOT.parents[1]
@@ -55,7 +61,7 @@ def runner_environ() -> dict[str, str]:
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/tmp"),
         "LANG": "C.UTF-8",
-        "PYTHONPATH": f"{REPO_ROOT}{os.pathsep}{REPO_ROOT / 'backend'}",
+        "PYTHONPATH": str(REPO_ROOT),
         "PYTHONHASHSEED": "0",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
@@ -84,9 +90,7 @@ def run_bundle_in_subprocess(bundle_name: str, database_url: str, workdir: Path)
         command = bundle_subprocess_command(bundle_name, copy_url, out)
         completed = subprocess.run(command, cwd=workdir, env=runner_environ(), timeout=RUNNER_TIMEOUT_SECONDS)
         if completed.returncode == ADAPTER_UNAVAILABLE_EXIT_CODE:
-            raise AdapterUnavailable(
-                f"no {HTTP_ADAPTER_KIND} adapter for {os.environ.get(IMPLEMENTATION_ENV) or 'legacy'}"
-            )
+            raise AdapterUnavailable(f"no {HTTP_ADAPTER_KIND} adapter for {implementation_name()}")
         completed.check_returncode()
         return read_golden(out)
 

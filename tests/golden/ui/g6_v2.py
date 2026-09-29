@@ -1,4 +1,3 @@
-import argparse
 import json
 import shutil
 import socket
@@ -154,7 +153,7 @@ def capture_v2(out_dir: Path) -> dict[str, object]:
         wait_until_ready(f"{base_url}/", api, api_log, "arxplore api frontend")
         subprocess.run(
             ["node", str(g6_ui.CAPTURE_SCRIPT), "--base-url", base_url, "--out", str(out_dir), "--pdf", str(pdf)]
-            + ["--paper", g6_ui.DETAIL_PAPER, "--missing-paper", g6_ui.MISSING_PAPER, "--impl", "v2"],
+            + ["--paper", g6_ui.DETAIL_PAPER, "--missing-paper", g6_ui.MISSING_PAPER],
             cwd=UI_DIR,
             check=True,
             timeout=CAPTURE_TIMEOUT_SECONDS,
@@ -205,6 +204,10 @@ class ScreenResult:
     detail: str
     variant: bool
 
+    @property
+    def identical(self) -> bool:
+        return self.text_equal and self.aria_equal and not self.pixels
+
     def describe(self) -> str:
         source = "v2 variant" if self.variant else "original"
         pixel_note = f"{self.pixels} px" + (f" ({self.detail})" if self.detail else "")
@@ -246,32 +249,3 @@ def write_variant(actual_dir: Path, names: Sequence[str]) -> None:
                 variant.unlink(missing_ok=True)
             else:
                 shutil.copyfile(captured, variant)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m tests.golden.ui.g6_v2")
-    parser.add_argument("--out", type=Path, help="keep the capture in this directory")
-    parser.add_argument("--reuse", action="store_true", help="compare an existing capture in --out without capturing")
-    parser.add_argument("--write-variant", nargs="+", metavar="SCREEN", default=[], help="store screens as v2 variants")
-    args = parser.parse_args(argv)
-    with tempfile.TemporaryDirectory(prefix="v2-g6-capture-") as scratch:
-        out_dir = args.out or Path(scratch)
-        if not args.reuse:
-            started = time.perf_counter()
-            capture_v2(out_dir)
-            print(f"captured in {time.perf_counter() - started:.0f}s -> {out_dir}")
-        if args.write_variant:
-            unknown = sorted(set(args.write_variant) - set(screen_names()))
-            if unknown:
-                parser.error(f"unknown screens: {unknown}")
-            write_variant(out_dir, args.write_variant)
-        results = compare(out_dir)
-    for result in results:
-        print(result.describe())
-    mismatched = [result for result in results if not (result.text_equal and result.aria_equal and not result.pixels)]
-    print("identical" if not mismatched else f"{len(mismatched)} screen(s) differ")
-    return 1 if mismatched else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

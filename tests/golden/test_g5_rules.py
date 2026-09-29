@@ -6,14 +6,14 @@ from typing import Any
 import pytest
 
 from tests.golden import g5_http
-from tests.golden.store import read_golden
+from tests.golden.store import diff, read_golden
 
-LEGACY_GOLDEN = read_golden(g5_http.GOLDEN_PATH) if g5_http.GOLDEN_PATH.is_file() else {"bundles": {}}
+ORIGINAL_GOLDEN = read_golden(g5_http.GOLDEN_PATH) if g5_http.GOLDEN_PATH.is_file() else {"bundles": {}}
 RATE_LIMITED_INDEX = 30
 
 
 def responses(bundle: str, scenario: str) -> list[dict[str, Any]]:
-    return copy.deepcopy(LEGACY_GOLDEN["bundles"][bundle][scenario]["responses"])
+    return copy.deepcopy(ORIGINAL_GOLDEN["bundles"][bundle][scenario]["responses"])
 
 
 def _set_header(name: str, values: list[str]) -> Callable[[dict[str, Any]], None]:
@@ -77,8 +77,8 @@ MUTATIONS = [
 ]
 
 
-def test_v2_rules_accept_every_legacy_response():
-    for bundle, scenarios in LEGACY_GOLDEN["bundles"].items():
+def test_v2_rules_accept_every_original_response():
+    for bundle, scenarios in ORIGINAL_GOLDEN["bundles"].items():
         for name, scenario in scenarios.items():
             recorded = scenario["responses"]
             assert g5_http.compare_responses_v2(recorded, copy.deepcopy(recorded)) == [], f"{bundle}:{name}"
@@ -109,7 +109,7 @@ def test_v2_rules_ignore_encoding_charset_cookie_case_and_other_headers():
             }
 
     assert g5_http.compare_responses_v2(expected, actual) == []
-    assert g5_http.compare_responses_legacy(expected, actual) != []
+    assert diff(expected, actual) != []
 
 
 @pytest.mark.parametrize(
@@ -133,8 +133,3 @@ def test_v2_rules_report_a_missing_response():
     expected = responses("pages", "list_page_invalid")
 
     assert g5_http.compare_responses_v2(expected, expected[:-1]) == ["response count 3 -> 2"]
-
-
-def test_the_comparison_is_chosen_by_implementation():
-    assert g5_http.response_comparison("v2") is g5_http.compare_responses_v2
-    assert g5_http.response_comparison("legacy") is g5_http.compare_responses_legacy

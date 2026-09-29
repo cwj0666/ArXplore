@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from tests.golden import environment, g3_layout, g3_pypdf
-from tests.golden.adapters import load_parser_adapter
+from tests.golden.adapters import implementation_name, load_parser_adapter
 from tests.golden.store import sha256_bytes, sha256_text, variant_path, write_golden
 
 DATABASE_SQL = """
@@ -77,7 +77,11 @@ def capture(out_dir: Path, variant: str | None, report_path: Path | None) -> int
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.goldens.capture_g3_layout")
     parser.add_argument("--out", type=Path, default=g3_layout.GOLDEN_DIR)
-    parser.add_argument("--variant", help="write <id>.<variant>.json.gz next to the original goldens")
+    parser.add_argument(
+        "--variant",
+        default=implementation_name(),
+        help="write <id>.<variant>.json.gz next to the original goldens; an empty value writes the originals",
+    )
     parser.add_argument("--report", type=Path, help="write the database comparison as JSON")
     args = parser.parse_args(argv)
     return capture(args.out, args.variant, args.report)

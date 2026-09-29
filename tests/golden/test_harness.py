@@ -20,4 +20,4 @@ def test_missing_implementations_and_capabilities_are_reported_as_unavailable():
     with pytest.raises(AdapterUnavailable):
         load_adapter("parser", "no_such_implementation")
     with pytest.raises(AdapterUnavailable):
-        load_adapter("no_such_capability", "legacy")
+        load_adapter("no_such_capability", "v2")

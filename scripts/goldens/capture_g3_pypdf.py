@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tests.golden import g3_pypdf
-from tests.golden.adapters import load_parser_adapter
+from tests.golden.adapters import implementation_name, load_parser_adapter
 from tests.golden.store import (
     diff,
     format_problems,
@@ -94,7 +94,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     capture_parser = commands.add_parser("capture", help="parse the PDFs and write the G3 golden files")
     capture_parser.add_argument("--out", type=Path, default=g3_pypdf.GOLDEN_DIR)
     capture_parser.add_argument("--implementation")
-    capture_parser.add_argument("--variant", help="write <name>.<variant>.json.gz next to the original golden")
+    capture_parser.add_argument(
+        "--variant",
+        default=implementation_name(),
+        help="write <name>.<variant>.json.gz next to the original golden; an empty value writes the original",
+    )
     args = parser.parse_args(argv)
     if args.command == "fetch":
         return fetch()

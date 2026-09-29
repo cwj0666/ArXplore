@@ -685,8 +685,6 @@ def _mask_retry_after(result: HttpResult, text: str, payload: Any) -> tuple[str,
     return pattern.sub(RETRY_AFTER_PLACEHOLDER, text), masked_payload
 
 
-LEGACY_RULES = "legacy"
-V2_RULES = "v2"
 RULE_REQUEST = "request"
 RULE_STATUS = "status code"
 RULE_MEDIA_TYPE = "content-type media type"
@@ -750,10 +748,6 @@ def v2_rule_views(record: Mapping[str, Any]) -> dict[str, Any]:
     return views
 
 
-def compare_responses_legacy(expected: list[Any], actual: list[Any]) -> list[str]:
-    return diff(expected, actual)
-
-
 def compare_responses_v2(expected: list[Any], actual: list[Any]) -> list[str]:
     problems: list[str] = []
     if len(expected) != len(actual):
@@ -763,16 +757,6 @@ def compare_responses_v2(expected: list[Any], actual: list[Any]) -> list[str]:
         label = f"response {index} {request.get('method', '?')} {request.get('path', '?')}"
         problems.extend(f"{label}: {problem}" for problem in diff(v2_rule_views(left), v2_rule_views(right)))
     return problems
-
-
-RESPONSE_COMPARISONS: dict[str, Callable[[list[Any], list[Any]], list[str]]] = {
-    LEGACY_RULES: compare_responses_legacy,
-    V2_RULES: compare_responses_v2,
-}
-
-
-def response_comparison(implementation: str) -> Callable[[list[Any], list[Any]], list[str]]:
-    return RESPONSE_COMPARISONS[V2_RULES if implementation == V2_RULES else LEGACY_RULES]
 
 
 def _without_stream_options(body: Any) -> Any:

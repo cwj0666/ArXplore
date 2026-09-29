@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+import psycopg
+
 DATABASE_URL_ENV = "GOLDEN_DATABASE_URL"
 DEFAULT_DATABASE_URL = "postgresql://arxplore@localhost:55432/arxplore"
 TEMPLATE_DATABASE = "arxplore_tpl"
@@ -14,11 +16,6 @@ EXACT_SEARCH_OPTION = "-c enable_indexscan=off"
 EXACT_SEARCH_ENV = "GOLDEN_EXACT_SEARCH"
 COPY_PREFIX = "golden_"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-LEGACY_DJANGO_ENV = {
-    "DJANGO_SETTINGS_MODULE": "arxplore_web.settings",
-    "DJANGO_SECRET_KEY": "golden-harness-secret-key-not-for-production",
-    "DJANGO_DEBUG": "",
-}
 
 
 def database_url() -> str:
@@ -73,14 +70,6 @@ def database_reachable(url: str, timeout: float = 1.0) -> bool:
 
 def connect(url: str, *, options: str | None = None) -> Any:
     extra = {"options": options} if options else {}
-    try:
-        import psycopg
-    except ModuleNotFoundError:
-        import psycopg2
-
-        connection = psycopg2.connect(url, **extra)
-        connection.autocommit = True
-        return connection
     return psycopg.connect(url, autocommit=True, **extra)
 
 
