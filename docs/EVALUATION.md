@@ -10,9 +10,10 @@ README의 평가 요약을 자세히 풀어 쓴 문서입니다. 하네스 사�
 2026-09-28에 첫 재구축과 같은 조건으로 다시 만든 것이고, 청크 합성 질의 11개의 정답 청크 id는 새 코퍼스에 맞게 다시
 매핑했습니다(worklog 2026-09-28_02, 질의셋 sha256 fe0cce78a89b).
 
-**측정 조건**: 이 코퍼스는 수식·표 파싱을 끄고(`LAYOUT_PARSER_PARSE_TABLES_AND_MATH=false`) 만들었습니다. 운영 기본값(`true`)과
-다릅니다. 레이아웃·섹션·`content_role`은 HURIDOCS 결과이고, 수식은 LaTeX 대신 pdftohtml 텍스트, 표는 HTML 대신 텍스트입니다.
-수식·표 변환이 CPU에서 논문당 수 분씩 걸려 재구축 시간 안에 끝낼 수 없었습니다(`docs/worklog/phase-4`의 2026-09-26 코퍼스 재구축 항목).
+**측정 조건**
+- 이 코퍼스는 수식·표 파싱을 끄고(`LAYOUT_PARSER_PARSE_TABLES_AND_MATH=false`) 만들었습니다. 운영 기본값(`true`)과 다릅니다. 레이아웃·섹션·`content_role`은 HURIDOCS 결과이고, 수식은 LaTeX 대신 pdftohtml 텍스트, 표는 HTML 대신 텍스트입니다. 수식·표 변환이 CPU에서 논문당 수 분씩 걸려 재구축 시간 안에 끝낼 수 없었습니다(`docs/worklog/phase-4`의 2026-09-26 코퍼스 재구축 항목).
+- 청크는 리팩토링 전 청커로 만든 것입니다. 지금 청커는 겹침을 실제로 적용하고, 짧은 첫 문장을 지우지 않고, 최대 길이를 지키고, 정규화가 멱등이라(수정 F01~F04) 같은 섹션에서 청크 18,337개를 만듭니다. 코퍼스를 새 청커로 다시 청킹·임베딩하면 청크 id가 바뀌므로 청크 합성 질의를 다시 매핑한 뒤 다시 잽니다(`docs/worklog/phase-5`).
+- 측정은 파서·`content_role` 수정 뒤 재처리와 role 백필, 임베딩 backlog 소진을 마친 DB에서 했습니다.
 
 | 검색 방식 | hit@1 | hit@5 | hit@10 | MRR@10 |
 | --- | --- | --- | --- | --- |
@@ -27,9 +28,14 @@ README의 평가 요약을 자세히 풀어 쓴 문서입니다. 하네스 사�
 - 주제 질의는 조건에 맞는 논문 전부를 정답으로 두도록 라벨을 고친 뒤 질의 형태 관점(query_form 12건) hit@10이 lexical 0.667, vector 0.917, hybrid 0.917입니다(첫 실측 0.333 / 0.250 / 0.167은 라벨 오류). 정답 집합이 커서 recall@10은 0.326~0.529로 낮으므로 이 관점에서는 hit@k만 읽습니다.
 - 약한 부분집합은 한국어 lexical(hit@10 0.466), 언어 관점(10건, vector·hybrid hit@10 0.400), 다논문 관점(6건, vector·hybrid hit@10 0.500, 첫 실측 hybrid 0.667)입니다. 세 방식 모두 상위 10개 안의 참고문헌·목차 청크 비율(noise@10)은 0입니다.
 
+**리팩토링 뒤 재현**: 같은 코퍼스를 읽기 전용으로 두고 새 하네스(`arxplore-eval`)로 전체 ablation을 다시 돌렸습니다(`eval/results/20260929-163558.md`). 질의 임베딩은 이 실행을 위해 한 번 다시 받아 둔 표(`tests/golden/data/g1_query_embeddings.json.gz`)를 가짜 OpenAI 서버로 제공했습니다.
+- lexical은 111개 질의 모두 청크 순위까지 같습니다.
+- vector와 hybrid는 논문 단위 hit@1/5/10, MRR@10, recall@10과 부분집합 13개가 위 표와 같습니다. 청크 순서까지 같은 질의는 vector 96개, hybrid 93개이고, 나머지는 임베딩을 다시 받아 생긴 하위 순위의 순서 바뀜이나 이웃 청크 교체입니다. 같은 표로 옛 하네스를 돌리면 새 하네스와 10방식 × 111질의가 모두 같습니다.
+- 다른 값은 `vector_norerank` 1개 질의, `hybrid_plainrrf` 2개 질의와 noise@10 다섯 칸(vector·hybrid 0.001 등)이고 모두 임베딩 차이에서 옵니다.
+
 ## 검색 지연
 
- hybrid는 lexical 경로와 vector 경로(질의 임베딩 → 벡터 SQL)를 동시에 실행합니다(커밋 ba2e6a3). 병렬화 전 순차 실행과 같은 조건에서 번갈아 잰 결과입니다(`eval/results/latency_20260928-151847.md`). 조건은 로컬 WSL2(i7-13650HX), 같은 머신의 PostgreSQL 16 + pgvector 0.8.6(재구축 코퍼스 덤프 복원), 연결 풀 8, 질의 111개, 워밍업 1회 + 3회 반복, 질의마다 순서 교대, 임베딩 API 왕복 포함, 단일 클라이언트입니다.
+hybrid는 lexical 경로와 vector 경로(질의 임베딩 → 벡터 SQL)를 동시에 실행합니다(커밋 ba2e6a3). 병렬화 전 순차 실행과 같은 조건에서 번갈아 잰 결과입니다(`eval/results/latency_20260928-151847.md`). 조건은 로컬 WSL2(i7-13650HX), 같은 머신의 PostgreSQL 16 + pgvector 0.8.6(재구축 코퍼스 덤프 복원), 연결 풀 8, 질의 111개, 워밍업 1회 + 3회 반복, 질의마다 순서 교대, 임베딩 API 왕복 포함, 단일 클라이언트입니다.
 
 | 경로 | 순차 p50 / p95 (ms) | 병렬 p50 / p95 (ms) | 질의별 변화 (95% 구간) |
 | --- | --- | --- | --- |
@@ -37,15 +43,17 @@ README의 평가 요약을 자세히 풀어 쓴 문서입니다. 하네스 사�
 | 제품 경로 `retrieve_contexts` (limit 5) | 390 / 669 | 235 / 448 | −25.6% [−28.3, −23.0] |
 
 - 같은 임베딩을 넣으면 111개 질의 모두 결과가 같습니다. 단계별 중앙값은 임베딩 149ms, lexical SQL 약 235ms, vector SQL 57ms이고, 한국어 질의는 lexical SQL이 약 10ms라 줄어드는 폭이 작습니다(ko p50 246→228ms, en 604→381ms). 같은 조건의 대조군은 lexical 단독 160 / 383ms, vector 단독 198 / 263ms입니다.
-- 이 A/B는 가중 RRF 규칙 시점(2026-09-28)에 쟀습니다. 2026-09-29의 융합 규칙 변경은 두 채널을 같은 방식으로 병렬 실행하고 채널 결과를 합치는 계산만 바꾸므로 다시 재지 않았고, 위 값을 그대로 씁니다. 품질 표 실행(`20260929-005408.md`)의 지연 열은 교대 측정이 아니라 이 비교에 쓰지 않습니다. 동시 요청 부하와 원격 DB에서의 지연은 재지 않았습니다.
+- 이 A/B는 리팩토링 전 구현(스레드 병렬)과 가중 RRF 규칙 시점(2026-09-28)에 쟀습니다. 지금 구현은 두 채널을 각자 풀 연결로 `asyncio.gather`에서 동시에 돌리고, 융합 규칙 변경은 채널 결과를 합치는 계산만 바꿉니다. 품질 표 실행(`20260929-005408.md`, `20260929-163558.md`)의 지연 열은 교대 측정이 아니라 이 비교에 쓰지 않습니다. 동시 요청 부하와 원격 DB에서의 지연은 재지 않았습니다.
 
-평가 하네스는 [`eval/`](../eval/README.md)에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF, 예전 가중 RRF 규칙)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다. 파서·`content_role` 수정 후 재처리와 백필(`scripts/backfill_content_roles.py`), 임베딩 backlog 소진을 마친 DB에서 측정합니다.
+평가 하네스는 [`eval/`](../eval/README.md)와 `src/arxplore_eval`에 있습니다. 질의셋은 known-item 질의(알려진 논문을 초록으로 찾기), 청크 합성 질의(본문 청크 하나로만 답할 수 있는 질의), 8개 관점(언어·질의 형태·근거 위치·코퍼스 밖·다논문·안전·대화·상세 챗)의 수작업 케이스 74개로 이루어지고, 세 경로와 ablation(논문 다양성, lexical 필터, vector rerank, 표준 RRF, 예전 가중 RRF 규칙)을 비교해 논문 단위·청크 단위 hit@k·MRR·recall, 상위 10개 중 참고문헌·목차·앞부분 청크 비율, 지연을 기록합니다.
 
 ```bash
-python scripts/eval_build_queries.py                     # 표본·프롬프트 확인 (dry-run, LLM 미호출)
-python scripts/eval_build_queries.py --generate          # eval/queries.jsonl 생성 → 사람이 검토
-python scripts/eval_retrieval.py --methods lexical       # API 키 없이 lexical만
-python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (OPENAI_API_KEY 필요)
+uv run arxplore-eval build-queries                      # 표본·프롬프트 확인 (dry-run, LLM 미호출)
+uv run arxplore-eval build-queries --generate           # eval/queries.generated.jsonl 생성 → 사람이 검토
+uv run arxplore-eval retrieval --methods lexical        # API 키 없이 lexical만
+uv run arxplore-eval retrieval --ablations all          # 3방식 + ablation (OPENAI_API_KEY 필요)
+uv run arxplore-eval latency                            # hybrid 채널 순차·병렬 지연 A/B
+uv run arxplore-eval explain --query "..."              # 검색 SQL 실행 계획 (읽기 전용 트랜잭션)
 ```
 
 결과는 `eval/results/<timestamp>.md`(위 표와 같은 모양의 붙여넣기용 표 포함)와 질의별 CSV로 남습니다. DB에 연결할 수 없거나 질의셋의 정답 id가 DB에 없으면 결과를 쓰지 않고 실패합니다.
@@ -59,6 +67,7 @@ python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (O
 | agent | 0.865 (113) | 0.667 (114) | 0.870 (10) | n/a |
 | paper_chat | 0.913 (91) | 0.563 (91) | 0.892 (11) | n/a |
 
+- 답변은 리팩토링 전 구현으로 모았습니다. 새 하네스는 대본을 따르는 가짜 LLM으로 같은 질의셋을 돌렸을 때 답변 235건이 필드마다 같고, 저장된 답변의 행동 지표와 RAGAS 요청 계획 430건이 바이트까지 옛 하네스와 같습니다.
 - pypdf 코퍼스의 첫 실측(`generation_20260925-233840.md`, 243개 답변)은 agent 0.870 / 0.654 / 0.737, paper_chat 0.928 / 0.577 / 0.807이었습니다. 그사이 에이전트 프롬프트(검색 전 거절 금지, 질문 언어로 답하기)와 청크 합성 질의(15건 → 11건, 다른 청크)도 바뀌어 차이를 파서 효과로 읽지 않습니다. context_precision은 청크 합성 질의에서만 계산되어 표본이 10~11건입니다.
 - LLM 판정 없는 행동 지표: 거절 정확도는 에이전트 1.000(15건, 첫 실측 0.933), 상세 챗 0.833(6건)이고, 날조 링크 없음과 잘못된 입력 거부는 두 모드 모두 1.000입니다. answer 케이스에서 거절한 건수는 에이전트 7건(첫 실측 7건), 상세 챗 9건(12건)입니다.
 - 영어 질의에 한국어로 답한 비율(에이전트, 답변의 한글 글자 비율 30% 초과)은 22/63에서 4/61로 줄었습니다. 에이전트 프롬프트의 질문 언어 규칙 효과입니다. 이 비율은 아직 행동 지표가 아니라 답변 파일에서 셉니다.
@@ -69,8 +78,10 @@ python scripts/eval_retrieval.py --ablations all         # 3방식 + ablation (O
 `context_precision`은 질의셋의 `reference_answer`나 정답 청크 본문이 있는 질의만, `context_recall`은 `reference_answer`가 있는 질의만 계산합니다. 현재 질의셋에는 `reference_answer`가 없어 `context_recall`은 n/a입니다. LLM 판정 점수이므로 같은 판정 모델로 잰 값끼리 상대 비교에만 씁니다. 지표 정의와 비용, 해석할 때 주의할 점은 [`eval/README.md`](../eval/README.md#생성-품질ragas)에 있습니다.
 
 ```bash
-python scripts/eval_generation.py --collect --keep-going                     # 답변 수집 + RAGAS 채점 (DB + OPENAI_API_KEY)
-python scripts/eval_generation.py --answers eval/results/answers_<timestamp>.jsonl   # 저장된 답변만 다시 채점
+uv sync --group eval                                                               # ragas, tiktoken
+uv run arxplore-eval generation --collect --keep-going                             # 답변 수집 + RAGAS 채점 (DB + OPENAI_API_KEY)
+uv run arxplore-eval generation --answers eval/results/answers_<timestamp>.jsonl   # 저장된 답변만 다시 채점
+uv run arxplore-eval generation --answers eval/results/answers_<timestamp>.jsonl --behavior-only   # 행동 지표만 (키 불필요)
 ```
 
 결과는 `eval/results/generation_<timestamp>.md`(위 표와 같은 모양의 붙여넣기용 표 포함)와 질의별 CSV로 남습니다. 키가 없거나 DB에 연결할 수 없으면 결과를 쓰지 않고 실패합니다.
@@ -78,11 +89,11 @@ python scripts/eval_generation.py --answers eval/results/answers_<timestamp>.jso
 ## 알려진 한계와 로드맵
 
 - **평가 규모**: 275편·질의 111개의 단일 실행이라 HNSW 효과와 운영 규모 지연, 지표의 분산을 말할 수 없습니다. 청크 합성 질의는 어휘 겹침 필터를 통과한 11건뿐이라 1건이 청크 hit@5를 0.091 움직입니다. LLM이 만든 질의가 절반이라 실제 사용자 질의보다 코퍼스 문장과 어휘 겹침이 클 수 있습니다.
+- **코퍼스 전환 전 수치**: 검색·생성 수치는 리팩토링 전 청커로 만든 청크에서 잰 값입니다. 새 청커로 재청킹·재임베딩(`arxplore run rechunk`)하고 HURIDOCS로 재파싱(`arxplore run reparse`)한 코퍼스에서 청크 합성 질의를 다시 매핑하고 검색·생성 평가를 다시 재야 합니다. 재임베딩과 생성 평가 재수집은 유료입니다.
 - **수식·표 파싱 조건**: 현재 수치는 `LAYOUT_PARSER_PARSE_TABLES_AND_MATH=false`로 만든 코퍼스의 값입니다. 운영 기본값(`true`)의 LaTeX 수식·HTML 표가 검색에 주는 영향은 재지 않았습니다. 켜면 수식 OCR(pix2tex)과 표 OCR(RapidOCR)이 CPU에 묶여, pix2tex를 GPU로 돌려도 28쪽 논문 하나에 194초가 걸렸습니다(끄면 19초).
-- **파싱 전 중복 건너뛰기 없음**: prepare worker는 논문을 파싱한 뒤에야 `content_hash`로 변경 여부를 판단합니다. 주말에 HF Daily Papers가 금요일 목록을 반복하면 같은 논문을 다시 파싱하고(14일치 raw 375행에 고유 논문 275편), 날짜 잡을 병렬로 돌리면 같은 논문을 동시에 처리합니다.
 - **hybrid 대 vector 단독**: 융합을 min-max convex combination으로 바꾼 뒤 hybrid MRR@10이 vector 단독보다 0.016 높지만 유의하지 않고(95% 구간 [−0.001, +0.038]), 순위가 갈리는 질의는 111개 중 4개입니다. α(0.35)는 같은 질의셋으로 골랐습니다. hybrid는 병렬화 뒤에도 vector 단독보다 느립니다(같은 조건 p50 282 대 198ms). 새 질의셋으로 α를 다시 확인하거나 vector 단독 경로를 검토할 지점입니다.
+- **지연 재측정**: 위 지연은 리팩토링 전 구현에서 잰 값입니다. 지금 구현(async 풀, `asyncio.gather`)의 실제 임베딩 왕복을 포함한 지연 A/B는 재지 않았습니다.
+- **RAGAS 채점 환경**: 지금 lock의 eval 그룹(ragas 0.4.3, langchain-community 0.4.2)에서는 `import ragas`가 `langchain_community.chat_models.vertexai`를 찾지 못해 실패하므로 RAGAS 채점을 돌릴 수 없습니다. `--behavior-only` 채점과 답변 수집은 돕니다.
 - **상세 챗 인젝션 수정 미측정**: 상세 챗 프롬프트에 사용자 메시지 속 지시를 따르지 않는 규칙을 더했지만(ce24d57) `sf-inject-embedded`의 재측정은 하지 않았습니다.
 - **한국어 lexical**: FTS 설정이 `english`라 임베딩 키가 없는 lexical 폴백에서는 한국어 질문이 거의 맞지 않습니다.
-- **ASGI 전환**: 지금은 gunicorn gthread(워커 4 × 스레드 8)라 SSE 스트림 하나가 스레드 하나를 오래 점유합니다.
-- **배포**: nginx가 HTTP만 제공합니다. 외부에 공개하기 전에 TLS(또는 Tailscale 전용 접근)와 `DJANGO_SECURE_COOKIES=true`, 공유 rate limit용 Redis가 필요합니다.
-- **캐시 무효화**: AI 결과 캐시에 프롬프트 버전이 없어서 프롬프트를 바꿔도 기존 결과가 그대로 보입니다.
+- **배포**: nginx가 HTTP만 제공합니다. 외부에 공개하기 전에 TLS(또는 Tailscale 전용 접근)와 `SECURE_COOKIES=true`, 공유 rate limit용 Redis(`REDIS_URL`)가 필요합니다.

@@ -1,72 +1,98 @@
-# 오프라인 검색 평가
+# 오프라인 평가
 
-`PaperRetriever`의 lexical / vector / hybrid 경로와 일부 ablation을 같은 질의셋으로 비교하는 하네스입니다.
-retriever 코드는 수정하지 않고, 공개 함수(`search_paper_contexts*`)와 하위 단계를 그대로 호출합니다.
+제품 검색(`arxplore.retrieval`)의 lexical / vector / hybrid 경로와 ablation, 그리고 에이전트·상세 챗의 답변 품질을 같은 질의셋으로
+재는 하네스입니다. 코드는 `src/arxplore_eval` 패키지와 `arxplore-eval` 명령이고, 이 폴더에는 데이터(질의셋, 케이스, 결과, 캐시)만
+둡니다. 하네스는 제품의 공개 함수만 조립하므로 제품 코드를 고치지 않고 돕니다.
 
-| 파일 | 역할 |
+| 모듈 (`src/arxplore_eval/`) | 역할 |
 | --- | --- |
-| `eval/metrics.py` | hit@k, MRR@k, recall@k, percentile (순수 함수) |
-| `eval/dataset.py` | 질의셋 JSONL 스키마·검증·로더(파일 또는 디렉터리), 자리표시자 채우기, 질의 생성 프롬프트 |
-| `eval/runner.py` | 방식 레지스트리(기본 + ablation), 질의 실행, 집계. retriever는 주입받음 |
-| `eval/report.py` | 질의별·집계 CSV, Markdown 표 |
-| `eval/queries.sample.jsonl` | 형식 예시 6건. arxiv_id·chunk_id는 **가짜 자리표시자**(`0000.0000x`, `90000x`) |
-| `eval/cases/*.jsonl` | 관점별 손으로 쓴 케이스 카탈로그(아래 "케이스 카탈로그"). arxiv_id는 자리표시자 |
-| `eval/cases/placeholders.json` | 자리표시자별로 필요한 논문 조건(제목 키워드·섹션 등)과 코퍼스에 없어야 할 논문 |
-| `eval/behavior.py` | LLM 판정 없는 행동 지표, 결과 종류(answered/refused/rejected/error), 제품 API 입력 검증 재현 |
-| `scripts/eval_build_queries.py` | DB 표본 + LLM으로 `eval/queries.jsonl` 생성 (기본 dry-run), `--attach-ids`로 카탈로그 자리표시자 채우기 |
-| `scripts/eval_retrieval.py` | 평가 실행 → `eval/results/<timestamp>.{csv,md}`, `<timestamp>_summary.csv` |
-| `eval/answers.py` | 생성 평가용 답변 수집: 에이전트·상세 챗을 Django 없이 호출해 답변과 LLM에 넘긴 발췌문 기록 |
-| `eval/generation.py` | RAGAS 판정 요청 구성·건너뛰기 규칙, ragas 어댑터(`RagasScorer`), 집계, CSV·Markdown |
-| `scripts/eval_generation.py` | 생성 평가 실행 → `eval/results/answers_<timestamp>.jsonl`, `generation_<timestamp>.{csv,md}` |
-| `eval/candidate_cache.py` | hybrid 융합 입력 캐시(gzip JSONL) 형식·기록·재생·게이트 |
-| `eval/fusion_sweep.py` | 융합 설정 가족, 재생 채점, ko/en 쌍 클러스터 단위 반복 층화 CV, 1-SE 선택, 클러스터 paired bootstrap, 리포트 |
-| `scripts/eval_dump_candidates.py` | 질의별 융합 입력과 제품 hybrid 결과 기록 → `eval/cache/candidates_<timestamp>.jsonl.gz` (DB + 키) |
-| `scripts/eval_fusion_sweep.py` | 캐시로 `gate`(재생 = 제품) / `sweep`(설정 비교) / `convex`(점수 convex combination 비교) → `eval/results/fusion_<timestamp>.{md,csv}` (DB·키 불필요) |
-| `eval/latency.py` | hybrid 지연 A/B(채널 순차 vs 병렬): 계측 래퍼, 쌍 교대 실행, 질의별 중앙값 차이의 ko/en 쌍 클러스터 bootstrap, 반복 간 동일성 기준선 |
-| `scripts/eval_hybrid_latency.py` | 지연 A/B 실행 → `eval/results/latency_<timestamp>.{md,csv}` (DB + 키, 임베딩만 호출) |
+| `metrics.py` | hit@k, MRR@k, recall@k, percentile (순수 함수) |
+| `dataset.py` | 질의셋 JSONL 스키마·검증·로더(파일 또는 디렉터리), 자리표시자 채우기 |
+| `runner.py` | 방식 레지스트리(기본 + ablation), 질의 실행, 집계. 제품의 채널별 조회·rerank·필터, 융합, 논문 다양성, 문맥 창 함수를 조립한다 |
+| `report.py`, `tables.py`, `subsets.py` | 질의별·집계 CSV, Markdown 표, 부분집합 |
+| `build_queries.py` | DB 표본 + LLM 질의 생성 프롬프트, 카탈로그 자리표시자 채우기, 질의셋 결합 |
+| `behavior.py` | LLM 판정 없는 행동 지표, 결과 종류(answered/refused/rejected/error), 제품 API 입력 검증 재사용 |
+| `answers.py` | 생성 평가용 답변 수집: 제품 `ChatService`를 부르고 LLM에 넘긴 발췌문은 검색 관찰 훅으로 기록 |
+| `generation.py` | RAGAS 판정 요청 구성·건너뛰기 규칙, ragas 어댑터(`RagasScorer`), 집계 |
+| `research_fusion.py` | 연구용 융합: 예전 가중 RRF 규칙, 표준 RRF, 고정·confidence 가중, 이론 정규화 |
+| `candidate_cache.py` | hybrid 융합 입력 캐시(gzip JSONL) 형식·기록·재생·게이트 |
+| `fusion_sweep.py` | 융합 설정 가족, 재생 채점, ko/en 쌍 클러스터 단위 반복 층화 CV, 1-SE 선택, 클러스터 paired bootstrap, 리포트 |
+| `latency.py` | hybrid 지연 A/B(채널 순차 vs 병렬): 계측, 쌍 교대 실행, 질의별 중앙값 차이의 클러스터 bootstrap |
+| `explain.py` | 제품 검색 SQL의 `EXPLAIN (ANALYZE, BUFFERS)` 요약 |
+| `commands/` | `arxplore-eval` 명령 |
 
-단위 테스트(`tests/unit/test_eval_metrics.py`, `tests/unit/test_eval_runner.py`, `tests/unit/test_eval_generation.py`,
-`tests/unit/test_eval_cases.py`)는 가짜 retriever·생성 함수·점수기로 전 과정을 돌리며 DB·API 키가 필요 없습니다.
+| 데이터 (`eval/`) | 내용 |
+| --- | --- |
+| `queries.jsonl` | 측정에 쓰는 질의셋. `queries.generated.jsonl` 뒤에 `queries.cases.jsonl`을 이어 붙인 것과 바이트까지 같다 |
+| `queries.generated.jsonl` | known-item·청크 합성 질의(LLM 생성 후 사람 검토) |
+| `queries.cases.jsonl` | 케이스 카탈로그에 실제 논문 id를 채운 사본 |
+| `queries.sample.jsonl` | 형식 예시 6건. arxiv_id·chunk_id는 **가짜 자리표시자**(`0000.0000x`, `90000x`) |
+| `cases/*.jsonl`, `cases/placeholders.json` | 관점별 손으로 쓴 케이스(아래 "케이스 카탈로그")와 자리표시자별 논문 조건 |
+| `results/` | 평가 결과(Markdown, CSV)와 답변 파일 |
+| `cache/` | 융합 입력 캐시 |
+
+단위 테스트(`tests/unit/eval/`)는 가짜 retriever·생성 함수·점수기로 전 과정을 돌리며 DB·API 키가 필요 없습니다. 통합 테스트
+(`tests/integration/eval/`)는 작은 pgvector 코퍼스와 가짜 OpenAI 서버로 모든 명령을 돌리고, `GOLDEN_DATABASE_URL`이 있으면 lexical
+3방식을 기록된 실행 `results/20260929-005408.csv`와 비교합니다.
 
 ## 전제 조건 (측정 전에 반드시)
 
 측정은 아래가 끝난 DB에서만 의미가 있습니다. 하나라도 빠지면 결과를 README·포트폴리오에 쓰지 않습니다.
 
-1. **Phase 0 파서 복구가 반영된 prepare-worker로 재처리**: `scripts/requeue_failed_prepare_jobs.py`로 failed 잡을 재등록하고 처리 완료까지 대기. `paper_fulltexts.source`에서 `layout_pdf`/`pdf` 비중을 확인합니다(평가 리포트의 "본문 source" 줄에 기록됨).
-2. **`content_role` 백필**: `scripts/backfill_content_roles.py` dry-run → 승인 후 `--apply`. "Reference Model", "Direct Preference Optimization" 같은 섹션이 body로 돌아와야 합니다.
-3. **임베딩 backlog 소진**: vector/hybrid를 잴 때 references가 아닌 청크 대부분에 임베딩이 있어야 합니다. 리포트의 `chunks` 대비 `embeddings` 수로 확인합니다.
-4. **질의셋은 1~3 이후에 생성**: chunk_synth 질의의 정답은 `chunk_id`인데, 재청킹·백필로 청크가 다시 만들어지면 id가 바뀝니다. `eval_retrieval.py`는 정답 id가 DB에 없으면 실행을 거부합니다.
+1. **현재 파서·청커로 처리된 코퍼스**: 파서를 바꿨으면 `arxplore run reparse --since ... --until ... --apply`로 날짜 잡을 다시 열어
+   worker가 처리하게 하고, 청커만 바꿨으면 `arxplore run rechunk --apply`로 저장된 섹션에서 다시 청킹합니다. 둘 다 먼저 dry-run으로
+   규모를 봅니다. `paper_fulltexts.source`의 `layout_pdf`/`pdf` 비중은 평가 리포트의 "본문 source" 줄에 기록됩니다.
+2. **임베딩 backlog 소진**: vector/hybrid를 잴 때 references가 아닌 청크 대부분에 임베딩이 있어야 합니다. 리포트의 `chunks` 대비
+   `embeddings` 수로 확인합니다.
+3. **질의셋은 1~2 이후에 생성**: chunk_synth 질의의 정답은 `chunk_id`인데, 재청킹으로 청크가 다시 만들어지면 id가 바뀝니다.
+   `arxplore-eval retrieval`은 정답 id가 DB에 없으면 실행을 거부합니다.
+
+DB 접속은 제품과 같은 설정(`POSTGRES_HOST`, `APP_POSTGRES_DB` 등, 실행 위치의 `.env`)을 씁니다. 모든 명령은
+`--openai-base-url`(또는 `OPENAI_BASE_URL`)로 OpenAI 호환 주소를 바꿀 수 있어, 가짜 서버(`tests/fakes/openai_server.py`)로 비용 없이
+돌려 볼 수 있습니다.
 
 ## 실행
 
 ```bash
 # 0) 형식 확인 (DB 불필요)
-pytest tests/unit/test_eval_metrics.py tests/unit/test_eval_runner.py
+uv run pytest tests/unit/eval
 
 # 1) 질의셋 표본 확인 — DB만 필요, LLM 미호출
-python scripts/eval_build_queries.py --papers 20 --chunks 10 --seed 42
+uv run arxplore-eval build-queries --papers 20 --chunks 10 --seed 42
 
-# 2) 생성 — DB + OPENAI_API_KEY. known_item 20편 × ko/en = 최대 40개 + chunk_synth 최대 10개
-python scripts/eval_build_queries.py --generate --papers 20 --chunks 10 --seed 42
+# 2) 생성 — DB + OPENAI_API_KEY. known_item 20편 × ko/en = 최대 40개 + chunk_synth 최대 10개 → eval/queries.generated.jsonl
+uv run arxplore-eval build-queries --generate --papers 20 --chunks 10 --seed 42
 
-# 3) 사람이 검토: eval/queries.jsonl에서 정답이 모호하거나 너무 쉬운(제목을 그대로 쓴) 질의를 지우고,
-#    직접 고친 항목은 source를 "manual"로 바꾼다. 필요하면 manual 질의를 손으로 추가한다.
+# 3) 사람이 검토: 정답이 모호하거나 너무 쉬운(제목을 그대로 쓴) 질의를 지우고, 직접 고친 항목은 source를 "manual"로 바꾼다.
+#    그 뒤 queries.generated.jsonl + queries.cases.jsonl로 queries.jsonl을 다시 쓴다
+uv run arxplore-eval build-queries --combine
 
 # 4) 평가 — lexical만 (API 키 불필요)
-python scripts/eval_retrieval.py --methods lexical
+uv run arxplore-eval retrieval --methods lexical
 
 # 5) 평가 — 3방식 + 모든 ablation (DB + OPENAI_API_KEY; 질의 임베딩 비용 발생)
-python scripts/eval_retrieval.py --ablations all
+uv run arxplore-eval retrieval --ablations all
 
 # 일부만 빠르게
-python scripts/eval_retrieval.py --limit 5 --methods lexical,hybrid
+uv run arxplore-eval retrieval --limit 5 --methods lexical,hybrid
 ```
 
-주요 옵션: `--k 10`, `--adjacency-window 1`(제품 경로와 동일한 문맥 창, 지연에 포함), `--lang ko|en`, `--category language,safety`,
-`--warmup 1`(방식별로 첫 질의를 한 번 버림), `--keep-going`(질의 단위 예외를 기록하고 계속; 기본은 즉시 중단).
+주요 옵션: `--k 10`, `--adjacency-window 1`(제품 경로와 같은 문맥 창, 지연에 포함), `--lang ko|en`, `--category language,safety`,
+`--warmup 1`(방식별로 첫 질의를 한 번 버림), `--keep-going`(질의 단위 예외를 기록하고 계속; 기본은 즉시 중단), `--meta KEY=VALUE`
+(리포트 머리말에 측정 조건을 덧붙임, 반복 가능).
 
 DB에 연결할 수 없거나, 정답 id가 DB에 없거나, vector 계열인데 키·임베딩이 없으면 **아무 파일도 쓰지 않고 종료 코드 2**로 끝납니다.
 `--keep-going`으로 실패한 질의가 있으면 결과 파일은 쓰되 종료 코드 1이고, 실패 건은 집계에서 빠지며 `errors` 열에 개수가 남습니다.
+
+검색 SQL의 실행 계획은 `arxplore-eval explain`으로 봅니다. 제품의 SQL 빌더와 후보 수 규칙으로 lexical·vector SQL을 만들어
+읽기 전용 트랜잭션에서 `EXPLAIN (ANALYZE, BUFFERS)`로 돌리고 롤백합니다. 질의 벡터는 기본으로 DB에 저장된 임베딩 하나를 쓰고,
+`--embed`일 때만 OpenAI를 부릅니다.
+
+```bash
+uv run arxplore-eval explain --query "direct preference optimization" --runs 3
+uv run arxplore-eval explain --no-hybrid --channel vector --limit 20       # 단독 벡터 검색의 후보 수
+uv run arxplore-eval explain --arxiv-id 2609.27980 --channel vector        # 논문 범위(상세 챗) 검색
+```
 
 ## 질의셋 형식 (`eval/queries.jsonl`)
 
@@ -116,58 +142,67 @@ DB에 연결할 수 없거나, 정답 id가 DB에 없거나, vector 계열인데
 - lexical은 FTS 설정이 `english`라 `ko` 질의에서 낮게 나오는 것이 예상된 결과입니다. `ko`/`en` 행을 나눠 보고합니다.
 - LLM이 만든 질의는 생성 모델의 표현 습관을 따릅니다. 가능하면 manual 질의를 일부 섞고, 부분집합별 결과를 같이 봅니다.
 
-## Ablation (retriever 무수정)
+## Ablation (제품 코드 무수정)
 
 | 이름 | 방식 | 무엇을 끄나 |
 | --- | --- | --- |
-| `nodiv` | `lexical_nodiv`, `vector_nodiv`, `hybrid_nodiv` | `_apply_paper_diversity`(논문당 2청크 우선). hybrid는 입력 두 목록과 병합 결과 모두에서 끔. SQL 안의 논문당 3청크 상한은 남는다 |
-| `nofilter` | `lexical_nofilter` | `_filter_lexical_candidates`(references/front_matter/참고문헌형·목차형 텍스트 제거) |
-| `norerank` | `vector_norerank` | `_rerank_vector_candidates`(섹션 prior, 토큰 겹침, 참고문헌형 감점) |
-| `plainrrf` | `hybrid_plainrrf` | hybrid 융합 → 표준 RRF(k=60, `STANDARD_RRF_FUSION`)로 대체. 입력은 `hybrid_fusion_inputs`(기본 lexical/vector 결과), diversity는 유지. lexical 부분 일치 행 제거도 하지 않는다(예전 구현과 같음) |
-| `rules` | `hybrid_rules` | hybrid 융합 → 2026-09-29까지의 제품 규칙(가중 RRF, `LEGACY_RULES_FUSION`)으로 대체. 입력·diversity는 `plainrrf`와 같다 |
+| `nodiv` | `lexical_nodiv`, `vector_nodiv`, `hybrid_nodiv` | 논문 다양성(`arxplore.retrieval.diversity`, 논문당 2청크 우선). hybrid는 입력 두 목록과 병합 결과 모두에서 끔. SQL 안의 논문당 3청크 상한은 남는다 |
+| `nofilter` | `lexical_nofilter` | lexical 후보 필터(references/front_matter/참고문헌형·목차형 텍스트 제거) |
+| `norerank` | `vector_norerank` | vector rerank(섹션 prior, 토큰 겹침, 참고문헌형 감점) |
+| `plainrrf` | `hybrid_plainrrf` | hybrid 융합 → 표준 RRF(k=60, `research_fusion.STANDARD_RRF_FUSION`)로 대체. 입력은 `Retriever.hybrid_inputs`(기본 lexical/vector 결과), diversity는 유지. lexical 부분 일치 행 제거도 하지 않는다(예전 구현과 같음) |
+| `rules` | `hybrid_rules` | hybrid 융합 → 2026-09-29까지의 제품 규칙(가중 RRF, `research_fusion.LEGACY_RULES_FUSION`)으로 대체. 입력·diversity는 `plainrrf`와 같다 |
 
-ablation은 `PaperRetriever`의 하위 단계(저장소 조회 → 정규화 → rerank → filter → diversity → 문맥 창)를 같은 순서·같은 후보 수로 다시 조합해 구현합니다.
-retriever를 고치지 않고는 끌 수 없는 것:
+ablation은 제품 검색의 공개 단계(채널 조회 → rerank → 필터 → 융합 → 다양성 → 문맥 창)를 같은 순서·같은 후보 수로 다시 조합해 구현합니다.
+제품 코드를 고치지 않고는 끌 수 없는 것:
 
-- lexical/vector **SQL 안의** `content_role`·섹션 가중(`paper_repository.list_chunk_candidates_by_query`, `vector_repository.search_paper_chunks`). `vector_norerank`도 SQL 감점은 남아 있습니다.
-- lexical SQL의 `ts_rank_cd` / ILIKE 보너스 개별 기여, 후보 수(`max(k*3, 10)`) 변경.
+- lexical/vector **SQL 안의** `content_role`·섹션 가중(`retrieval.lexical.build_lexical_candidates_query`, `retrieval.vector.build_vector_search_query`). `vector_norerank`도 SQL 감점은 남아 있습니다.
+- lexical SQL의 `ts_rank_cd` / ILIKE 보너스 개별 기여, 채널 후보 수(`candidate_fetch_limit`: `max(k*5, 30)`) 변경.
 - 예전 가중 RRF 규칙의 적응 가중치와 품질 가중을 **따로** 끄기. 따로 끈 결과는 아래 융합 설정 비교의 요인 배치(CF)로 봅니다.
 - `toc` 청크 제외(두 SQL 모두 WHERE 절에서 제외).
 
 ## hybrid 융합 설정 비교 (캐시 재생)
 
-융합 상수(`src/integrations/hybrid_fusion.py`의 `HybridFusionConfig`)를 바꿔 볼 때마다 DB·임베딩을 다시 부르지 않도록, 제품 hybrid
-경로가 융합에 넘기는 입력을 한 번 기록하고 융합 → 논문 다양성만 다시 재생합니다. 절차와 판정 규칙은 사전 등록 항목
-(`docs/worklog/phase-4/2026-09-28_01_*.md`, convex는 `2026-09-29_01_*.md`)이 기준입니다. 제품 기본(`DEFAULT_HYBRID_FUSION`)은
-2026-09-29부터 convex 비교의 pick `CC_mm_a0.35`(min-max, lexical 가중치 0.35)이고, 그 전 규칙은 `LEGACY_RULES_FUSION`(가족 C)입니다.
+융합 상수(`research_fusion.HybridFusionConfig`)를 바꿔 볼 때마다 DB·임베딩을 다시 부르지 않도록, 제품 hybrid 경로가 융합에 넘기는
+입력을 한 번 기록하고 융합 → 논문 다양성만 다시 재생합니다. 절차와 판정 규칙은 사전 등록 항목(`docs/worklog/phase-4/2026-09-28_01_*.md`,
+convex는 `2026-09-29_01_*.md`)이 기준입니다. 제품 융합(`arxplore.retrieval.fusion`)은 2026-09-29부터 convex 비교의 pick
+`CC_mm_a0.35`(min-max, lexical 가중치 0.35)이고, `research_fusion.PRODUCT_FUSION`이 같은 설정입니다. 그 전 규칙은
+`LEGACY_RULES_FUSION`(가족 C)입니다.
 
 ```bash
-# 1) 기록 — DB + OPENAI_API_KEY. 질의마다 hybrid_fusion_inputs(k), live hybrid·vector·lexical(k)을 부른다
-python scripts/eval_dump_candidates.py --queries eval/queries.jsonl --k 10
+# 1) 기록 — DB + OPENAI_API_KEY. 질의마다 hybrid 융합 입력(k)과 live hybrid·vector·lexical(k)을 부른다
+uv run arxplore-eval dump-candidates --queries eval/queries.jsonl --k 10
 
-# 2) 게이트 — 기록 시점 제품 설정(캐시 머리말 fusion_default) 재생이 기록한 제품 hybrid 순위와 모든 질의에서 같아야 한다(다르면 종료 코드 1)
-python scripts/eval_fusion_sweep.py gate --cache eval/cache/candidates_<timestamp>.jsonl.gz
+# 2) 게이트 — 기록 시점 설정(캐시 머리말) 재생이 기록한 제품 hybrid 순위와 모든 질의에서 같고,
+#    research_fusion의 제품 설정 재생이 제품 융합과 같아야 한다(다르면 종료 코드 1)
+uv run arxplore-eval fusion gate --cache eval/cache/candidates_<timestamp>.jsonl.gz
 
 # 3) 비교 — 게이트를 먼저 돌리고 통과할 때만 결과를 쓴다
-python scripts/eval_fusion_sweep.py sweep --cache eval/cache/candidates_<timestamp>.jsonl.gz
+uv run arxplore-eval fusion sweep --cache eval/cache/candidates_<timestamp>.jsonl.gz
 
 # 4) 점수 수준 융합 비교 — sweep 설정에 convex combination 가족을 더하고 pick을 그 가족 안에서 고른다
-python scripts/eval_fusion_sweep.py convex --cache eval/cache/candidates_<timestamp>.jsonl.gz
+uv run arxplore-eval fusion convex --cache eval/cache/candidates_<timestamp>.jsonl.gz
 ```
 
+- `--cache`를 빼면 `eval/cache/`의 가장 최근 파일을 씁니다. `fusion` 명령은 DB·키가 필요 없습니다.
 - 캐시 후보에는 `chunk_id`, `arxiv_id`, `score`, `content_role`, `section_title`, lexical `strict_match`만 남습니다. 순서가 채널 순위입니다. 머리말에 기록 커밋, k, 코퍼스 요약, 질의셋 digest, 기록 시점 기본 융합 설정이 있습니다. 질의 111개 기준 수백 KB라 결과와 함께 커밋합니다(chunk_id는 코퍼스에 묶여 있어 캐시 없이는 같은 비교를 재현할 수 없음).
 - 설정 가족: R0(vector·lexical 단독, 캐시 후보에 다양성만), F0(표준 RRF, k ∈ {10, 20, 40, 60, 100}), F1(고정 가중치 w_lex ∈ {0, 0.1, …, 1} × k), F2(confidence 선형 w_min ∈ {0.1, …, 0.9} × tau ∈ {0.2, 0.3, 0.5, 0.8} × k), C(예전 가중 RRF 규칙 `LEGACY_RULES_FUSION`, 이름은 예전 리포트와 같게 `C_current`), CF(C의 방법 가중 × 품질 가중 × 교차 보너스 2^3). F1·F2는 품질 가중 on/off × 교차 보너스 {0, 0.015}와 교차합니다. REF는 비교용(부분 일치 행을 버리지 않는 C, 예전 `hybrid_plainrrf`)입니다.
 - 클러스터: id 끝의 `-ko`/`-en`만 다른 질의 쌍은 한 클러스터(`cluster_key`), 짝이 없는 질의는 혼자 한 클러스터입니다. CV는 쌍을 같은 fold에 두고 클러스터 단위로 층화(source × 쌍/lang)하며, bootstrap은 클러스터를 복원 추출하고 질의 평균을 통계량으로 씁니다. 리포트 표에 질의 수와 클러스터 수를 함께 적습니다.
 - 선택: 주 지표 논문 MRR@k. 클러스터 층화 5-fold × 10회 반복 CV로 가족별 성능(학습 fold에서 고른 설정을 남긴 fold에서 잰 값)을 내고, 선택 가능한 가족 전체에서 전체 데이터 MRR 최고 설정의 CV SE 안에 드는 설정 중 상수가 가장 적은 설정을 고릅니다(1-SE 규칙, 상수 수는 `count_parameters`). 클러스터 paired bootstrap 10,000회로 pick − C, pick − F0(k=60), pick − vector 단독, C − F0(k=60), C − vector 단독의 ΔMRR·Δhit@1 95% 구간을 전체와 manual 부분집합에서 냅니다.
-- `convex`(사전 등록 `docs/worklog/phase-4/2026-09-29_01_*.md`): 채널 점수를 정규화해 `α·φ_lex + (1−α)·φ_vec`로 합칩니다(`weighting="convex"`, α는 lexical 가중치, Bruch et al., TOIS 2023). CC는 부분 일치 행 제거를 켠 정규화 3종(per-query min-max `mm`, 이론 하한 min-max `tmm` lexical 0 / vector −1, strict 행 하한 `tmms` 0.56 / −1) × α ∈ {0, 0.05, …, 0.95}이고 선택 대상입니다. CCK는 제거를 끈 `mm`·`tmm` 보조 가족으로 보고만 합니다. 한 채널에만 나온 후보의 다른 채널 점수는 0, 상한 − 하한 ≤ 0이면 채널 후보가 모두 1.0입니다. 리포트에 규칙 (4)(pick − 표준 RRF), 정규화별 CV, α 곡선, 퇴화 수, 질의별 차이가 붙습니다. 이 비교의 pick이 지금 제품 기본값입니다(2026-09-29_03).
-- R0는 hybrid 입력(채널당 `hybrid_branch_limit(k)`개)에 다양성만 적용한 순위라 제품 vector/lexical 단독 검색(저장소 요청 수가 다름)과 다를 수 있습니다. 기록 스크립트가 다른 질의 수를 참고로 출력합니다.
+- `convex`(사전 등록 `docs/worklog/phase-4/2026-09-29_01_*.md`): 채널 점수를 정규화해 `alpha·φ_lex + (1−alpha)·φ_vec`로 합칩니다(`weighting="convex"`, alpha는 lexical 가중치, Bruch et al., TOIS 2023). CC는 부분 일치 행 제거를 켠 정규화 3종(per-query min-max `mm`, 이론 하한 min-max `tmm` lexical 0 / vector −1, strict 행 하한 `tmms` 0.56 / −1) × alpha ∈ {0, 0.05, …, 0.95}이고 선택 대상입니다. CCK는 제거를 끈 `mm`·`tmm` 보조 가족으로 보고만 합니다. 한 채널에만 나온 후보의 다른 채널 점수는 0, 상한 − 하한 ≤ 0이면 채널 후보가 모두 1.0입니다. 리포트에 규칙 (4)(pick − 표준 RRF), 정규화별 CV, alpha 곡선, 퇴화 수, 질의별 차이가 붙습니다. 이 비교의 pick이 지금 제품 기본값입니다(2026-09-29_03).
+- R0는 hybrid 입력(채널당 `hybrid_branch_limit(k)`개)에 다양성만 적용한 순위라 제품 vector/lexical 단독 검색(저장소 요청 수가 다름)과 다를 수 있습니다. 기록 명령이 다른 질의 수를 참고로 출력합니다.
 - 옵션: `--seed 20260928`, `--folds 5`, `--repeats 10`, `--resamples 10000`, `--out-dir eval/results`. seed가 같으면 결과가 같습니다.
+
+## 검색 지연 A/B
+
+`arxplore-eval latency`는 hybrid 두 채널을 순차(A)와 병렬(B)로 번갈아 돌려 질의별 중앙값 차이를 잽니다. 평가 경로(k)와 제품 경로
+(`--product-limit`, 기본 5)를 함께 재고, 같은 임베딩을 넣었을 때 두 실행의 결과가 같은지 먼저 확인합니다(`--no-memo-check`로 건너뜀).
+DB와 키가 필요하고 임베딩만 부릅니다. 결과는 `eval/results/latency_<timestamp>.{md,csv}`입니다.
 
 ## 생성 품질(RAGAS)
 
 제품의 두 답변 경로, 에이전트(`agent`)와 상세 챗(`paper_chat`)이 만든 답변을 [RAGAS](https://docs.ragas.io) LLM 판정으로 채점합니다.
-검색 평가와 같은 질의셋을 쓰고, Django·세션 없이 `src/core/agent`의 제품 함수를 서버 `OPENAI_API_KEY`(`override_openai_runtime`)로 직접 호출합니다.
-ragas 호출은 `eval/generation.py`의 `RagasScorer` 하나에 모여 있고(`ragas.metrics.collections` + `llm_factory`, 지표별 `ascore`), 단위 테스트는 이 자리에 고정 점수를 돌려주는 가짜 점수기를 넣습니다.
+검색 평가와 같은 질의셋을 쓰고, 제품 채팅 서비스(`arxplore.api.services.chat.build_chat_service`)를 서버 `OPENAI_API_KEY`로 직접 부릅니다.
+ragas 호출은 `generation.py`의 `RagasScorer` 하나에 모여 있고(`ragas.metrics.collections` + `llm_factory`, 지표별 `ascore`), 단위 테스트는 이 자리에 고정 점수를 돌려주는 가짜 점수기를 넣습니다.
 
 | 지표 | 뜻 | 계산 조건 |
 | --- | --- | --- |
@@ -178,10 +213,10 @@ ragas 호출은 `eval/generation.py`의 `RagasScorer` 하나에 모여 있고(`r
 
 ### 답변 수집
 
-- `agent`: `agent_search`(LangGraph 에이전트)를 호출합니다. `contexts`는 검색 도구(`search_paper_chunks_tool`)가 LLM에 넘긴 청크 본문(문맥 창 포함)이고, 도구를 여러 번 부르면 중복을 뺀 합집합입니다.
-- `paper_chat`: 질의의 `open_arxiv_id`(없으면 `relevant_arxiv_ids[0]`) 논문으로 상세 챗을 호출합니다. `contexts`는 프롬프트의 번호 출처(초록 + 검색 청크) 본문 그대로입니다.
+- `agent`: 에이전트를 부릅니다. `contexts`는 검색 도구(`search_paper_chunks_tool`)가 LLM에 넘긴 청크 본문(문맥 창 포함)이고, 도구를 여러 번 부르면 중복을 뺀 합집합입니다. 발췌문은 검색 관찰 훅(`arxplore.context.observe_retrieval`)으로 받습니다.
+- `paper_chat`: 질의의 `open_arxiv_id`(없으면 `relevant_arxiv_ids[0]`) 논문으로 상세 챗을 부릅니다. `contexts`는 프롬프트의 번호 출처(초록 + 검색 청크) 본문 그대로입니다.
 - 질의의 `mode` 힌트가 허용하지 않는 (질의, 모드) 조합은 만들지 않습니다.
-- 호출 전에 제품 API(`backend/papers/services.py`)의 입력 검증을 `eval.behavior.prepare_chat_input`으로 재현합니다: 앞뒤 공백 제거 후 빈 문자열이거나 4,000자를 넘으면 생성하지 않고 `outcome="rejected"`, `rejection`에 API 안내 문구를 남깁니다(오류가 아님). `history`는 user/assistant이고 내용이 있는 턴만, 턴당 4,000자, 최근 20턴만 남기고, 마지막 user 턴이 현재 질문과 같으면 뺀 뒤 제품 함수에 `chat_history`로 넘깁니다.
+- 호출 전에 제품 API의 입력 검증(`arxplore.api.services.chat.validate_chat_input`)을 그대로 씁니다: 앞뒤 공백 제거 후 빈 문자열이거나 4,000자를 넘으면 생성하지 않고 `outcome="rejected"`, `rejection`에 API 안내 문구를 남깁니다(오류가 아님). `history`는 user/assistant이고 내용이 있는 턴만, 턴당 4,000자, 최근 20턴만 남기고, 마지막 user 턴이 현재 질문과 같으면 뺀 뒤 넘깁니다.
 - 레코드의 `outcome`: `answered` / `refused`(답변에 거절 문구) / `rejected` / `error`. `hit_arxiv_ids`는 에이전트 검색 도구가 LLM에 넘긴 청크의 논문(상세 챗은 열어 둔 논문)입니다.
 - 답변 모델은 `OPENAI_MODEL`이고 `--answer-model`로 바꿉니다. 답변 레코드는 `eval/results/answers_<timestamp>.jsonl`에 한 줄씩 바로 추가됩니다.
 
@@ -201,34 +236,34 @@ ragas 호출은 `eval/generation.py`의 `RagasScorer` 하나에 모여 있고(`r
 
 ### 전제 조건
 
-- 검색 평가의 전제 조건 1~4를 마친 DB와 사람이 검토한 `eval/queries.jsonl`.
+- 검색 평가의 전제 조건 1~3을 마친 DB와 사람이 검토한 `eval/queries.jsonl`.
 - `OPENAI_API_KEY`(서버 키): 답변 생성, hybrid 질의 임베딩, 판정 LLM, `answer_relevancy` 임베딩에 모두 씁니다.
-- ragas 0.4.x (`requirements-dev.txt`).
+- eval 의존성 그룹(`uv sync --group eval`, ragas 0.4.3·tiktoken). ragas가 쓰는 scikit-network는 Python 3.14 휠이 없어 설치할 때 C++ 컴파일러로 빌드합니다. ragas를 불러올 수 없으면 채점 명령은 작업 전에 멈추고 `--behavior-only`를 안내합니다.
 
 ### 실행
 
 ```bash
 # 0) 형식 확인 (DB·키 불필요)
-pytest tests/unit/test_eval_generation.py
+uv run pytest tests/unit/eval/test_eval_generation.py
 
 # 1) 소량 확인: 에이전트 3건 수집 + 채점
-python scripts/eval_generation.py --collect --mode agent --limit 3
+uv run arxplore-eval generation --collect --mode agent --limit 3
 
 # 2) 전체: 두 모드 수집 + 채점. 질의 단위 실패는 error로 남기고 계속
-python scripts/eval_generation.py --collect --keep-going
+uv run arxplore-eval generation --collect --keep-going
 
 # 3) 수집만 따로 (끊기면 같은 명령으로 이어서)
-python scripts/eval_generation.py --collect --no-score --keep-going --out eval/results/answers_run1.jsonl
+uv run arxplore-eval generation --collect --no-score --keep-going --out eval/results/answers_run1.jsonl
 
 # 4) 저장된 답변만 다시 채점 (지표·판정 모델 바꿔 보기)
-python scripts/eval_generation.py --answers eval/results/answers_run1.jsonl
-python scripts/eval_generation.py --answers eval/results/answers_run1.jsonl --metrics faithfulness,answer_relevancy --judge-model gpt-4o-mini
+uv run arxplore-eval generation --answers eval/results/answers_run1.jsonl
+uv run arxplore-eval generation --answers eval/results/answers_run1.jsonl --metrics faithfulness,answer_relevancy --judge-model gpt-4o-mini
 ```
 
 주요 옵션: `--mode agent|paper_chat|both`(기본 both), `--metrics`(기본 all), `--limit`, `--lang ko|en`, `--category`, `--behavior-only`(RAGAS 생략, 행동 지표만),
 `--refusal-phrases FILE`(거절 문구 목록, 한 줄에 하나), `--judge-model`(기본 `gpt-5-mini`),
 `--embedding-model`(기본 `text-embedding-3-small`, `answer_relevancy`용), `--judge-max-tokens`(gpt-5·o 계열 기본 8192), `--concurrency 4`,
-`--no-adapt-language`, `--out-dir eval/results`.
+`--no-adapt-language`, `--trace`(LangSmith 추적을 설정대로 켬, 기본 끔), `--out-dir eval/results`.
 
 결과: `eval/results/generation_<timestamp>.md`(README 붙여넣기용 표 + 모드 × 부분집합 표), `generation_<timestamp>.csv`(질의별 점수·건너뛴 사유·판정 오류), `generation_<timestamp>_summary.csv`.
 부분집합은 검색 평가와 같은 `all`, `ko`, `en`, `known_item`, `llm_synth`, `manual`, `category:<이름>`, `behavior:<기대 행동>`이고 모드별로 나눕니다. 표의 값은 `평균 (계산된 질의 수)`입니다.
@@ -265,7 +300,7 @@ python scripts/eval_generation.py --answers eval/results/answers_run1.jsonl --me
 
 ## 행동 지표 (LLM 판정 없음)
 
-`eval/behavior.py`가 답변 레코드만 보고 문자열 규칙으로 계산합니다. 판정 LLM·API 키가 필요 없고(`--behavior-only`), RAGAS를 켜도 항상 같이 계산합니다.
+`behavior.py`가 답변 레코드만 보고 문자열 규칙으로 계산합니다. 판정 LLM·API 키가 필요 없고(`--behavior-only`), RAGAS를 켜도 항상 같이 계산합니다.
 값은 1.0(통과) / 0.0(실패)의 평균이고, `mentions_required_ids`만 비율입니다. 해당 케이스가 없는 칸은 `-`입니다.
 
 | 지표 | 대상 | 통과 조건 |
@@ -276,13 +311,13 @@ python scripts/eval_generation.py --answers eval/results/answers_run1.jsonl --me
 | `mentions_required_ids` | `must_mention_arxiv_ids`가 있는 레코드 | 필수 ID 중 답변에 나온 비율(링크 속 ID, 본문의 `2401.12345` 형태, 버전 접미사 무시) |
 | `rejected_as_expected` | `expect_rejected`이거나 실제로 거부된 레코드 | 기대(`expect_rejected`)와 결과(`outcome == rejected`)가 일치. 경계 밖인데 통과했거나, 경계 안인데 거부됐으면 0 |
 
-- 링크 해석은 제품의 `src.core.agent.citations.arxiv_id_from_url`·`normalize_arxiv_id`를 그대로 씁니다(`abs`/`pdf`, `v2`·`.pdf` 접미사, `www.`·`export.` 호스트).
+- 링크 해석은 제품의 `arxplore.llm.citations.arxiv_id_from_url`·`normalize_cited_arxiv_id`를 그대로 씁니다(`abs`/`pdf`, `v2`·`.pdf` 접미사, `www.`·`export.` 호스트).
 - 거절 문구 기본 목록은 `DEFAULT_REFUSAL_PHRASES`(상세 챗 프롬프트의 "제공된 발췌문으로는 답하기 어렵습니다", "찾지 못", "찾을 수 없", "관련 논문이 없", "could not find", "not in the provided" 등)입니다. 문자열 포함 검사라 "정확히 알 수 없지만 …"처럼 답을 하면서 거절 문구를 쓰는 답변도 `refused`로 셉니다. 제품 문구를 바꾸면 `--refusal-phrases`로 목록을 바꿔 다시 채점합니다(답변 파일은 그대로).
 - 결과 종류(`answered`/`refused`/`rejected`/`error`) 건수를 모드 × 부분집합별로 같이 보여 줍니다. answer 케이스의 `refused`는 과잉 거절, refuse 케이스의 `answered`는 거절 실패로 읽습니다.
 
 ## 케이스 카탈로그
 
-`eval/cases/`에 관점별 JSONL로 손으로 쓴 케이스가 있습니다(`source=manual`). 아래 숫자는 파일에서 센 값이고, `tests/unit/test_eval_cases.py`가 이 표와 실제 개수가 같은지 확인합니다.
+`eval/cases/`에 관점별 JSONL로 손으로 쓴 케이스가 있습니다(`source=manual`). 아래 숫자는 파일에서 센 값이고, `tests/unit/eval/test_eval_dataset.py`가 관점별 파일 구성과 케이스 규칙을 검사합니다.
 
 | 관점(category) | 케이스 | answer / refuse / clarify | 입력 거부 기대 | 검색 평가 대상 | 다루는 것 |
 | --- | --- | --- | --- | --- | --- |
@@ -305,42 +340,42 @@ python scripts/eval_generation.py --answers eval/results/answers_run1.jsonl --me
 
 ### 실제 id 붙이기
 
-카탈로그의 arxiv_id는 모두 **자리표시자**(`0000.0000a` ~ `0000.0000q`)이고, 제목이 필요한 질의는 `{{title:0000.0000g}}`(제목 전체), `{{title_head:0000.0000i:4}}`(제목 앞 4단어) 템플릿으로 적었습니다. **코퍼스의 실제 id로 바꾼 뒤에만 실행합니다.** 자리표시자가 남은 질의셋은 두 평가 스크립트가 종료 코드 2로 거부합니다.
+카탈로그의 arxiv_id는 모두 **자리표시자**(`0000.0000a` ~ `0000.0000q`)이고, 제목이 필요한 질의는 `{{title:0000.0000g}}`(제목 전체), `{{title_head:0000.0000i:4}}`(제목 앞 4단어) 템플릿으로 적었습니다. **코퍼스의 실제 id로 바꾼 뒤에만 실행합니다.** 자리표시자가 남은 질의셋은 두 평가 명령이 종료 코드 2로 거부합니다.
 
 ```bash
 # 1) 후보 미리보기 — DB만 필요. 자리표시자마다 placeholders.json 조건에 맞는 논문을 최신 순으로 보여 주고,
 #    서로 다른 논문을 하나씩 고른다(파일을 쓰지 않음)
-python scripts/eval_build_queries.py --attach-ids
+uv run arxplore-eval build-queries --attach-ids
 
 # 2) 고른 논문이 조건("need")에 맞지 않으면 직접 지정
-python scripts/eval_build_queries.py --attach-ids --set 0000.0000a=2405.01234 --set 0000.0000k=2406.05678
+uv run arxplore-eval build-queries --attach-ids --set 0000.0000a=2405.01234 --set 0000.0000k=2406.05678
 
 # 3) 기록 — 원본 카탈로그는 그대로 두고 eval/queries.cases.jsonl에 채운 사본을 쓴다
-python scripts/eval_build_queries.py --attach-ids --write [--overwrite] [--set ...]
+uv run arxplore-eval build-queries --attach-ids --write [--overwrite] [--set ...]
 
 # 4) 사람이 훑어보기: 질문이 그 논문에 실제로 답이 있는지(부록·그림 캡션·결과 표·결론 등) 확인하고 필요하면 --set으로 바꿔 다시 기록
 
 # 5) 실행
-python scripts/eval_retrieval.py --queries eval/queries.cases.jsonl --methods lexical
-python scripts/eval_generation.py --collect --queries eval/queries.cases.jsonl --keep-going --behavior-only
-python scripts/eval_generation.py --answers eval/results/answers_<timestamp>.jsonl   # 같은 답변에 RAGAS까지
+uv run arxplore-eval retrieval --queries eval/queries.cases.jsonl --methods lexical
+uv run arxplore-eval generation --collect --queries eval/queries.cases.jsonl --keep-going --behavior-only
+uv run arxplore-eval generation --answers eval/results/answers_<timestamp>.jsonl   # 같은 답변에 RAGAS까지
 ```
 
 - `placeholders.json`의 조건: `title_keyword`(제목 ILIKE, `%` 와일드카드 가능), `title_keywords`(그중 하나라도 맞으면 되는 OR 목록, 있으면 `title_keyword` 대신 씀), `exclude_title_keywords`(제목에 있으면 빼는 목록), `min_chunks`(청크 수 하한), `section_keyword`(그 섹션 제목을 가진 청크 존재), `content_role`(예: `appendix` 청크 존재), `chunk_pattern`(본문 ILIKE, 예: `Figure 1`). `need`는 사람이 확인할 조건 설명입니다.
 - **집합 자리표시자**(`all_matches: true`, `0000.0000r`~`0000.0000x`): 조건에 맞는 논문 **전부**(최대 50편)가 정답이 됩니다. "diffusion", "4비트 양자화"처럼 특정 논문이 아니라 주제를 묻는 `query_form` 질의에 씁니다. 첫 실측에서 이런 질의에 단일 자리표시자를 붙였더니 제목 키워드가 우연히 맞는 논문(예: `Quantiz` → 벡터 양자화 토크나이저 논문) 하나만 정답이 되어 12건 중 10건이 검색은 맞았는데도 0점이었습니다. 리스트 안의 집합 자리표시자는 모든 id로 펼쳐지고, 문자열 안(`{{title:...}}`, 링크)에서는 첫 논문을 씁니다. 다른 자리표시자가 고른 논문도 집합에서 빼지 않습니다.
 - 채우지 못한 자리표시자가 남은 케이스와 `absent` 논문이 코퍼스에 있는 케이스는 빼고 목록을 출력합니다. 자리표시자가 없는 케이스(거절·입력 거부·인젝션 일부)는 그대로 들어갑니다.
-- 채운 파일은 측정에 쓴 질의셋으로 결과와 함께 커밋합니다(리포트 머리말의 sha256으로 대조).
+- 채운 파일은 측정에 쓴 질의셋으로 결과와 함께 커밋합니다(리포트 머리말의 sha256으로 대조). `queries.jsonl`을 다시 쓸 때는 `build-queries --combine`을 씁니다.
 
 ## 결과 반영 체크리스트
 
 측정을 실제로 돌린 뒤에만 진행합니다. 추정치나 부분 실행 결과는 쓰지 않습니다.
 
-- [ ] 전제 조건 1~4 충족을 리포트 머리말(코퍼스 규모, 본문 source 분포, 임베딩 수, 커밋)로 확인
+- [ ] 전제 조건 1~3 충족을 리포트 머리말(코퍼스 규모, 본문 source 분포, 임베딩 수, 커밋)로 확인
 - [ ] `errors` 열이 모두 0 (아니면 원인 해결 후 재실행)
 - [ ] `eval/results/<timestamp>.md`, `.csv`, `_summary.csv`와 사용한 `eval/queries.jsonl`을 함께 커밋 (리포트의 sha256과 파일 일치)
-- [ ] README "Evaluation" 표의 "측정 예정"을 리포트의 "README 붙여넣기용" 표로 교체하고, 질의 수(ko/en, 출처별)·측정일·커밋·결과 파일 경로를 표 아래에 적기
+- [ ] README "Evaluation" 표는 리포트의 "README 붙여넣기용" 표로만 바꾸고, 질의 수(ko/en, 출처별)·측정일·커밋·결과 파일 경로와 측정 조건은 `docs/EVALUATION.md`에 적기
 - [ ] ko/en 차이, known_item vs llm_synth 차이, noise@10을 한두 문장으로 요약. 차이가 몇 건 수준이면 "차이 없음"으로 서술
-- [ ] "hybrid 우위" 같은 문장은 표가 뒷받침할 때만 README·포트폴리오 덱(5p)에 쓰기
-- [ ] ablation 결과로 diversity·필터·가중치의 효과를 확인한 경우에만 덱에서 해당 설계를 "효과 있음"으로 서술
+- [ ] "hybrid 우위" 같은 문장은 표가 뒷받침할 때만 README·포트폴리오에 쓰기
+- [ ] ablation 결과로 diversity·필터·가중치의 효과를 확인한 경우에만 해당 설계를 "효과 있음"으로 서술
 - [ ] 생성 품질: 리포트 머리말의 답변 파일 sha256·답변 모델·판정 모델·ragas 설정을 확인하고, 사용한 `answers_<timestamp>.jsonl`과 `generation_<timestamp>.{md,csv}`, `_summary.csv`를 함께 커밋
-- [ ] 생성 품질 표의 "측정 예정"을 리포트의 "README 붙여넣기용" 표로 교체하고, 판정 모델과 지표별 계산된 질의 수(`n`)를 표 아래에 적기. 판정 실패·생성 실패가 있으면 원인 해결 후 재실행
+- [ ] 생성 품질 표는 리포트의 "README 붙여넣기용" 표로 바꾸고, 판정 모델과 지표별 계산된 질의 수(`n`)는 `docs/EVALUATION.md`에 적기. 판정 실패·생성 실패가 있으면 원인 해결 후 재실행
