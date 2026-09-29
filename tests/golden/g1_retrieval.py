@@ -3,6 +3,8 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
+from arxplore_eval.dataset import load_queries
+
 from tests.fakes.openai_server import EmbeddingVectors, FakeHTTPError, FakeOpenAIServer, load_embedding_table
 from tests.golden.adapters import RetrievalAdapter
 from tests.golden.store import DATA_DIR, GOLDEN_ROOT, sha256_text
@@ -120,8 +122,6 @@ def pair_key(arxiv_id: str, question: str) -> str:
 
 
 def build_query_sets() -> dict[str, dict[str, dict[str, Any]]]:
-    from eval.dataset import load_queries
-
     queries = load_queries(QUERIES_PATH)
     sets: dict[str, dict[str, dict[str, Any]]] = {
         "eval": {query.id: {"query": query.query} for query in queries if query.retrieval_eligible},
