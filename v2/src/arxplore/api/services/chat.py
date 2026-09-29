@@ -7,8 +7,9 @@ from arxplore.api.services.detail import find_paper
 from arxplore.api.services.store import PaperStore
 from arxplore.config import AppSettings
 from arxplore.domain.papers import Paper
-from arxplore.llm.agent.graph import AgentGraph
+from arxplore.llm.agent.graph import AgentGraph, build_agent_graph
 from arxplore.llm.agent.stream import stream_agent_answer
+from arxplore.llm.agent.tools import build_agent_tools
 from arxplore.llm.events import AnswerEvent, CollectedAnswer, collect_answer
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.paper_chat import (
@@ -156,3 +157,21 @@ class ChatService:
     async def answer_agent_chat(self, chat: ChatInput) -> CollectedAnswer:
         answer = await collect_answer(self.stream_agent_chat(chat))
         return CollectedAnswer(answer=answer.answer or EMPTY_AGENT_ANSWER, citations=answer.citations)
+
+
+def build_chat_service(
+    settings: AppSettings,
+    *,
+    store: PaperStore,
+    retriever: ContextRetriever,
+    models: ChatModelFactory,
+    tracer: Tracer,
+) -> ChatService:
+    return ChatService(
+        settings=settings,
+        store=store,
+        retriever=retriever,
+        models=models,
+        tracer=tracer,
+        agent_graph=build_agent_graph(build_agent_tools(retriever, store), models),
+    )

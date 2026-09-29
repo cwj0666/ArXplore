@@ -1,3 +1,4 @@
+import json
 import logging
 from types import ModuleType
 from typing import Any
@@ -15,6 +16,7 @@ from arxplore.api.services.chat import (
     CHAT_HISTORY_MAX_MESSAGES,
     CHAT_MESSAGE_MAX_CHARS,
     MESSAGE_TOO_LONG_MESSAGE,
+    build_chat_service,
     chat_fields,
     normalize_history,
     validate_chat_input,
@@ -29,6 +31,8 @@ from arxplore.api.services.detail import (
 from arxplore.api.services.generation import summary_source_text, validate_summary_model
 from arxplore.api.services.listing import list_papers, page_window, parse_page_number
 from arxplore.domain.papers import PaperFulltext
+from arxplore.llm.models import ChatModelFactory
+from arxplore.llm.tracing import Tracer
 from arxplore.sources.arxiv import ArxivPaper
 
 
@@ -301,6 +305,37 @@ class TestChatInput:
         assert chat_fields({"message": 42}) == ("42", [])
         assert chat_fields({"message": None, "history": "x"}) == ("None", "x")
         assert chat_fields({}) == ("", [])
+
+
+class TestChatServiceBuilder:
+    async def test_agent_tools_use_the_given_store_and_retriever(
+        self, harness: Any, helpers: ModuleType, ids: dict[str, str]
+    ) -> None:
+        fakes = harness.fakes
+        search = fakes.ToolCall(name="search_paper_chunks_tool", arguments=json.dumps({"query": "method"}))
+        trending = fakes.ToolCall(name="get_trending_papers_tool", arguments="{}")
+        link = f"https://arxiv.org/abs/{ids['main']}"
+        replies = iter([fakes.ChatReply(tool_calls=(search, trending)), f"[근거]({link})"])
+        harness.fake_openai.chat_handler = lambda request: next(replies)
+        retriever = helpers.FakeRetriever(contexts={None: [helpers.make_context(ids["main"], 10, "method context")]})
+        settings = harness.settings()
+        service = build_chat_service(
+            settings,
+            store=harness.store,
+            retriever=retriever,
+            models=ChatModelFactory.from_settings(settings),
+            tracer=Tracer.disabled(),
+        )
+
+        answer = await service.answer_agent_chat(service.prepare_agent_chat("방법은?", []))
+
+        assert retriever.calls == [("method", 5, None)]
+        assert harness.store.recent_limits == [10]
+        assert answer.answer == f"[근거]({link})"
+        assert {(citation.arxiv_id, citation.chunk_id) for citation in answer.citations if citation.in_answer} == {
+            (ids["main"], 10),
+            (ids["main"], None),
+        }
 
 
 class TestGenerationInputs:

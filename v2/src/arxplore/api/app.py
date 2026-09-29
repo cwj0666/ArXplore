@@ -32,7 +32,7 @@ from arxplore.api.security import (
     TrustedOrigins,
 )
 from arxplore.api.services.arxiv_cache import CachedArxivSearch
-from arxplore.api.services.chat import ChatService
+from arxplore.api.services.chat import build_chat_service
 from arxplore.api.services.detail import ArxivSearch
 from arxplore.api.services.generation import GenerationService
 from arxplore.api.services.store import PaperStore, PostgresPaperStore
@@ -40,8 +40,6 @@ from arxplore.config import AppSettings, get_settings
 from arxplore.db.migrate import verify_schema
 from arxplore.db.pool import create_pool_from_settings
 from arxplore.embedding import EmbeddingClient
-from arxplore.llm.agent.graph import build_agent_graph
-from arxplore.llm.agent.tools import build_agent_tools
 from arxplore.llm.detail import PaperDetailWriter
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.paper_chat import ContextRetriever
@@ -86,7 +84,6 @@ def build_services(
 ) -> ApiServices:
     models = chat_models or ChatModelFactory.from_settings(settings)
     active_tracer = tracer or Tracer.from_settings(settings)
-    agent_graph = build_agent_graph(build_agent_tools(retriever, store), models)
     return ApiServices(
         settings=settings,
         store=store,
@@ -97,14 +94,7 @@ def build_services(
             PaperDetailWriter(models, active_tracer),
             SummaryWriter(models, active_tracer),
         ),
-        chat=ChatService(
-            settings=settings,
-            store=store,
-            retriever=retriever,
-            models=models,
-            tracer=active_tracer,
-            agent_graph=agent_graph,
-        ),
+        chat=build_chat_service(settings, store=store, retriever=retriever, models=models, tracer=active_tracer),
         rate_limiter=rate_limiter,
         trusted_origins=TrustedOrigins.parse(settings.csrf_trusted_origins),
     )
