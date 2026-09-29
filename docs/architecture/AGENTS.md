@@ -1,71 +1,42 @@
 # ArXplore AI 작업 규칙
 
-이 문서는 ArXplore 저장소에서 AI 도구가 작업할 때 따라야 하는 공통 규칙이다. 현재 저장소는 이미 수집, 파싱, 적재, 임베딩 기반을 갖춘 상태이며, AI는 이 기반을 임의로 다시 설계하는 것이 아니라 그 위에서 retrieval, answer chain, prompt, 논문 상세 문서, UI 계층을 다듬는 방식으로 작업해야 한다.
-
-## 0. refactor/v2 브랜치의 예외
-
-`refactor/v2`는 사용자가 승인한 전면 리팩토링 브랜치다(결정 기록 `docs/worklog/phase-5`).
-
-- 이 브랜치에서는 리팩토링 계획(`~/portfolio/02_projects/arxplore/reports/refactor/06_plan.md`)이 이 문서의 구조 유지 규칙보다 우선한다.
-- 다음 조항은 이 브랜치에 적용하지 않는다: 1절의 "코드를 즉시 바꾸지 않는다", 6~8절의 재설계·재작성 금지.
-- 3절의 계약은 계획의 골든 절차로 지킨다. 먼저 같게 옮기고, 동작 변경은 수정 ID가 붙은 커밋에서만 한다.
+이 문서는 ArXplore 저장소에서 AI 도구가 작업할 때 따르는 규칙이다. 수집, 파싱, 적재, 임베딩, 검색, 생성, API, UI가 모두
+갖춰진 상태이고, 작업은 이 구조와 공용 계약 위에서 한다.
 
 ## 1. 먼저 읽을 문서
 
-작업을 시작하기 전에 아래 문서를 먼저 읽는다.
+1. `README.md`: 기능, 구조, 평가 요약
+2. `docs/architecture/ARCHITECTURE.md`: 런타임, 모듈, 스키마와 마이그레이션, 큐, 검색, API
+3. `docs/SETUP.md`: 실행, 테스트, 골든 테스트, CI
+4. `docs/EVALUATION.md`, `eval/README.md`: 평가 수치, 측정 조건, 한계, 하네스 사용법
+5. `docs/worklog/README.md`와 페이즈별 `INDEX.md`: 결정 기록
 
-1. `README.md` (Features, Architecture, Evaluation 요약). 상세 수치와 알려진 한계는 `docs/EVALUATION.md`
-2. `docs/architecture/ARCHITECTURE.md`
-3. `docs/management/ROLES.md`
-4. `docs/management/WORKFLOW.md`
+문서와 코드가 다르면 코드를 바로 고치지 않는다. 현재 동작을 먼저 확인해 설명하고, 문서를 맞출지 코드를 고칠지 구분한 뒤 진행한다.
 
-환경 준비와 실행 절차가 필요할 때는 `docs/management/TEAM_SETUP.md`도 함께 읽는다.
+## 2. 코드 규칙
 
-문서와 코드가 충돌할 경우 코드를 즉시 바꾸지 않는다. 현재 운영 사실이 무엇인지 먼저 설명하고, 문서 정합화가 필요한지 또는 코드 수정이 필요한지 구분한 뒤 진행한다.
+- 코드와 설정 파일에 주석과 docstring을 쓰지 않는다. 설명이 필요한 곳은 이름과 구조로 드러낸다. LLM에 넘어가는 도구 설명처럼 기능인 문자열은 `@tool(description=...)` 같은 명시적 인자로 둔다. `.env.example`의 변수 설명만 예외다.
+- Python 3.14와 uv를 쓴다. 의존성은 `pyproject.toml`과 `uv.lock`이 기준이고, 바꾸면 `uv lock`으로 lock을 함께 갱신한다. 평가 전용 의존성은 `eval` 그룹이다.
+- 커밋 전에 `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`(strict, `src`), `uv run pytest tests/unit`을 통과시킨다. 프론트는 `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`다.
+- API, DB, OpenAI, LangGraph는 async로 쓴다. 파싱·정제·청킹 같은 CPU 작업은 동기 함수로 두고 `asyncio.to_thread`로 부른다.
+- ORM을 쓰지 않는다. SQL은 `db/repositories`와 검색 모듈의 상수·빌더로 둔다. 검색 SQL은 손으로 튜닝한 결과라 문장 구조를 바꾸면 골든으로 확인한다.
+- 요청 경로, worker, 스케줄러에 DDL을 넣지 않는다. 스키마는 새 번호 마이그레이션으로만 바꾼다.
+- 외부 요청의 헤더와 본문에 사용자 이메일 같은 개인정보를 넣지 않는다.
 
-## 2. 현재 운영 구조를 먼저 이해할 것
+## 3. 공용 계약
 
-AI는 아래 운영 사실을 현재 기준선으로 사용한다.
+아래는 여러 계층이 함께 쓰는 계약이다. 바꿔야 하면 이유와 영향 받는 계층을 먼저 정리하고, 관련 문서와 골든을 같은 작업에서 고친다.
 
-- 서버 자동화 DAG는 3개다
-  - `arxplore_daily_collect` (매일 18:00 KST)
-  - `arxplore_maintenance` (3시간마다)
-  - `arxplore_langsmith_maintenance` (매일 03:00 KST, LangSmith trace 정리)
-- 최신 수집분은 `daily_collect`가 수행한다
-- 과거 raw 백필과 arXiv 메타데이터 후속 보강은 `maintenance`가 수행한다
-- `prepare`와 `embed`는 서버 Airflow가 아니라 로컬 runtime에서 수행한다
-- 로컬 실행 진입점은 `docker-compose.yml`의 `prepare-worker` 서비스(profile: parser)와 `src/pipeline/prepare_worker.py`다
-- raw payload와 backfill 상태는 PostgreSQL `raw_daily_papers`·`pipeline_state` 테이블(`raw_store.py`)에, prepare queue는 PostgreSQL `prepare_jobs` 테이블(`prepare_job_repository.py`)에 있다. 수집은 raw 저장과 enqueue를 한 트랜잭션으로 실행한다
-- parser runtime은 같은 `docker-compose.yml`의 `layout-parser` 서비스(profile: parser, HURIDOCS 컨테이너)다
-- PDF 파싱 경로는 `layout -> pypdf -> abstract fallback` 순서다. GPU는 layout parser에만 쓰고, 임베딩은 OpenAI API로 만든다
-- 스키마는 `scripts/migrate_schema.py`(또는 worker 시작 시 `ensure_schema`)가 만든다. 리포지토리 생성자나 요청 경로에 DDL을 넣지 않는다
-- 제품 검색 경로는 `src/core/agent/retrieval.py`의 `retrieve_contexts`가 고른다. `RETRIEVAL_MODE=hybrid`(기본)이고 질의 임베딩 키(서버 `OPENAI_API_KEY`, 요청 범위 `override_openai_runtime` 키가 있으면 그 키)가 있으면 `PaperRetriever.search_paper_contexts_by_hybrid`(lexical + vector 점수의 min-max convex combination)를 쓰고, 키가 없거나 임베딩 호출이 실패하면 `search_paper_contexts`(lexical)로 내려간다. 에이전트 도구 `search_paper_chunks_tool`과 상세 챗이 같은 경로를 쓴다
-- 상세 페이지 챗은 질문으로 해당 논문 안(`arxiv_id` 한정)을 검색해 초록 + 발췌 청크 최대 5개로 답하고, SSE로 스트리밍하며 `[n]` 번호 인용을 `citations`로 돌려준다. 검색 결과가 없으면 앞 청크로 대신한다(`retrieval_mode: "first_chunks"`)
-- 계정·로그인이 없고 모든 기능이 공개다. 개요·상세 요약은 캐시가 없을 때만 서버 `OPENAI_API_KEY`로 생성하고, 챗·에이전트도 서버 키를 쓴다. LLM 호출 엔드포인트와 `detail.json`은 클라이언트 IP당 rate limit(`RATE_LIMIT_LLM_PER_MINUTE`, `RATE_LIMIT_DETAIL_PER_MINUTE`)을 받는다
+### HTTP API
 
-## 3. 절대 임의 변경하면 안 되는 것
+- 경로, 메서드, 끝 슬래시, 상태 코드, 오류 문구, 검사 순서가 계약이다. 모든 오류는 `{"error": 문구}`이고, 요청 검증 실패는 400 "잘못된 요청입니다.", 405는 빈 본문과 `Allow`다.
+- 요청·응답 모델과 SSE 이벤트는 `arxplore openapi`가 내보내는 스키마이고, 그 출력이 `frontend/openapi.json`에 커밋되어 있다. 프론트 타입은 이 파일에서 `npm run generate:api`로 만든다. 스키마를 바꾸면 두 파일을 같이 갱신한다(`uv run arxplore openapi --output frontend/openapi.json`, `cd frontend && npm run generate:api`). CI와 `npm run check:api`가 어긋남을 잡는다.
+- 새 API 경로는 `docker/web/nginx.conf`의 location과 `frontend/vite.config.ts`의 프록시 목록에 같이 넣는다. SSE 경로는 버퍼링을 끈 location을 쓴다.
+- LLM을 부르는 6개 경로(`analyze/`, `summary/`, 상세 챗과 어시스턴트의 JSON·SSE)가 llm rate limit 버킷 하나를 공유하고, `detail.json`은 detail 버킷이다.
 
-### `PaperDetailDocument` 계약
+### SSE
 
-`src/core/models.py`의 `PaperRef`, `PaperDetailDocument`는 팀 공용 데이터 계약이다. 이 모델은 생성 체인의 출력이자 UI 입력이다. 한 계층의 편의를 위해 필드를 바꾸면 다른 계층이 동시에 깨진다.
-
-다음 변경은 팀 합의 없이 하지 않는다.
-
-- 필드 이름 변경
-- 필드 삭제
-- 필드 타입 변경
-- 의미가 겹치는 새 필드 추가
-- `overview`와 `key_findings` 역할 혼합
-
-### retrieval 결과 shape
-
-retrieval 구현은 바꿀 수 있지만, 결과 shape는 쉽게 바꾸지 않는다. 역할 2와 역할 5가 이 구조를 소비하므로, `chunk_id`, `arxiv_id`, `chunk_text`, `section_title`, `content_role`, `score` 같은 핵심 필드는 안정적으로 유지해야 한다.
-
-### answer payload shape
-
-응답 계층이 UI에 넘기는 payload도 공용 계약이다. 현재 형태는 다음과 같다.
-
-**SSE 엔드포인트** (둘 다 `POST`, JSON 본문 `{"message": str, "history": [{"role": "user"|"assistant", "content": str}]}`)
+엔드포인트는 둘 다 `POST`이고 본문은 `{"message": str, "history": [{"role": "user"|"assistant", "content": str}]}`다.
 
 - 에이전트: `/papers/assistant/stream/`
 - 상세 챗: `/papers/<arxiv_id>/chat/stream/`
@@ -79,17 +50,13 @@ data: {"error": "..."}
 data: [DONE]
 ```
 
-- `in_answer`: 답변이 실제로 이 출처를 인용했으면 `true`. 에이전트는 답변 속 `[제목](URL)` 링크를 도구 결과와 대조하고(URL 또는 arXiv ID 일치), 상세 챗은 `[1]`, `[2]` 같은 발췌문 번호를 대조한다. 답변에 인용이 하나도 없으면 사용한 출처 전체를 `in_answer: false`로 보낸다. 도구 결과에 없는 링크는 서버 로그에 경고로 남기고 답변은 고치지 않는다.
+- `in_answer`: 답변이 이 출처를 실제로 인용했으면 `true`다. 에이전트는 답변 속 `[제목](URL)` 링크를 도구 결과와 대조하고(URL 또는 arXiv ID 일치), 상세 챗은 `[1]`, `[2]` 같은 발췌문 번호를 대조한다. 답변에 인용이 하나도 없으면 사용한 출처 전체를 `in_answer: false`로 보낸다. 도구 결과에 없는 링크는 서버 로그에 경고로 남기고 답변은 고치지 않는다.
 - 상세 챗의 1번 출처는 논문 초록이다(`section_title: "Abstract"`, `chunk_id: null`). 트렌딩 도구에서 온 에이전트 출처도 `chunk_id: null`이다.
-- 스트리밍을 시작하기 전 검증 실패는 JSON으로 응답한다: 빈 메시지·4,000자 초과 메시지·잘못된 `history` 400, 없는 논문 404(상세 챗), 서버 `OPENAI_API_KEY` 없음 503. `history`는 서버에서 user/assistant만 남기고 최근 20개, 메시지당 4,000자로 자른다.
+- 스트리밍 전의 검증 실패는 JSON으로 응답한다: 빈 메시지·4,000자 초과 메시지·잘못된 `history`는 400, 없는 논문은 404(상세 챗), 서버 `OPENAI_API_KEY`가 없으면 503이다. `history`는 서버에서 user/assistant만 남기고 최근 20개, 메시지당 4,000자로 자른다.
 - `error` 문구는 사용자용 고정 문구다. 예외 메시지는 응답에 싣지 않고 서버 로그에 남긴다.
+- 비스트리밍 경로의 응답: 에이전트 `/papers/assistant/chat/`는 `{"answer", "citations"}`, 상세 챗 `/papers/<arxiv_id>/chat/`은 `{"answer", "citations", "retrieval_mode": "hybrid"|"lexical"|"first_chunks"}`다.
 
-**비스트리밍 엔드포인트**
-
-- 에이전트 `/papers/assistant/chat/`: `{"answer": str, "citations": [...]}`
-- 상세 챗 `/papers/<arxiv_id>/chat/`: `{"answer": str, "citations": [...], "retrieval_mode": "hybrid"|"lexical"|"first_chunks"}`
-
-**에이전트 검색 도구 출력** (`search_paper_chunks_tool`, LLM이 읽는 문자열)
+에이전트 검색 도구(`search_paper_chunks_tool`)가 LLM에 넘기는 문자열도 계약이다. 도구 이름과 설명 문자열은 바꾸지 않는다.
 
 ```text
 [1] 제목: {paper_title} | arxiv_id: {arxiv_id} | 섹션: {section_title 또는 -} | chunk_id: {chunk_id 또는 -}
@@ -97,80 +64,72 @@ data: [DONE]
 내용: {context_text, 없으면 chunk_text}
 ```
 
-결과가 없으면 "검색된 관련 논문이 없습니다. …지어내지 말고…" 문구를 돌려준다. 도구는 돌려준 hit을 요청 범위 레지스트리에 기록하고, 스트리밍 계층이 이를 `citations`로 만든다. 검색 방식은 `RETRIEVAL_MODE`(기본 `hybrid`)를 따르고, 질의 임베딩 키(서버 `OPENAI_API_KEY`)가 없거나 임베딩 호출이 실패하면 lexical로 내려간다.
+결과가 없으면 "검색된 관련 논문이 없습니다. …지어내지 말고…" 문구를 돌려준다. 도구는 돌려준 hit을 요청 범위 레지스트리에 기록하고, 스트리밍 계층이 이를 `citations`로 만든다.
 
-계약 변경이 필요하면 아래 순서를 따른다.
+### 검색 결과
 
-1. 왜 변경이 필요한지 설명한다
-2. 영향을 받는 계층을 정리한다
-3. 관련 문서와 코드 수정 범위를 함께 제안한다
+검색 결과는 `arxplore.domain.retrieval`의 frozen dataclass(`RetrievalHit`, `RetrievalContext`)다. `chunk_id`, `arxiv_id`, `chunk_text`, `section_title`, `content_role`, `score`는 에이전트 도구, 상세 챗, 평가 하네스, 골든 G1이 함께 쓰는 핵심 필드라 이름과 의미를 바꾸지 않는다. 평가 하네스는 검색의 공개 단계 함수만 쓰므로, 공개 함수의 시그니처를 바꾸면 `arxplore_eval`도 같이 고친다.
 
-## 4. 저장소 구조 규칙
+### 마이그레이션
 
-각 계층의 책임은 다음과 같다.
+- 스키마는 `src/arxplore/db/migrations/NNNN_<이름>.sql`로만 바꾸고, 번호는 하나씩 늘린다. 파일 하나가 트랜잭션 하나다.
+- 적용된 파일은 고치지 않는다. 실행기가 체크섬으로 바뀐 파일을 찾아 멈추므로, 고칠 내용은 새 번호로 더한다.
+- API, worker, 스케줄러는 시작할 때 대기 마이그레이션과 임베딩 차원을 확인한다. 임베딩 차원을 바꾸는 것은 스키마 변경이다.
 
-- `dags/`: Airflow DAG 정의만 둔다
-- `src/pipeline/`: DAG와 워커가 호출하는 실행 진입점
-- `src/integrations/`: 외부 서비스 연동, 저장소 접근, retrieval 구현
-- `src/core/`: 도메인 모델, 프롬프트, 생성 체인, RAG 응답
-- `src/shared/`: 설정과 tracing
-- `backend/`: Django API와 React shell
-- `frontend/`: React UI
+### AI 결과 캐시
 
-아래 변경은 구조 원칙에 어긋난다.
+개요·핵심 포인트와 상세 요약은 `prompt_version`과 함께 캐시된다. 결과를 바꾸는 프롬프트나 후처리를 고치면 `ANALYSIS_PROMPT_VERSION`(`llm/detail.py`) 또는 `SUMMARY_PROMPT_VERSION`(`llm/summary_graph.py`)을 올린다. 이전 버전 행은 첫 요청 때 다시 생성되므로 LLM 비용이 든다.
 
-- DAG 파일에 무거운 비즈니스 로직을 직접 넣는 것
-- 외부 연동 코드를 `src/core/`나 `backend/`에 넣는 것
-- UI 편의를 위해 도메인 계약을 바꾸는 것
-- 저장 편의를 위해 공용 모델을 바꾸는 것
+## 4. 골든과 수정 ID
 
-## 5. 용어 규칙
+`tests/golden`의 골든 6종은 리팩토링 전 구현의 출력을 고정한 것이다. 모든 LLM·임베딩·arXiv 호출은 `tests/fakes`의 가짜 서버가 받는다.
 
-AI는 아래 표준 표현을 사용한다.
+| ID | 대상 |
+| --- | --- |
+| G1 | 검색 순위(평가 경로, 제품 경로, 상세 챗) |
+| G2 | 저장된 섹션에서 만든 청크 |
+| G3 | pypdf 파싱, HURIDOCS 응답 재생 |
+| G4 | 가짜 서버가 받은 LLM 요청 본문(G5와 함께 캡처) |
+| G5 | HTTP·SSE 응답 |
+| G6 | 화면(PNG, innerText, ARIA) |
+
+- 원본 골든 파일(`<이름>.json.gz`, `g6_ui/`)은 옛 구현의 기준선이라 고치지 않는다. 현재 구현과 다른 결과는 변형(`<이름>.v2.json.gz`, `g6_ui.v2/`)에 두고, 비교는 변형이 있으면 변형과, 없으면 원본과 한다.
+- 동작을 바꾸지 않는 변경은 골든이 그대로 통과해야 한다.
+- 동작을 바꾸는 수정은 수정 ID(F 번호)를 단 별도 커밋으로 하고, 골든 차이는 그 커밋에서만 허용한다.
+  1. 수정 커밋에서 해당 골든의 변형을 다시 캡처한다(`uv run python -m scripts.goldens.capture_<종류>`, 기본으로 v2 변형을 쓴다).
+  2. `tests/golden/data/<이름>.v2.diff.md`에 수정 ID 절을 더해 무엇이 몇 개 바뀌었고 왜 그런지 적는다.
+  3. 커밋 메시지에 수정 ID와 사유를 쓰고, 결정은 worklog에 남긴다.
+- G1 질의 임베딩 표를 다시 받는 `capture_g1_retrieval embed`는 실제 OpenAI API를 부른다(유료). 먼저 `embed --dry-run`으로 필요한 입력이 표에 모두 있는지 확인하고, 실제 호출은 사용자 승인 뒤에만 한다.
+
+## 5. 테스트 DB와 비용
+
+- 통합 테스트는 테스트마다 public 스키마를 지운다. `V2_TEST_DATABASE_URL`로 작업 전용 DB를 명시하고, 이름은 `v2_test`로 시작해야 한다. 여러 작업자가 쓰는 DB를 가리키지 않고, 끝나면 만든 DB를 지운다.
+- 골든 DB의 `arxplore`(원본)와 `arxplore_tpl`(복사용 템플릿)에는 쓰지 않는다. 쓰기가 필요하면 `CREATE DATABASE ... TEMPLATE arxplore_tpl`로 만든 복사본을 쓴다.
+- 유료 API(OpenAI LLM·임베딩) 호출은 사용자 승인 뒤에만 한다. 테스트, 골든, 스모크는 가짜 OpenAI 서버(`tests/fakes/openai_server.py`)에 `OPENAI_BASE_URL`을 붙여 돌린다.
+- `.env`에는 실제 키가 있다. 골든 하네스와 스모크처럼 가짜 서버를 쓰는 실행은 `.env`가 없는 위치에서 돌리거나 설정을 명시적으로 넘긴다.
+
+## 6. 저장소 구조 규칙
+
+- `src/arxplore`의 패키지 경계를 지킨다. `domain`은 I/O가 없는 모델, `db`는 SQL, `sources`는 외부 HTTP, `parsing`은 순수 CPU 작업, `retrieval`과 `llm`은 도메인 로직, `pipeline`과 `scheduler`는 작업 조립, `api`는 HTTP 계층이다. 명령은 패키지의 `commands.register`가 `cli.py`에 붙인다.
+- API 라우트에 SQL을 직접 쓰지 않고, 외부 연동을 `llm`이나 `api`에 넣지 않는다.
+- 평가 하네스(`src/arxplore_eval`)는 제품의 공개 함수만 쓰고, 연구용 설정은 `research_fusion`에 둔다.
+- 프론트는 `pages`가 조립만 하고 기능은 `features`, 공용 코드는 `shared`에 둔다. 서버 상태는 TanStack Query로 다루고 스타일은 CSS Modules와 `shared/styles/tokens.css`의 토큰을 쓴다.
+- 서버는 수집·저장과 스케줄러만 맡고, GPU 파싱과 임베딩은 로컬 worker가 한다. 이 분리를 깨지 않는다.
+
+## 7. 용어 규칙
 
 | 표준 표현 | 설명 |
 |---|---|
-| `논문 상세 문서` | `PaperDetailDocument` 단위 구조화 문서 |
 | `논문 개요` | 단일 논문의 목적, 접근, 결과를 설명하는 overview |
 | `핵심 포인트` | 단일 논문의 기여와 결과를 정리한 key findings |
 | `상세 요약` | 논문 본문을 한국어로 구조화한 detailed summary |
-| `근거 번역` | 근거 chunk의 한국어 번역 |
-| `논문 청크` | retrieval과 grounding 입력 단위 |
-| `lexical retrieval` | 텍스트 기반 검색 |
+| `논문 청크` | 검색과 근거 제시의 입력 단위 |
+| `lexical retrieval` | 전문 검색 |
 | `vector retrieval` | 임베딩 기반 검색 |
-| `hybrid retrieval` | lexical과 vector를 결합한 검색 |
-| `RAG 응답` | retrieval 결과를 기반으로 만든 답변 |
+| `hybrid retrieval` | lexical과 vector 점수를 합친 검색 |
+| `RAG 응답` | 검색 결과를 근거로 만든 답변 |
 | `prepare job` | 날짜 단위 prepare 작업 |
+| `골든` / `변형 골든` | 옛 구현 출력의 기준선 / 수정으로 달라진 현재 구현의 기준 |
+| `수정 ID` | 동작을 바꾸는 수정의 F 번호 |
 
 문맥에 맞는다는 이유로 다른 용어를 섞어 쓰지 않는다.
-
-## 6. 작업 방식 규칙
-
-- 현재 구조를 다시 초기화하거나 대체하기보다, 이미 존재하는 경로 위에서 문제를 푼다
-- 문서 기준과 충돌하는 구조 변경은 코드 수정 전에 먼저 설명한다
-- 문서에도 영향을 주는 변경이면 관련 문서를 함께 갱신한다
-- 테스트나 검증 경로가 있으면 실행한다
-- retrieval, answer, prompt, 논문 상세, UI 경계를 침범하는 변경은 더 보수적으로 다룬다
-
-## 7. 현재 단계에서 AI가 우선해야 할 것
-
-현재 단계에서 AI가 우선적으로 다뤄야 할 순서는 다음과 같다.
-
-1. retrieval 품질과 반환 shape
-2. answer chain과 citation 정책
-3. 한국어 번역과 상세 요약 규칙
-4. 논문 상세 문서 생성 품질
-5. UI 소비 계층 연결
-
-AI는 "파이프라인 뼈대를 새로 만드는 작업"을 기본값으로 두지 않는다. 이미 구현된 기반을 이해한 뒤, 그 위에 있는 계층을 개선하는 것이 현재 기준이다.
-
-## 8. 금지 예시
-
-아래와 같은 요청은 바로 반영하지 않는다.
-
-- `"검색 결과 shape를 UI에 맞게 바꿔줘"`
-- `"PaperDetailDocument 필드를 조금 단순화해줘"`
-- `"prepare는 서버 Airflow에서 돌리게 다시 바꿔줘"`
-- `"DAG를 예전처럼 여러 개로 다시 쪼개자"`
-
-이런 요청은 계약, 운영 모델, 역할 경계 전체에 영향을 줄 수 있다. 먼저 이유와 영향 범위를 설명한 뒤 진행한다.

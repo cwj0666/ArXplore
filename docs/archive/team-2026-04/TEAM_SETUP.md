@@ -1,6 +1,6 @@
 # ArXplore 개발 환경 설정 가이드
 
-> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../README.md)와 [ARCHITECTURE](../architecture/ARCHITECTURE.md)를 따릅니다.
+> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../../README.md)와 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)를 따릅니다.
 
 ## 1. 문서 목적
 

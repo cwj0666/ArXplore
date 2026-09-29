@@ -1,6 +1,6 @@
 # ArXplore 역할 분담
 
-> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../README.md)와 [ARCHITECTURE](../architecture/ARCHITECTURE.md)를 따릅니다.
+> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../../README.md)와 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)를 따릅니다.
 
 ## 1. 문서 목적
 
@@ -33,11 +33,11 @@
 
 모든 역할은 아래 기준을 공유한다.
 
-- 제품 방향과 도메인 범위는 [README.md](../../README.md)의 `Goals & Scope` 섹션을 따른다
-- 구조와 런타임 토폴로지는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)를 따른다
+- 제품 방향과 도메인 범위는 [README.md](../../../README.md)의 `Goals & Scope` 섹션을 따른다
+- 구조와 런타임 토폴로지는 [ARCHITECTURE.md](../../architecture/ARCHITECTURE.md)를 따른다
 - 개발 흐름과 통합 순서는 [WORKFLOW.md](./WORKFLOW.md)를 따른다
 - 로컬 실행 환경과 운영 절차는 [TEAM_SETUP.md](./TEAM_SETUP.md)를 따른다
-- AI 작업 규칙은 [AGENTS.md](../architecture/AGENTS.md)를 따른다
+- AI 작업 규칙은 [AGENTS.md](../../architecture/AGENTS.md)를 따른다
 - 공용 데이터 계약은 `src/core/models.py`의 `PaperRef`, `PaperDetailDocument`를 기준으로 한다
 - UI는 읽기 전용 소비 계층으로 유지하며 저장 구조나 검색 계약을 직접 바꾸지 않는다
 - 검색 계층은 구현을 바꿀 수 있어도 반환 shape는 가능한 한 안정적으로 유지한다

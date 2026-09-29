@@ -1,10 +1,10 @@
 # ArXplore 개발 및 운영 워크플로우
 
-> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../README.md)와 [ARCHITECTURE](../architecture/ARCHITECTURE.md)를 따릅니다.
+> SK네트웍스 AI 캠프 팀 프로젝트 당시 문서입니다. 역할·작업 방식은 그때 기준이며, 현재 코드 구조는 [README](../../../README.md)와 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)를 따릅니다.
 
 ## 1. 문서 목적
 
-이 문서는 ArXplore를 현재 코드 기준으로 어떻게 개발하고 운영할지 정리한 실행 문서다. 환경 준비 자체는 [TEAM_SETUP.md](./TEAM_SETUP.md)를 기준으로 하고, 본 문서는 "무엇이 이미 준비되어 있으며, 어떤 순서와 handoff로 작업해야 하는가"를 설명한다. 제품 기능과 현재 한계는 [README.md](../../README.md)를 따른다.
+이 문서는 ArXplore를 현재 코드 기준으로 어떻게 개발하고 운영할지 정리한 실행 문서다. 환경 준비 자체는 [TEAM_SETUP.md](./TEAM_SETUP.md)를 기준으로 하고, 본 문서는 "무엇이 이미 준비되어 있으며, 어떤 순서와 handoff로 작업해야 하는가"를 설명한다. 제품 기능과 현재 한계는 [README.md](../../../README.md)를 따른다.
 
 현재 기준에서 중요한 점은 다음과 같다.
 
@@ -15,10 +15,10 @@
 
 ## 2. 기본 원칙
 
-- 제품 기준은 [README.md](../../README.md)를 따른다
-- 계층과 런타임 구조는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)를 따른다
+- 제품 기준은 [README.md](../../../README.md)를 따른다
+- 계층과 런타임 구조는 [ARCHITECTURE.md](../../architecture/ARCHITECTURE.md)를 따른다
 - 역할 경계는 [ROLES.md](./ROLES.md)를 따른다
-- AI 작업 규칙은 [AGENTS.md](../architecture/AGENTS.md)를 따른다
+- AI 작업 규칙은 [AGENTS.md](../../architecture/AGENTS.md)를 따른다
 - 공통 계약인 `PaperDetailDocument`, retrieval 결과 shape, answer payload는 쉽게 바꾸지 않는다
 - DAG 파일은 가볍게 유지하고 실제 로직은 `src/pipeline`과 `src/integrations`에 둔다
 - parser runtime은 서버가 아니라 로컬 개발용 PC에서 운영한다
