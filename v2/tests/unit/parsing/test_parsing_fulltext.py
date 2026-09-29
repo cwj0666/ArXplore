@@ -5,6 +5,7 @@ import pytest
 
 from arxplore.parsing.chunker import build_chunks
 from arxplore.parsing.fulltext import fallback_result, parse_fulltext
+from arxplore.parsing.layout_client import LayoutParserClient
 from arxplore.parsing.models import LayoutSegment
 
 BODY = "We propose a method for the alignment of large language models."
@@ -135,6 +136,28 @@ async def test_layout_parser_errors_degrade_to_pypdf_and_are_logged(caplog, text
 
     assert result.source == "pdf"
     assert f"layout parser unavailable: {error}" in caplog.text
+
+
+async def test_layout_parser_that_keeps_failing_falls_back_to_pypdf_after_retries(caplog, text_pdf):
+    calls: list[httpx.Request] = []
+    delays: list[float] = []
+
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(503)
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(unavailable)) as http_client:
+        client = LayoutParserClient("http://layout-parser:5060", http_client=http_client, sleep=record_sleep)
+        with caplog.at_level(logging.WARNING):
+            result = await parse_fulltext(text_pdf(["1 Introduction", BODY]), layout_client=client)
+
+    assert result.source == "pdf"
+    assert len(calls) == 4
+    assert delays == [1.0, 2.0, 4.0]
+    assert "layout parser unavailable" in caplog.text
 
 
 async def test_unexpected_layout_errors_propagate(text_pdf):

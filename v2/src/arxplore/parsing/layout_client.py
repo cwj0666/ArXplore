@@ -1,3 +1,6 @@
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Any, Self
 
 import httpx
@@ -7,10 +10,22 @@ from arxplore.parsing.models import LayoutSegment
 
 DEFAULT_FILENAME = "document.pdf"
 DEFAULT_TIMEOUT_SECONDS = 600.0
+DEFAULT_RETRIES = 3
+DEFAULT_BACKOFF_SECONDS = 1.0
+RETRYABLE_STATUS_CODES = frozenset({422, *range(500, 600)})
+RETRYABLE_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+)
 REQUIRED_SEGMENT_FIELDS = frozenset(
     {"left", "top", "width", "height", "page_number", "page_width", "page_height", "text", "type"}
 )
 LAYOUT_CLIENT_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, httpx.InvalidURL, ValueError)
+
+type Sleep = Callable[[float], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 def _form_flag(value: bool) -> str:
@@ -36,6 +51,12 @@ def normalize_segment(segment: Any) -> LayoutSegment:
     }
 
 
+def is_retryable_error(error: Exception) -> bool:
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code in RETRYABLE_STATUS_CODES
+    return isinstance(error, RETRYABLE_TRANSPORT_ERRORS)
+
+
 def normalize_segments(payload: Any) -> list[LayoutSegment]:
     if not isinstance(payload, list):
         raise ValueError("Layout parser response must be a list of segments.")
@@ -50,14 +71,24 @@ class LayoutParserClient:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         fast: bool = False,
         parse_tables_and_math: bool = True,
+        retries: int = DEFAULT_RETRIES,
+        backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
         http_client: httpx.AsyncClient | None = None,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
+        if retries < 0:
+            raise ValueError("retries must not be negative.")
+        if backoff_seconds < 0:
+            raise ValueError("backoff_seconds must not be negative.")
         self._configured_url = (base_url or "").strip()
         self.base_url = self._configured_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.fast = fast
         self.parse_tables_and_math = parse_tables_and_math
+        self.retries = retries
+        self.backoff_seconds = backoff_seconds
         self._http_client = http_client
+        self._sleep = sleep
 
     @classmethod
     def from_settings(cls, settings: AppSettings, *, http_client: httpx.AsyncClient | None = None) -> Self:
@@ -71,6 +102,18 @@ class LayoutParserClient:
 
     def is_configured(self) -> bool:
         return bool(self._configured_url)
+
+    def retry_delay(self, retry: int) -> float:
+        return float(self.backoff_seconds * 2**retry)
+
+    async def _post(self, url: str, files: dict[str, Any], form: dict[str, str]) -> httpx.Response:
+        if self._http_client is not None:
+            response = await self._http_client.post(url, files=files, data=form, timeout=self.timeout_seconds)
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(url, files=files, data=form)
+        response.raise_for_status()
+        return response
 
     async def analyze_pdf_bytes(
         self,
@@ -90,12 +133,24 @@ class LayoutParserClient:
                 self.parse_tables_and_math if parse_tables_and_math is None else parse_tables_and_math
             ),
         }
-        files = {"file": (filename, content, "application/pdf")}
+        files: dict[str, Any] = {"file": (filename, content, "application/pdf")}
         url = f"{self.base_url}/"
-        if self._http_client is not None:
-            response = await self._http_client.post(url, files=files, data=form, timeout=self.timeout_seconds)
-        else:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(url, files=files, data=form)
-        response.raise_for_status()
-        return normalize_segments(response.json())
+        retry = 0
+        while True:
+            try:
+                response = await self._post(url, files, form)
+            except LAYOUT_CLIENT_ERRORS as exc:
+                if retry >= self.retries or not is_retryable_error(exc):
+                    raise
+                delay = self.retry_delay(retry)
+                logger.warning(
+                    "layout parser attempt %d of %d failed: %s; retrying in %.1fs",
+                    retry + 1,
+                    self.retries + 1,
+                    exc,
+                    delay,
+                )
+                await self._sleep(delay)
+                retry += 1
+            else:
+                return normalize_segments(response.json())

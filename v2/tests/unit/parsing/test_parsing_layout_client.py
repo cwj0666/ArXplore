@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -103,15 +104,119 @@ async def test_form_flags_follow_the_client_and_call_options():
     assert b'filename="x.pdf"' in second
 
 
-async def test_http_errors_are_raised_without_retrying():
+class RecordedSleep:
+    def __init__(self) -> None:
+        self.delays: list[float] = []
+
+    async def __call__(self, delay: float) -> None:
+        self.delays.append(delay)
+
+
+def respond_in_turn(*responses: httpx.Response | Exception) -> Handler:
+    queue = list(responses)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        outcome = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return handle
+
+
+@pytest.mark.parametrize("status_code", [422, 500, 502, 503, 504])
+async def test_retryable_statuses_are_retried_with_exponential_backoff(caplog, status_code):
     requests: list[httpx.Request] = []
-    async with mocked_client(respond_json({"detail": "busy"}, 503), requests) as http_client:
-        client = LayoutParserClient(BASE_URL, http_client=http_client)
+    sleep = RecordedSleep()
+    async with mocked_client(respond_json({"detail": "busy"}, status_code), requests) as http_client:
+        client = LayoutParserClient(BASE_URL, http_client=http_client, sleep=sleep)
+
+        with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
+            await client.analyze_pdf_bytes(b"%PDF")
+
+    assert len(requests) == 4
+    assert sleep.delays == [1.0, 2.0, 4.0]
+    assert "layout parser attempt 1 of 4 failed" in caplog.text
+    assert "layout parser attempt 4 of 4" not in caplog.text
+
+
+async def test_a_retry_that_succeeds_returns_the_segments():
+    requests: list[httpx.Request] = []
+    sleep = RecordedSleep()
+    handler = respond_in_turn(
+        httpx.Response(503),
+        httpx.Response(422),
+        httpx.Response(200, content=json.dumps([RAW_SEGMENT]).encode()),
+    )
+    async with mocked_client(handler, requests) as http_client:
+        client = LayoutParserClient(BASE_URL, http_client=http_client, sleep=sleep)
+
+        segments = await client.analyze_pdf_bytes(b"%PDF")
+
+    assert len(segments) == 1
+    assert len(requests) == 3
+    assert sleep.delays == [1.0, 2.0]
+    assert all(b"%PDF" in request.read() for request in requests)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ConnectError("refused"),
+        httpx.ReadTimeout("read timed out"),
+        httpx.ConnectTimeout("connect timed out"),
+        httpx.ReadError("connection reset"),
+        httpx.RemoteProtocolError("server disconnected"),
+    ],
+)
+async def test_timeouts_and_connection_errors_are_retried(error):
+    requests: list[httpx.Request] = []
+    sleep = RecordedSleep()
+    handler = respond_in_turn(error, httpx.Response(200, content=json.dumps([RAW_SEGMENT]).encode()))
+    async with mocked_client(handler, requests) as http_client:
+        client = LayoutParserClient(BASE_URL, http_client=http_client, sleep=sleep)
+
+        segments = await client.analyze_pdf_bytes(b"%PDF")
+
+    assert len(segments) == 1
+    assert len(requests) == 2
+    assert sleep.delays == [1.0]
+
+
+@pytest.mark.parametrize("status_code", [400, 404, 413, 415])
+async def test_other_client_errors_are_not_retried(status_code):
+    requests: list[httpx.Request] = []
+    sleep = RecordedSleep()
+    async with mocked_client(respond_json({"detail": "bad"}, status_code), requests) as http_client:
+        client = LayoutParserClient(BASE_URL, http_client=http_client, sleep=sleep)
 
         with pytest.raises(httpx.HTTPStatusError):
             await client.analyze_pdf_bytes(b"%PDF")
 
     assert len(requests) == 1
+    assert sleep.delays == []
+
+
+async def test_retry_count_and_backoff_come_from_the_client():
+    requests: list[httpx.Request] = []
+    sleep = RecordedSleep()
+    async with mocked_client(respond_json({}, 503), requests) as http_client:
+        once = LayoutParserClient(BASE_URL, http_client=http_client, sleep=sleep, retries=0)
+        with pytest.raises(httpx.HTTPStatusError):
+            await once.analyze_pdf_bytes(b"%PDF")
+        twice = LayoutParserClient(BASE_URL, http_client=http_client, sleep=sleep, retries=2, backoff_seconds=0.5)
+        with pytest.raises(httpx.HTTPStatusError):
+            await twice.analyze_pdf_bytes(b"%PDF")
+
+    assert len(requests) == 1 + 3
+    assert sleep.delays == [0.5, 1.0]
+
+
+def test_negative_retry_settings_are_rejected():
+    with pytest.raises(ValueError, match="retries"):
+        LayoutParserClient(BASE_URL, retries=-1)
+    with pytest.raises(ValueError, match="backoff_seconds"):
+        LayoutParserClient(BASE_URL, backoff_seconds=-0.1)
 
 
 async def test_invalid_json_is_a_value_error():
@@ -143,13 +248,27 @@ async def test_without_an_injected_client_a_request_scoped_client_is_used():
 
 
 @respx.mock
-async def test_transport_errors_are_raised_without_retrying():
-    route = respx.post(f"{BASE_URL}/").mock(side_effect=httpx.ConnectError("down"))
+async def test_invalid_json_and_segments_are_not_retried():
+    route = respx.post(f"{BASE_URL}/").mock(return_value=httpx.Response(200, json={"not": "a list"}))
+    sleep = RecordedSleep()
 
-    with pytest.raises(httpx.ConnectError):
-        await LayoutParserClient(BASE_URL).analyze_pdf_bytes(b"%PDF")
+    with pytest.raises(ValueError):
+        await LayoutParserClient(BASE_URL, sleep=sleep).analyze_pdf_bytes(b"%PDF")
 
     assert route.call_count == 1
+    assert sleep.delays == []
+
+
+@respx.mock
+async def test_a_request_scoped_client_also_retries():
+    route = respx.post(f"{BASE_URL}/").mock(side_effect=httpx.ConnectError("down"))
+    sleep = RecordedSleep()
+
+    with pytest.raises(httpx.ConnectError):
+        await LayoutParserClient(BASE_URL, sleep=sleep).analyze_pdf_bytes(b"%PDF")
+
+    assert route.call_count == 4
+    assert sleep.delays == [1.0, 2.0, 4.0]
 
 
 def test_is_configured():

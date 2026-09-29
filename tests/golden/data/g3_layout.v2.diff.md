@@ -65,3 +65,13 @@
   - 2609.09143: `C.4 Loss-VQA Performance on Text VQA` → `… on TextVQA`
 - HURIDOCS 텍스트에는 단어 사이 공백이 있어 pypdf 경로(2609.12397)에서 본 붙은 단어 문제는 생기지 않는다.
 - F04 보완(camelCase 분리를 pypdf 쪽 텍스트에만 남김)은 layout 경로를 거치지 않아 이 변형은 바뀌지 않는다.
+
+## F33: HURIDOCS 호출 재시도
+
+`LayoutParserClient`가 재시도한다.
+- 대상은 422, 5xx, 타임아웃, 연결 오류다.
+- 기본은 첫 시도 뒤 3회 재시도(최대 4회 호출)이고, 대기는 1·2·4초로 늘어난다.
+- 끝까지 실패하면 예외가 나고, 예전처럼 pypdf로 내려간다.
+- 다른 4xx, 잘못된 JSON, segment 검증 실패는 재시도하지 않는다.
+
+골든은 HTTP를 거치지 않으므로 G3-layout 변형(기록된 응답 재생)은 바뀌지 않는다.

@@ -119,3 +119,13 @@ G2 입력은 옛 정규화를 세 번 거쳐 저장된 sections라 변화가 작
 1. 2608.27875 청크 1: `we propose Hy Quant, an efficient hybrid quantization` → `we propose HyQuant, …`
 2. 2609.10895 청크 2: `React Human thus offers both a fine-grained …` → `ReactHuman thus offers …`
 3. 2609.15051 청크 1: `gains of 11.5\% on Math Vision and 11.1\% on MMMU-Pro.` → `… on MathVision and …`
+
+## F33: HURIDOCS 호출 재시도
+
+`LayoutParserClient`가 재시도한다.
+- 대상은 422, 5xx, 타임아웃, 연결 오류다.
+- 기본은 첫 시도 뒤 3회 재시도(최대 4회 호출)이고, 대기는 1·2·4초로 늘어난다.
+- 끝까지 실패하면 예외가 나고, 예전처럼 pypdf로 내려간다.
+- 다른 4xx, 잘못된 JSON, segment 검증 실패는 재시도하지 않는다.
+
+골든은 HTTP를 거치지 않으므로 G2 변형은 바뀌지 않는다.
