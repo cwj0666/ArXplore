@@ -11,7 +11,7 @@ from arxplore.db.migrate import SEARCH_INDEXES
 from arxplore.retrieval.lexical import build_lexical_candidates_query
 from arxplore.retrieval.query import candidate_fetch_limit, hybrid_branch_limit
 from arxplore.retrieval.service import RetrievalConfig
-from arxplore.retrieval.vector import build_vector_search_query, resolve_hnsw_ef_search
+from arxplore.retrieval.vector import build_vector_search_query, hnsw_ef_search_statement
 
 LEXICAL = "lexical"
 VECTOR = "vector"
@@ -20,7 +20,6 @@ CHANNEL_TABLES = {LEXICAL: frozenset({"papers", "paper_chunks"}), VECTOR: frozen
 EXPLAIN_JSON = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
 EXPLAIN_TEXT = "EXPLAIN (ANALYZE, BUFFERS) "
 READ_ONLY_SQL = "SET TRANSACTION READ ONLY"
-HNSW_EF_SEARCH_SQL = "SELECT set_config('hnsw.ef_search', %s, true)"
 SEARCH_INDEX_TABLES_SQL = """
     SELECT indexname, tablename
     FROM pg_indexes
@@ -79,8 +78,8 @@ def vector_target(
         model_name=config.embedding_model,
         min_similarity=max(0.0, config.vector_min_similarity),
     )
-    ef_search = None if arxiv_id else resolve_hnsw_ef_search(params["candidate_limit"])
-    setup: tuple[Statement, ...] = ((HNSW_EF_SEARCH_SQL, (str(ef_search),)),) if ef_search is not None else ()
+    ef_search = hnsw_ef_search_statement(params["candidate_limit"], arxiv_id=arxiv_id)
+    setup: tuple[Statement, ...] = (ef_search,) if ef_search is not None else ()
     return ExplainTarget(channel=VECTOR, sql=sql, params=params, setup=setup)
 
 

@@ -6,10 +6,9 @@ from typer.testing import CliRunner
 from arxplore.retrieval.lexical import build_lexical_candidates_query
 from arxplore.retrieval.query import candidate_fetch_limit, hybrid_branch_limit
 from arxplore.retrieval.service import RetrievalConfig
-from arxplore.retrieval.vector import build_vector_search_query, resolve_hnsw_ef_search
+from arxplore.retrieval.vector import HNSW_EF_SEARCH_SQL, build_vector_search_query
 from arxplore_eval.cli import app
 from arxplore_eval.explain import (
-    HNSW_EF_SEARCH_SQL,
     LEXICAL,
     SEQ_SCAN_NOTE,
     VECTOR,
@@ -84,7 +83,7 @@ class TestTargets:
             EMBEDDING, limit=75, model_name="text-embedding-3-large", min_similarity=0.2
         )
         assert (target.sql, target.params) == (sql, params)
-        assert target.setup == ((HNSW_EF_SEARCH_SQL, (str(resolve_hnsw_ef_search(600)),)),)
+        assert target.setup == ((HNSW_EF_SEARCH_SQL, ("600",)),)
         assert target.describe() == "SQL LIMIT 75, 1단계 후보 600, hnsw.ef_search 600"
 
     def test_paper_scoped_vector_search_keeps_the_default_ef_search(self) -> None:

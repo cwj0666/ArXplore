@@ -26,6 +26,7 @@ VECTOR_CANDIDATES_PER_RESULT = 8
 SCOPED_VECTOR_CANDIDATES_PER_RESULT = 4
 MAX_HNSW_EF_SEARCH = 1000
 DEFAULT_HNSW_EF_SEARCH = 40
+HNSW_EF_SEARCH_SQL = "SELECT set_config('hnsw.ef_search', %s, true)"
 MAX_OVERLAP_BONUS = 0.12
 OVERLAP_BONUS_PER_TOKEN = 0.03
 APPENDIX_QUERY_KEYWORDS = ("appendix", "supplement", "additional analysis")
@@ -82,6 +83,13 @@ def resolve_hnsw_ef_search(candidate_limit: int) -> int | None:
     if candidate_limit <= DEFAULT_HNSW_EF_SEARCH:
         return None
     return min(int(candidate_limit), MAX_HNSW_EF_SEARCH)
+
+
+def hnsw_ef_search_statement(candidate_limit: int, *, arxiv_id: str | None = None) -> tuple[str, tuple[str]] | None:
+    ef_search = None if arxiv_id else resolve_hnsw_ef_search(candidate_limit)
+    if ef_search is None:
+        return None
+    return HNSW_EF_SEARCH_SQL, (str(ef_search),)
 
 
 def build_vector_search_query(
@@ -233,14 +241,15 @@ async def fetch_vector_candidates(
         model_name=model_name,
         min_similarity=max(0.0, min_similarity),
     )
-    ef_search = None if arxiv_id else resolve_hnsw_ef_search(params["candidate_limit"])
+    ef_search = hnsw_ef_search_statement(params["candidate_limit"], arxiv_id=arxiv_id)
     async with (
         use_connection(db) as connection,
         connection.transaction(),
         connection.cursor(row_factory=dict_row) as cursor,
     ):
         if ef_search is not None:
-            await cursor.execute("SELECT set_config('hnsw.ef_search', %s, true)", (str(ef_search),), prepare=False)
+            statement, statement_params = ef_search
+            await cursor.execute(statement, statement_params, prepare=False)
         await cursor.execute(sql, params, prepare=False)
         rows = await cursor.fetchall()
     return [vector_hit_from_row(query, row) for row in rows]

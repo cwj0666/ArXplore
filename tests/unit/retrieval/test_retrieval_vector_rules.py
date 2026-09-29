@@ -3,6 +3,7 @@ import pytest
 from arxplore.domain.retrieval import RetrievalHit
 from arxplore.retrieval.vector import (
     build_vector_search_query,
+    hnsw_ef_search_statement,
     lexical_overlap_bonus,
     rerank_vector_hits,
     resolve_candidate_limit,
@@ -108,6 +109,12 @@ class TestVectorQueryBuilder:
     @pytest.mark.parametrize(("candidates", "expected"), [(40, None), (41, 41), (600, 600), (1200, 1000)])
     def test_ef_search_grows_with_the_candidate_count(self, candidates: int, expected: int | None) -> None:
         assert resolve_hnsw_ef_search(candidates) == expected
+
+    def test_ef_search_statement_is_transaction_local_and_skipped_for_paper_scoped_searches(self) -> None:
+        assert hnsw_ef_search_statement(600) == ("SELECT set_config('hnsw.ef_search', %s, true)", ("600",))
+        assert hnsw_ef_search_statement(1200) == ("SELECT set_config('hnsw.ef_search', %s, true)", ("1000",))
+        assert hnsw_ef_search_statement(40) is None
+        assert hnsw_ef_search_statement(600, arxiv_id="2401.00001") is None
 
     def test_query_vector_is_sent_as_a_twelve_digit_literal(self) -> None:
         _, params = build_vector_search_query([0.5, -1.0, 1e-13, 0.123456789012345], limit=5)
