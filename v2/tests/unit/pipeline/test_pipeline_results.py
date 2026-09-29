@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from typing import Any
 
@@ -9,10 +10,13 @@ from arxplore.pipeline.prepare.paper import PaperOutcome
 from arxplore.pipeline.prepare.run import (
     MAX_FAILURE_ERROR_CHARS,
     MAX_RECORDED_FAILURES,
+    ClaimLostError,
     DatePrepareResult,
     PaperFailure,
     QueueRunResult,
     format_failure_error,
+    heartbeat_interval_for,
+    run_with_heartbeat,
 )
 from arxplore.pipeline.worker import merge_embed_status, wait_seconds_after
 
@@ -191,3 +195,67 @@ def test_the_loop_waits_only_after_no_op_or_failed_runs() -> None:
 def test_the_per_paper_embedding_cap_is_rounds_times_chunks() -> None:
     assert EmbeddingBudget().max_chunks_per_paper == 200 * 100
     assert EmbeddingBudget(chunks_per_round=10, max_rounds_per_paper=3).max_chunks_per_paper == 30
+
+
+@pytest.mark.parametrize("stale,interval", [(900, 60.0), (90, 30.0), (1, 1 / 3), (0, 60.0), (-5, 60.0)])
+def test_the_heartbeat_interval_is_a_third_of_the_stale_window_up_to_a_minute(stale: int, interval: float) -> None:
+    assert heartbeat_interval_for(stale) == pytest.approx(interval)
+
+
+async def test_heartbeats_run_only_while_the_work_runs() -> None:
+    beats: list[float] = []
+
+    async def heartbeat() -> None:
+        beats.append(asyncio.get_running_loop().time())
+
+    async def work() -> str:
+        await asyncio.sleep(0.12)
+        return "done"
+
+    assert await run_with_heartbeat(work(), heartbeat, 0.03) == "done"
+    count = len(beats)
+    await asyncio.sleep(0.1)
+    assert 2 <= count <= 5
+    assert len(beats) == count
+
+
+async def test_a_work_error_is_raised_and_stops_the_heartbeats() -> None:
+    beats: list[int] = []
+
+    async def heartbeat() -> None:
+        beats.append(1)
+
+    async def work() -> None:
+        await asyncio.sleep(0.05)
+        raise ValueError("parse failed")
+
+    with pytest.raises(ValueError, match="parse failed"):
+        await run_with_heartbeat(work(), heartbeat, 0.02)
+    count = len(beats)
+    await asyncio.sleep(0.06)
+    assert len(beats) == count
+
+
+async def test_a_lost_claim_cancels_the_work() -> None:
+    cancelled: list[bool] = []
+
+    async def heartbeat() -> None:
+        raise ClaimLostError("prepare job claim lost: job_id=1")
+
+    async def work() -> None:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    with pytest.raises(ClaimLostError):
+        await asyncio.wait_for(run_with_heartbeat(work(), heartbeat, 0.01), timeout=2)
+    assert cancelled == [True]
+
+
+async def test_without_a_heartbeat_the_work_is_simply_awaited() -> None:
+    async def work() -> int:
+        return 7
+
+    assert await run_with_heartbeat(work(), None, 0.01) == 7

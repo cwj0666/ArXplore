@@ -1,9 +1,12 @@
+import asyncio
+import time
 from datetime import date
 from typing import Any
 
 import pytest
 
 from arxplore.db.repositories import jobs, raw
+from arxplore.domain.jobs import QueuePolicy
 from arxplore.pipeline.prepare import run as prepare_run
 from arxplore.pipeline.prepare.paper import PrepareContext
 from arxplore.pipeline.prepare.run import consume_prepare_queue
@@ -290,3 +293,86 @@ async def test_auto_jobs_are_claimed_before_older_backfill_jobs(pool, probe, pol
     assert run.as_dict()["modes"] == ["auto", "backfill"]
     assert (await _job(probe, auto_id))["status"] == "done"
     assert (await _job(probe, backfill_id))["status"] == "done"
+
+
+SHORT_STALE_POLICY = QueuePolicy(max_attempts=3, stale_seconds=1)
+
+
+async def _consume_while(pool: Any, context: PrepareContext, side: Any, **options: Any) -> Any:
+    run, _ = await asyncio.gather(
+        consume_prepare_queue(context, pool, policy=SHORT_STALE_POLICY, worker_id="w1", **options), side()
+    )
+    return run
+
+
+async def test_a_parse_longer_than_the_stale_window_keeps_its_claim(pool, probe, kit, monkeypatch) -> None:
+    job_id = await _seed(pool, kit, APRIL_7, ["2604.00001"])
+    parser = kit.FakeParser(delay_seconds=2.5)
+    beats: list[Any] = []
+    original = jobs.heartbeat
+
+    async def counting(db: Any, token: Any) -> bool:
+        beats.append(token)
+        return await original(db, token)
+
+    monkeypatch.setattr(jobs, "heartbeat", counting)
+    resets: list[int] = []
+
+    async def another_worker_checks_for_stale_jobs() -> None:
+        await asyncio.sleep(1.6)
+        resets.append(await jobs.reset_stale(pool, policy=SHORT_STALE_POLICY))
+        await asyncio.sleep(0.6)
+        resets.append(await jobs.reset_stale(pool, policy=SHORT_STALE_POLICY))
+
+    run = await _consume_while(pool, _context(pool, kit, parser), another_worker_checks_for_stale_jobs)
+
+    assert resets == [0, 0]
+    assert run.status == "success"
+    assert run.lost_claims == []
+    assert parser.cancelled == []
+    assert len(beats) >= 6
+    assert (await _job(probe, job_id))["status"] == "done"
+
+
+async def test_without_the_periodic_heartbeat_the_same_parse_loses_its_claim(pool, probe, kit) -> None:
+    job_id = await _seed(pool, kit, APRIL_7, ["2604.00001"])
+    parser = kit.FakeParser(delay_seconds=2.5)
+
+    async def another_worker_checks_for_stale_jobs() -> None:
+        await asyncio.sleep(1.6)
+        assert await jobs.reset_stale(pool, policy=SHORT_STALE_POLICY) == 1
+
+    run = await _consume_while(
+        pool, _context(pool, kit, parser), another_worker_checks_for_stale_jobs, heartbeat_interval=30.0
+    )
+
+    assert run.status == "claim_lost"
+    assert run.lost_claims[0]["stage"] == "complete"
+    assert (await _job(probe, job_id))["status"] == "pending"
+
+
+async def test_a_claim_taken_during_a_long_parse_stops_that_paper(pool, probe, kit) -> None:
+    job_id = await _seed(pool, kit, APRIL_7, ["2604.00001", "2604.00002"])
+    parser = kit.FakeParser(delay_seconds=30.0)
+
+    async def another_worker_takes_the_job() -> None:
+        await asyncio.sleep(0.5)
+        await probe.execute(
+            "UPDATE prepare_jobs SET claim_generation = claim_generation + 1, worker_id = 'w2' WHERE id = %s",
+            (job_id,),
+        )
+
+    started = time.monotonic()
+    run = await _consume_while(pool, _context(pool, kit, parser), another_worker_takes_the_job)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5
+    assert run.status == "claim_lost"
+    assert run.lost_claims == [
+        {"date": "2026-04-07", "mode": "auto", "job_id": job_id, "claim_generation": 1, "stage": "heartbeat"}
+    ]
+    assert parser.cancelled == ["2604.00001"]
+    assert len(parser.parsed) == 1
+    assert await probe.scalar("SELECT count(*) FROM paper_fulltexts") == 0
+    job = await _job(probe, job_id)
+    assert (job["status"], job["error"]) == ("processing", None)

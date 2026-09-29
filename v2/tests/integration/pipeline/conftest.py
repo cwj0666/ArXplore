@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import sys
 from collections.abc import AsyncIterator, Iterator, Sequence
@@ -161,6 +162,8 @@ class FakeParser:
     sections_by_id: dict[str, list[Section]] = field(default_factory=dict)
     failing_ids: set[str] = field(default_factory=set)
     parsed: list[bytes | None] = field(default_factory=list)
+    delay_seconds: float = 0.0
+    cancelled: list[str] = field(default_factory=list)
 
     async def parse(self, pdf_content: bytes | None, *, fallback_text: str) -> FulltextParseResult:
         self.parsed.append(pdf_content)
@@ -168,6 +171,12 @@ class FakeParser:
             sections: list[Section] = [{"title": "Abstract", "text": fallback_text}] if fallback_text else []
             return parse_result("fallback_abstract", sections, text=fallback_text)
         arxiv_id = pdf_content.decode().rsplit("/", 1)[-1].removesuffix(".pdf")
+        if self.delay_seconds:
+            try:
+                await asyncio.sleep(self.delay_seconds)
+            except asyncio.CancelledError:
+                self.cancelled.append(arxiv_id)
+                raise
         if arxiv_id in self.failing_ids:
             raise RuntimeError(f"parser exploded on {arxiv_id}")
         return parse_result(self.source, self.sections_by_id.get(arxiv_id, body_sections(arxiv_id)))

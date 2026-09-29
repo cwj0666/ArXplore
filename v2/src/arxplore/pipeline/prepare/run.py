@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 MAX_RECORDED_FAILURES = 50
 MAX_FAILURE_ERROR_CHARS = 500
 SAMPLE_PREPARED_LIMIT = 5
+HEARTBEAT_MAX_INTERVAL_SECONDS = 60.0
+HEARTBEATS_PER_STALE_WINDOW = 3
 
 type Heartbeat = Callable[[], Awaitable[None]]
 
@@ -144,12 +147,43 @@ class DatePrepareResult:
         }
 
 
+def heartbeat_interval_for(stale_seconds: float) -> float:
+    if stale_seconds <= 0:
+        return HEARTBEAT_MAX_INTERVAL_SECONDS
+    return min(HEARTBEAT_MAX_INTERVAL_SECONDS, stale_seconds / HEARTBEATS_PER_STALE_WINDOW)
+
+
+async def _beat_every(heartbeat: Heartbeat, interval: float) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        await heartbeat()
+
+
+async def run_with_heartbeat[T](operation: Awaitable[T], heartbeat: Heartbeat | None, interval: float) -> T:
+    if heartbeat is None:
+        return await operation
+    work = asyncio.ensure_future(operation)
+    beats = asyncio.ensure_future(_beat_every(heartbeat, interval))
+    try:
+        await asyncio.wait((work, beats), return_when=asyncio.FIRST_COMPLETED)
+        if not work.done():
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+            beats.result()
+        return work.result()
+    finally:
+        beats.cancel()
+        work.cancel()
+        await asyncio.gather(work, beats, return_exceptions=True)
+
+
 async def prepare_candidates(
     candidates: Sequence[PrepareCandidate],
     context: PrepareContext,
     *,
     force: bool = False,
     heartbeat: Heartbeat | None = None,
+    heartbeat_interval: float = HEARTBEAT_MAX_INTERVAL_SECONDS,
 ) -> tuple[list[PaperOutcome], list[PaperFailure]]:
     outcomes: list[PaperOutcome] = []
     failures: list[PaperFailure] = []
@@ -157,7 +191,11 @@ async def prepare_candidates(
         if heartbeat is not None:
             await heartbeat()
         try:
-            outcomes.append(await prepare_paper(candidate, context, force=force))
+            outcomes.append(
+                await run_with_heartbeat(prepare_paper(candidate, context, force=force), heartbeat, heartbeat_interval)
+            )
+        except ClaimLostError:
+            raise
         except Exception as exc:
             logger.exception("prepare_paper failed: arxiv_id=%s", candidate.arxiv_id)
             failures.append(PaperFailure(arxiv_id=candidate.arxiv_id.strip(), error=format_failure_error(exc)))
@@ -171,10 +209,13 @@ async def prepare_date(
     max_papers: int | None = None,
     force: bool = False,
     heartbeat: Heartbeat | None = None,
+    heartbeat_interval: float = HEARTBEAT_MAX_INTERVAL_SECONDS,
 ) -> DatePrepareResult:
     payload = await raw.load_daily_papers(context.db, target_date=target_date)
     selection = select_candidates(target_date, payload, max_papers=max_papers)
-    outcomes, failures = await prepare_candidates(selection.candidates, context, force=force, heartbeat=heartbeat)
+    outcomes, failures = await prepare_candidates(
+        selection.candidates, context, force=force, heartbeat=heartbeat, heartbeat_interval=heartbeat_interval
+    )
     return DatePrepareResult(selection=selection, outcomes=tuple(outcomes), failures=tuple(failures))
 
 
@@ -282,6 +323,7 @@ async def run_claimed_job(
     policy: QueuePolicy,
     max_papers: int | None,
     force: bool,
+    heartbeat_interval: float | None = None,
 ) -> None:
     token = job.token
     target_date = job.target_date.isoformat()
@@ -292,6 +334,9 @@ async def run_claimed_job(
             max_papers=max_papers,
             force=force or job.force_requested,
             heartbeat=job_heartbeat(pool, token),
+            heartbeat_interval=heartbeat_interval
+            if heartbeat_interval is not None
+            else heartbeat_interval_for(policy.stale_seconds),
         )
         if result.failure_count > 0 or result.status == "failed":
             error_summary = result.failure_summary()
@@ -340,6 +385,7 @@ async def consume_prepare_queue(
     max_jobs_per_run: int = 1,
     max_papers: int | None = None,
     force: bool = False,
+    heartbeat_interval: float | None = None,
 ) -> QueueRunResult:
     run = QueueRunResult(modes=tuple(modes), worker_id=worker_id)
     for _ in range(max(1, max_jobs_per_run)):
@@ -347,5 +393,14 @@ async def consume_prepare_queue(
         if job is None:
             break
         run.claimed_dates.append(job.target_date.isoformat())
-        await run_claimed_job(job, context, pool, run, policy=policy, max_papers=max_papers, force=force)
+        await run_claimed_job(
+            job,
+            context,
+            pool,
+            run,
+            policy=policy,
+            max_papers=max_papers,
+            force=force,
+            heartbeat_interval=heartbeat_interval,
+        )
     return run
