@@ -233,3 +233,13 @@ F34 대비(G3 pypdf)
    - 머리글이 제목으로 잘못 판정되던 `4 Journal Title XX(X)`, `8 Journal Title XX(X)` 섹션도 사라진다.
 2. 2609.25199: 모든 쪽 맨 위의 `Preprint`가 빠진다. 예전 규칙은 숫자로 끝나지 않는 이 줄을 지우지 못했다.
 3. 2609.17652: 러닝 헤더로 지워지던 표 행 `Fathom 48`, `Fathom 64 48 52 62 44 45 48` 등이 남는다.
+
+## F36: HURIDOCS segment 숫자 필드 검증
+
+- segment의 좌표·크기(`left`, `top`, `width`, `height`, `page_width`, `page_height`)가 다음 중 하나면 응답 검증 실패(`ValueError`)로 처리하고 pypdf로 내려간다.
+  - null, 숫자로 읽을 수 없는 문자열, 불리언, 목록
+  - NaN·무한대
+- `page_number`는 정수, 정수 값인 실수(`3.0`), 정수 문자열(`"4"`)만 받는다. null, `2.5`, `"2.0"`, 불리언은 검증 실패다.
+- 예전에는 null이 `TypeError`로 새어 나가 논문 처리 자체가 실패했고, `2.5`는 2로 잘라 받았다.
+
+G3-layout 표본의 응답 10개(segment 전부)는 모두 검증을 통과한다. G3 pypdf 변형은 바뀌지 않는다.

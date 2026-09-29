@@ -160,6 +160,21 @@ async def test_layout_parser_that_keeps_failing_falls_back_to_pypdf_after_retrie
     assert "layout parser unavailable" in caplog.text
 
 
+async def test_a_response_with_a_null_coordinate_falls_back_to_pypdf(caplog, text_pdf):
+    segment = {**layout_segment(BODY, "Text", 20.0), "top": None}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[segment])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        client = LayoutParserClient("http://layout-parser:5060", http_client=http_client)
+        with caplog.at_level(logging.WARNING):
+            result = await parse_fulltext(text_pdf(["1 Introduction", BODY]), layout_client=client)
+
+    assert result.source == "pdf"
+    assert "field top is not a valid number" in caplog.text
+
+
 async def test_unexpected_layout_errors_propagate(text_pdf):
     client = FakeLayoutClient(error=RuntimeError("bug"))
 

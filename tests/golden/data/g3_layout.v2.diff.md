@@ -133,3 +133,13 @@ F34 대비(G3-layout 재생)
 1. 2609.27980: 저자 줄 `Rasmus Aagaard 1, 2, Nicki Skafte Detlefsen 1`
 2. 2609.10539: 프롬프트 예시 제목 `Example 1`, `Example 2`, `Example 3`
 3. 2609.25199: 표 행 `Comparison Pairs Same verdict Same PR 69 37 Same reviewed revision 0 0`
+
+## F36: HURIDOCS segment 숫자 필드 검증
+
+- segment의 좌표·크기(`left`, `top`, `width`, `height`, `page_width`, `page_height`)가 다음 중 하나면 응답 검증 실패(`ValueError`)로 처리하고 pypdf로 내려간다.
+  - null, 숫자로 읽을 수 없는 문자열, 불리언, 목록
+  - NaN·무한대
+- `page_number`는 정수, 정수 값인 실수(`3.0`), 정수 문자열(`"4"`)만 받는다. null, `2.5`, `"2.0"`, 불리언은 검증 실패다.
+- 예전에는 null이 `TypeError`로 새어 나가 논문 처리 자체가 실패했고, `2.5`는 2로 잘라 받았다.
+
+G3-layout 표본의 응답 10개(segment 전부)는 모두 검증을 통과한다. G3-layout 변형은 바뀌지 않는다.

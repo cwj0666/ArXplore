@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from typing import Any, Self
 
@@ -32,6 +33,39 @@ def _form_flag(value: bool) -> str:
     return str(value).lower()
 
 
+def _invalid_field(field: str, value: Any) -> ValueError:
+    return ValueError(f"Layout parser segment field {field} is not a valid number: {value!r}")
+
+
+def _coordinate(segment: dict[str, Any], field: str) -> float:
+    value = segment[field]
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        raise _invalid_field(field, value)
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise _invalid_field(field, value) from exc
+    if not math.isfinite(number):
+        raise _invalid_field(field, value)
+    return number
+
+
+def _page_number(segment: dict[str, Any]) -> int:
+    value = segment["page_number"]
+    if isinstance(value, bool):
+        raise _invalid_field("page_number", value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise _invalid_field("page_number", value) from exc
+    raise _invalid_field("page_number", value)
+
+
 def normalize_segment(segment: Any) -> LayoutSegment:
     if not isinstance(segment, dict):
         raise ValueError("Layout parser segment must be a JSON object.")
@@ -39,13 +73,13 @@ def normalize_segment(segment: Any) -> LayoutSegment:
     if missing:
         raise ValueError(f"Layout parser segment is missing required fields: {', '.join(sorted(missing))}")
     return {
-        "left": float(segment["left"]),
-        "top": float(segment["top"]),
-        "width": float(segment["width"]),
-        "height": float(segment["height"]),
-        "page_number": int(segment["page_number"]),
-        "page_width": float(segment["page_width"]),
-        "page_height": float(segment["page_height"]),
+        "left": _coordinate(segment, "left"),
+        "top": _coordinate(segment, "top"),
+        "width": _coordinate(segment, "width"),
+        "height": _coordinate(segment, "height"),
+        "page_number": _page_number(segment),
+        "page_width": _coordinate(segment, "page_width"),
+        "page_height": _coordinate(segment, "page_height"),
         "text": str(segment.get("text") or ""),
         "type": str(segment.get("type") or ""),
     }

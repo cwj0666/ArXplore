@@ -70,6 +70,31 @@ def test_normalize_segments_rejects_invalid_payloads(payload, message):
         normalize_segments(payload)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("left", None),
+        ("top", "not a number"),
+        ("width", "nan"),
+        ("height", float("inf")),
+        ("page_width", True),
+        ("page_height", [612]),
+        ("page_number", None),
+        ("page_number", 2.5),
+        ("page_number", "2.0"),
+        ("page_number", False),
+    ],
+)
+def test_invalid_numeric_fields_fail_validation(field, value):
+    with pytest.raises(ValueError, match=f"field {field} is not a valid number"):
+        normalize_segment({**RAW_SEGMENT, field: value})
+
+
+def test_integral_float_and_numeric_string_page_numbers_are_accepted():
+    assert normalize_segment({**RAW_SEGMENT, "page_number": 3.0})["page_number"] == 3
+    assert normalize_segment({**RAW_SEGMENT, "page_number": "4"})["page_number"] == 4
+
+
 async def test_posts_the_pdf_as_a_multipart_form():
     requests: list[httpx.Request] = []
     async with mocked_client(respond_json([RAW_SEGMENT]), requests) as http_client:
