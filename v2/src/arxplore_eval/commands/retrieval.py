@@ -1,5 +1,6 @@
 import asyncio
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -98,6 +99,7 @@ def build_meta(
     corpus: CorpusSummary,
     settings: AppSettings,
     skipped: list[EvalQuery],
+    extra: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     langs = Counter(query.lang for query in queries)
     sources = ", ".join(f"{key} {value}" for key, value in sorted(Counter(query.source for query in queries).items()))
@@ -110,6 +112,7 @@ def build_meta(
         "코퍼스": corpus.describe(),
         "본문 source": corpus.describe_sources(),
         "임베딩 모델": f"{settings.openai_embedding_model} ({settings.openai_embedding_dimensions}d)",
+        **(extra or {}),
         "구현": "arxplore_eval (v2 공개 인터페이스)",
     }
     categories = Counter(query.category for query in queries if query.category)
@@ -122,6 +125,16 @@ def build_meta(
             + (" ..." if len(skipped) > SKIPPED_PREVIEW else "")
         )
     return meta
+
+
+def parse_meta(values: Sequence[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        key, separator, text = value.partition("=")
+        if not separator or not key.strip() or not text.strip():
+            raise ValueError(f"--meta 형식은 KEY=VALUE 입니다: {value!r}")
+        parsed[key.strip()] = text.strip()
+    return parsed
 
 
 async def run_retrieval_evaluation(
@@ -179,7 +192,15 @@ def register(app: typer.Typer) -> None:
         keep_going: Annotated[bool, typer.Option(help="질의 단위 예외를 error 열에 기록하고 계속")] = False,
         out_dir: Annotated[Path | None, typer.Option()] = None,
         openai_base_url: Annotated[str | None, typer.Option(envvar=BASE_URL_ENV, help=BASE_URL_HELP)] = None,
+        meta: Annotated[
+            list[str] | None,
+            typer.Option("--meta", metavar="KEY=VALUE", help="결과 md 머리말에 덧붙일 측정 조건(반복 가능)"),
+        ] = None,
     ) -> None:
+        try:
+            extra_meta = parse_meta(meta or [])
+        except ValueError as exc:
+            fail(str(exc))
         queries_path = queries or default_queries_path()
         selected = load_selected_queries(queries_path, lang=lang_value(lang), limit=limit, category=category)
         eligible, skipped = eligible_queries(selected)
@@ -214,7 +235,7 @@ def register(app: typer.Typer) -> None:
         directory = out_dir or default_results_dir()
         directory.mkdir(parents=True, exist_ok=True)
         stamp = stamp_of(started_at)
-        meta = build_meta(
+        report_meta = build_meta(
             started_at=started_at.strftime(TIME_FORMAT),
             queries_path=queries_path,
             queries=eligible,
@@ -225,8 +246,9 @@ def register(app: typer.Typer) -> None:
             corpus=run.corpus,
             settings=settings,
             skipped=skipped,
+            extra=extra_meta,
         )
-        markdown = render_markdown(aggregates, title=f"Retrieval evaluation {stamp}", meta=meta)
+        markdown = render_markdown(aggregates, title=f"Retrieval evaluation {stamp}", meta=report_meta)
         write_query_csv(run.results, directory / f"{stamp}.csv")
         write_summary_csv(aggregates, directory / f"{stamp}_summary.csv")
         (directory / f"{stamp}.md").write_text(markdown, encoding="utf-8")

@@ -87,7 +87,17 @@ def test_retrieval_command_runs_every_method(cli_env: Path) -> None:
     out_dir = cli_env / "results"
     result = runner.invoke(
         app,
-        ["retrieval", "--queries", str(_queries(cli_env / "q.jsonl")), "--ablations", "all", "--out-dir", str(out_dir)],
+        [
+            "retrieval",
+            "--queries",
+            str(_queries(cli_env / "q.jsonl")),
+            "--ablations",
+            "all",
+            "--out-dir",
+            str(out_dir),
+            "--meta",
+            "질의 임베딩=seeded basis vectors",
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -97,6 +107,7 @@ def test_retrieval_command_runs_every_method(cli_env: Path) -> None:
     assert all(not row["error"] for row in rows)
     markdown = next(out_dir.glob("*.md")).read_text(encoding="utf-8")
     assert "검색 평가 제외: 1개" in markdown and "구현: arxplore_eval (v2 공개 인터페이스)" in markdown
+    assert "- 임베딩 모델: text-embedding-3-large (1536d)\n- 질의 임베딩: seeded basis vectors\n" in markdown
 
 
 def test_dump_candidates_then_gate(cli_env: Path) -> None:

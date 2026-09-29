@@ -333,3 +333,42 @@ def test_scoring_without_ragas_fails_before_any_work(clean_env, monkeypatch: pyt
     assert result.exit_code == 2
     assert "ragas" in result.stderr and "--behavior-only" in result.stderr
     assert not (clean_env / "r").exists()
+
+
+class TestRetrievalMeta:
+    def test_parse_meta(self) -> None:
+        from arxplore_eval.commands.retrieval import parse_meta
+
+        assert parse_meta(["질의 임베딩=g1_query_embeddings(d74cd41)", " a = b=c "]) == {
+            "질의 임베딩": "g1_query_embeddings(d74cd41)",
+            "a": "b=c",
+        }
+        for bad in (["no-separator"], ["=value"], ["key= "]):
+            with pytest.raises(ValueError, match="KEY=VALUE"):
+                parse_meta(bad)
+
+    def test_meta_follows_the_embedding_model_line(self) -> None:
+        from arxplore.config import AppSettings
+        from arxplore_eval.commands.retrieval import build_meta
+        from arxplore_eval.corpus import CorpusSummary
+
+        meta = build_meta(
+            started_at="2026-09-29 00:00:00",
+            queries_path=Path(__file__),
+            queries=[_q("q1")],
+            methods=["lexical"],
+            k=10,
+            adjacency_window=1,
+            warmup=0,
+            corpus=CorpusSummary(papers=1, papers_with_chunks=1, chunks=1, embeddings=1, fulltext_sources={}),
+            settings=AppSettings.model_validate({}),
+            skipped=[],
+            extra={"질의 임베딩": "g1_query_embeddings(d74cd41)"},
+        )
+        keys = list(meta)
+        assert keys.index("질의 임베딩") == keys.index("임베딩 모델") + 1
+
+    def test_bad_meta_exits_before_any_work(self, clean_env) -> None:
+        result = runner.invoke(app, ["retrieval", "--meta", "missing-separator"])
+        assert result.exit_code == 2
+        assert "KEY=VALUE" in result.stderr
