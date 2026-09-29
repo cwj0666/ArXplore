@@ -37,6 +37,7 @@ dev = [
     "ruff>=0.16",
 ]
 eval = [
+    "langchain-community<0.4.2",
     "ragas==0.4.3",
     "tiktoken>=0.12",
 ]
