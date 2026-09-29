@@ -1,8 +1,8 @@
 # G5·G4 HTTP 골든 v2 변형: 원본과 다른 점
 
-변형 파일은 `g5_http.v2.json.gz`이고 `GOLDEN_IMPL=v2`일 때만 쓰인다. 원본 `g5_http.json.gz`는 옛 Django 구현 기준으로 그대로 둔다.
+변형 파일은 `g5_http.v2.json.gz`이고 v2 구현(`GOLDEN_IMPL` 기본값)과 비교할 때 쓰인다. 원본 `g5_http.json.gz`는 옛 Django 구현 기준으로 그대로 둔다.
 
-다시 만드는 명령(저장소 루트): `GOLDEN_IMPL=v2 v2/.venv/bin/python -m scripts.goldens.capture_g5_http --variant v2`
+다시 만드는 명령(저장소 루트): `uv run python -m scripts.goldens.capture_g5_http`(기본으로 v2 변형을 쓴다)
 
 - 응답은 `compare_responses_v2` 규칙으로 비교한다. 대상은 상태 코드, content-type 미디어 타입, allow, set-cookie 속성, 허용 목록 헤더, SSE 바이트, JSON 값, 그 밖의 본문 바이트다. 가짜 OpenAI·arXiv 요청 기록(G4)은 그대로 비교한다.
 - 이식 동등성: 0530057 시점에 v2는 원본 골든과 G5 60/60 시나리오, G4 60/60 시나리오가 같았다(`tests/golden/test_g5_http.py` 121 passed).

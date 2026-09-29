@@ -6,7 +6,6 @@ from arxplore.parsing.fulltext import fallback_result
 from arxplore.parsing.layout import parse_layout_segments
 from arxplore.parsing.layout_client import normalize_segments
 from arxplore.parsing.models import FulltextParseResult
-
 from tests.golden.adapters import ParsedPdf
 
 

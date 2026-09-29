@@ -1,8 +1,8 @@
 # G3 pypdf 골든 v2 변형: 원본과 다른 점
 
-변형 파일은 `g3_pypdf/<arxiv_id>.v2.json.gz` 10개이고 `GOLDEN_IMPL=v2`일 때만 쓰인다. 원본 `g3_pypdf/<arxiv_id>.json.gz`는 옛 구현(pypdf 5.4.0) 기준으로 그대로 둔다.
+변형 파일은 `g3_pypdf/<arxiv_id>.v2.json.gz` 10개이고 v2 구현(`GOLDEN_IMPL` 기본값)과 비교할 때 쓰인다. 원본 `g3_pypdf/<arxiv_id>.json.gz`는 옛 구현(pypdf 5.4.0) 기준으로 그대로 둔다.
 
-다시 만드는 명령(저장소 루트): `GOLDEN_IMPL=v2 v2/.venv/bin/python -m scripts.goldens.capture_g3_pypdf capture --implementation v2 --variant v2`
+다시 만드는 명령(저장소 루트): `uv run python -m scripts.goldens.capture_g3_pypdf capture`(기본으로 v2 변형을 쓴다)
 
 이식 동등성은 pypdf와 무관한 쪽 재파싱 테스트(`test_parsing_the_golden_pages_matches`)로 판정했다. e4b84ee 시점에 v2는 원본 골든과 10/10 같았다.
 

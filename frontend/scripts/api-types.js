@@ -11,7 +11,7 @@ const backendRoot = resolve(frontendRoot, "..");
 const schemaPath = join(frontendRoot, "openapi.json");
 const typesPath = join(frontendRoot, "src", "shared", "api", "schema.d.ts");
 const updateHint =
-  "cd v2 && uv run --frozen arxplore openapi --output frontend/openapi.json && cd frontend && npm run generate:api";
+  "uv run --frozen arxplore openapi --output frontend/openapi.json && cd frontend && npm run generate:api";
 
 async function renderTypes() {
   const ast = await openapiTS(pathToFileURL(schemaPath));

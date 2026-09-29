@@ -1,8 +1,8 @@
 # G2 청크 골든 v2 변형: 원본과 다른 점
 
-변형 파일은 `g2_chunks.v2.json.gz`이고 `GOLDEN_IMPL=v2`일 때만 쓰인다. 원본 `g2_chunks.json.gz`는 옛 구현과 DB `paper_chunks` 기준으로 그대로 둔다.
+변형 파일은 `g2_chunks.v2.json.gz`이고 v2 구현(`GOLDEN_IMPL` 기본값)과 비교할 때 쓰인다. 원본 `g2_chunks.json.gz`는 옛 구현과 DB `paper_chunks` 기준으로 그대로 둔다.
 
-다시 만드는 명령(저장소 루트): `GOLDEN_IMPL=v2 v2/.venv/bin/python -m scripts.goldens.capture_g2_chunks --variant v2`
+다시 만드는 명령(저장소 루트): `uv run python -m scripts.goldens.capture_g2_chunks`(기본으로 v2 변형을 쓴다)
 
 - 입력은 원본과 같다. 골든 DB의 `paper_fulltexts.sections` 275편이다.
 - 이식 동등성: 95adc76 시점에 v2는 원본 골든과 275/275편, 16,010/16,010청크가 같았다.

@@ -3,31 +3,22 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.mypy_cache/
 .pytest_cache/
 .ruff_cache/
 .venv/
 .env
 node_modules/
-frontend/node_modules/
 frontend/.vite/
 *.tsbuildinfo
 .ipynb_checkpoints/
-airflow.db
-airflow.db-shm
-airflow.db-wal
-airflow.cfg
 logs/
-simple_auth_manager_passwords.json.generated
 data/postgres/
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-backend/db.sqlite3
-backend/staticfiles/
 docs/tmp/
 
 prepare_*.log
-
-# Local playground / ad-hoc test files
 20260406.ipynb

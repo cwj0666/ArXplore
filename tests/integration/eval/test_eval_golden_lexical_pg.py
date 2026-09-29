@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 
 GOLDEN_URL_VARIABLE = "GOLDEN_DATABASE_URL"
 READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
-REFERENCE_RESULTS = Path(__file__).resolve().parents[4] / "eval" / "results" / "20260929-005408.csv"
+REFERENCE_RESULTS = Path(__file__).resolve().parents[3] / "eval" / "results" / "20260929-005408.csv"
 LEXICAL_METHODS = ("lexical", "lexical_nodiv", "lexical_nofilter")
 COMPARED_FIELDS = ("retrieved_chunk_ids", "retrieved_arxiv_ids", "retrieved_roles", "paper_mrr@10", "noise_count")
 

@@ -391,7 +391,7 @@ def test_arxiv_feed_filters_by_id_list_and_limits_searches(server):
     ]
     search_entries = ET.fromstring(search.text).findall("atom:entry", ATOM)
     assert [item.find("atom:id", ATOM).text for item in search_entries] == ["http://arxiv.org/abs/2609.90001v1"]
-    assert [request.query for request in server.requests_for(ARXIV_QUERY_PATH)][0] == {
+    assert next(request.query for request in server.requests_for(ARXIV_QUERY_PATH)) == {
         "id_list": ["2609.90002v1,2609.99999"]
     }
     assert server.errors == []

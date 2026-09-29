@@ -20,8 +20,7 @@ from tests.golden.store import DATA_DIR
 
 UI_DIR = Path(__file__).resolve().parent
 REPO_ROOT = UI_DIR.parents[2]
-V2_FRONTEND = REPO_ROOT / "v2" / "frontend"
-V2_DIST = V2_FRONTEND / "dist"
+FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 APP_COMMAND = Path(sys.executable).parent / "arxplore"
 SERVED_DIST = Path("frontend") / "dist"
 VARIANT_DIR = DATA_DIR / "g6_ui.v2"
@@ -111,7 +110,7 @@ def app_environ(server: FakeOpenAIServer, database_url: str) -> dict[str, str]:
 def serve_dist_from(workdir: Path) -> None:
     link = workdir / SERVED_DIST
     link.parent.mkdir(parents=True, exist_ok=True)
-    link.symlink_to(V2_DIST, target_is_directory=True)
+    link.symlink_to(FRONTEND_DIST, target_is_directory=True)
 
 
 def migrate(workdir: Path, env: dict[str, str]) -> None:
@@ -123,8 +122,8 @@ def migrate(workdir: Path, env: dict[str, str]) -> None:
 
 
 def capture_v2(out_dir: Path) -> dict[str, object]:
-    if not (V2_DIST / "index.html").is_file():
-        raise FileNotFoundError(f"{V2_DIST} is missing; run npm ci && npm run build in v2/frontend")
+    if not (FRONTEND_DIST / "index.html").is_file():
+        raise FileNotFoundError(f"{FRONTEND_DIST} is missing; run npm ci && npm run build in frontend")
     if not APP_COMMAND.is_file():
         raise FileNotFoundError(f"{APP_COMMAND} is missing; run the capture with the project environment")
     pdf = g6_ui.detail_pdf()
@@ -152,8 +151,12 @@ def capture_v2(out_dir: Path) -> dict[str, object]:
         wait_until_ready(f"{base_url}/bootstrap.json", api, api_log, "arxplore api")
         wait_until_ready(f"{base_url}/", api, api_log, "arxplore api frontend")
         subprocess.run(
-            ["node", str(g6_ui.CAPTURE_SCRIPT), "--base-url", base_url, "--out", str(out_dir), "--pdf", str(pdf)]
-            + ["--paper", g6_ui.DETAIL_PAPER, "--missing-paper", g6_ui.MISSING_PAPER],
+            [
+                "node",
+                str(g6_ui.CAPTURE_SCRIPT),
+                *("--base-url", base_url, "--out", str(out_dir), "--pdf", str(pdf)),
+                *("--paper", g6_ui.DETAIL_PAPER, "--missing-paper", g6_ui.MISSING_PAPER),
+            ],
             cwd=UI_DIR,
             check=True,
             timeout=CAPTURE_TIMEOUT_SECONDS,

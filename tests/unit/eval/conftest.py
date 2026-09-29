@@ -19,7 +19,7 @@ from arxplore_eval.research_fusion import (
     fuse_hybrid_candidates,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 EVAL_DIR = REPO_ROOT / "eval"
 FAKE_SERVER_PATH = REPO_ROOT / "tests" / "fakes" / "openai_server.py"
 FAKE_SERVER_MODULE = "arxplore_eval_tests_fake_openai_server"

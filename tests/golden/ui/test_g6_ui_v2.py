@@ -14,7 +14,7 @@ def v2_results(golden_database_url: str, tmp_path_factory: pytest.TempPathFactor
         for label, ready in (
             ("node", shutil.which("node") is not None),
             ("tests/golden/ui/node_modules (npm ci)", (g6_ui.UI_DIR / "node_modules" / "playwright").is_dir()),
-            ("v2/frontend/dist (npm ci && npm run build)", (g6_v2.V2_DIST / "index.html").is_file()),
+            ("frontend/dist (npm ci && npm run build)", (g6_v2.FRONTEND_DIST / "index.html").is_file()),
             (f"{g6_v2.APP_COMMAND.name} in the project environment", g6_v2.APP_COMMAND.is_file()),
         )
         if not ready

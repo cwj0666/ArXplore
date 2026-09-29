@@ -7,12 +7,12 @@ from typing import Any, TypeVar
 
 import fastapi
 import httpx
+
 from arxplore.api.app import create_app
 from arxplore.api.dependencies import ApiServices
 from arxplore.config import AppSettings, load_settings
 from arxplore.db.migrate import migrate
 from arxplore.db.pool import connect_from_settings
-
 from tests.golden.adapters import HttpResult
 
 T = TypeVar("T")

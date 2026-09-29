@@ -1,6 +1,6 @@
 # G3 layout 골든 v2 변형: 원본과 다른 점
 
-변형 파일은 `g3_layout/<arxiv_id>.v2.json.gz` 10개이고 `GOLDEN_IMPL=v2`일 때만 쓰인다. 원본 `g3_layout/<arxiv_id>.json.gz`는 옛 구현 기준으로 그대로 둔다.
+변형 파일은 `g3_layout/<arxiv_id>.v2.json.gz` 10개이고 v2 구현(`GOLDEN_IMPL` 기본값)과 비교할 때 쓰인다. 원본 `g3_layout/<arxiv_id>.json.gz`는 옛 구현 기준으로 그대로 둔다.
 
 - `request`, `response`, `response_sha256` 등 HURIDOCS 쪽 필드는 원본과 같다.
 - 바뀌는 것은 기록된 응답을 다시 파싱한 `parse`, `chunks`, `chunk_metrics`뿐이다.

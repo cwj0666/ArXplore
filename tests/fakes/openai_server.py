@@ -1,5 +1,6 @@
 import argparse
 import base64
+import contextlib
 import gzip
 import hashlib
 import json
@@ -563,7 +564,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
 class _HTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], fake: "FakeOpenAIServer") -> None:
+    def __init__(self, address: tuple[str, int], fake: FakeOpenAIServer) -> None:
         self.fake = fake
         super().__init__(address, _RequestHandler)
 
@@ -629,10 +630,8 @@ class FakeOpenAIServer:
         with self._lock:
             connections = list(self._connections)
         for connection in connections:
-            try:
+            with contextlib.suppress(OSError):
                 connection.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
         if thread is not None:
             thread.join(timeout=5)
         self._httpd = None
@@ -768,7 +767,7 @@ class FakeOpenAIServer:
             return None, False
         try:
             parsed = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             return raw.decode("utf-8", "replace"), False
         return parsed, isinstance(parsed, dict)
 

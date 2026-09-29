@@ -27,7 +27,7 @@ from arxplore.llm.summary_graph import SUMMARY_PROMPT_VERSION
 from arxplore.llm.tracing import Tracer
 from arxplore.sources.arxiv import ArxivPaper
 
-FAKE_SERVER_PATH = Path(__file__).resolve().parents[4] / "tests" / "fakes" / "openai_server.py"
+FAKE_SERVER_PATH = Path(__file__).resolve().parents[3] / "tests" / "fakes" / "openai_server.py"
 FAKE_SERVER_MODULE = "arxplore_tests_fake_openai_server"
 MAIN_ID = "2401.00001"
 OTHER_ID = "2401.00002"

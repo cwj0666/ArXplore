@@ -1,11 +1,11 @@
 # G1 검색 골든 v2 변형: 원본과 다른 점
 
-변형 파일은 `g1_retrieval.v2.json.gz`이고 `GOLDEN_IMPL=v2`일 때만 쓰인다. 원본 `g1_retrieval.json.gz`는 옛 구현 기준으로 그대로 둔다.
+변형 파일은 `g1_retrieval.v2.json.gz`이고 v2 구현(`GOLDEN_IMPL` 기본값)과 비교할 때 쓰인다. 원본 `g1_retrieval.json.gz`는 옛 구현 기준으로 그대로 둔다.
 - 변형 파일은 F06 커밋(2ad7bb8)에서 처음 만들었다.
 - 원본을 실제 질의 임베딩으로 다시 캡처한 뒤(60b131d, `query_vectors.source = stored`) 변형도 같은 벡터로 다시 캡처했다.
 - 두 번 캡처한 결과가 바이트 단위로 같았다. 555번의 임베딩 요청은 모두 저장된 표에서 응답했다.
 
-다시 만드는 명령(저장소 루트): `GOLDEN_IMPL=v2 v2/.venv/bin/python -m scripts.goldens.capture_g1_retrieval capture --variant v2 --vectors stored`
+다시 만드는 명령(저장소 루트): `uv run python -m scripts.goldens.capture_g1_retrieval capture --vectors stored`(기본으로 v2 변형을 쓴다)
 
 이식 동등성
 - 04e19a7 시점에 v2는 당시 원본 골든(결정적 가짜 질의 벡터)과 351/351이 같았다. 351은 평가 111, 제품 142, 상세 챗 97에 개수 검사 1을 더한 수다.

@@ -12,7 +12,7 @@ import pytest
 from arxplore.config import AppSettings
 from arxplore.db.migrate import migrate
 
-FAKE_SERVER_PATH = Path(__file__).resolve().parents[4] / "tests" / "fakes" / "openai_server.py"
+FAKE_SERVER_PATH = Path(__file__).resolve().parents[3] / "tests" / "fakes" / "openai_server.py"
 FAKE_SERVER_MODULE = "arxplore_tests_fake_openai_server"
 
 PAPERS = (

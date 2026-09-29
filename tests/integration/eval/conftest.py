@@ -17,7 +17,7 @@ from arxplore.db.pool import Pool, create_pool, open_pool
 from arxplore.db.repositories.embeddings import vector_literal
 from arxplore.retrieval.service import RetrievalConfig, Retriever
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 FAKE_SERVER_PATH = REPO_ROOT / "tests" / "fakes" / "openai_server.py"
 FAKE_SERVER_MODULE = "arxplore_eval_integration_fake_openai_server"
 EMBEDDING_MODEL = "text-embedding-3-large"

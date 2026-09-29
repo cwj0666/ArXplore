@@ -10,7 +10,7 @@ import pytest
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.tracing import Tracer
 
-FAKE_SERVER_PATH = Path(__file__).resolve().parents[4] / "tests" / "fakes" / "openai_server.py"
+FAKE_SERVER_PATH = Path(__file__).resolve().parents[3] / "tests" / "fakes" / "openai_server.py"
 FAKE_SERVER_MODULE = "arxplore_tests_fake_openai_server"
 
 

@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from typing import Any
 
 from arxplore_eval.dataset import load_queries
-
 from tests.fakes.openai_server import EmbeddingVectors, FakeHTTPError, FakeOpenAIServer, load_embedding_table
 from tests.golden.adapters import RetrievalAdapter
 from tests.golden.store import DATA_DIR, GOLDEN_ROOT, sha256_text

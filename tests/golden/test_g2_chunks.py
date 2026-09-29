@@ -48,7 +48,7 @@ def test_original_golden_matches_the_database_chunks(database_chunks):
 
 def test_golden_in_use_covers_every_paper_with_the_same_inputs():
     assert GOLDEN.get("format") == g2_chunks.FORMAT
-    assert PAPER_IDS == sorted(ORIGINAL["papers"])
+    assert sorted(ORIGINAL["papers"]) == PAPER_IDS
     assert [arxiv_id for arxiv_id in PAPER_IDS if not GOLDEN["papers"][arxiv_id]["chunks"]] == []
     assert {arxiv_id: GOLDEN["papers"][arxiv_id]["input_sha256"] for arxiv_id in PAPER_IDS} == {
         arxiv_id: ORIGINAL["papers"][arxiv_id]["input_sha256"] for arxiv_id in PAPER_IDS
