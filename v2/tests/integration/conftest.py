@@ -11,17 +11,21 @@ from arxplore.config import AppSettings
 
 DATABASE_URL_VARIABLE = "V2_TEST_DATABASE_URL"
 REQUIRE_DATABASE_VARIABLE = "V2_TEST_REQUIRE_DB"
-DEFAULT_DATABASE_URL = "postgresql://arxplore@localhost:55432/v2_test"
 SAFE_DATABASE_PREFIX = "v2_test"
 
 
 def _configured_url() -> str:
-    return os.environ.get(DATABASE_URL_VARIABLE, "").strip() or DEFAULT_DATABASE_URL
+    return os.environ.get(DATABASE_URL_VARIABLE, "").strip()
 
 
 @pytest.fixture(scope="session")
 def database_url() -> str:
     url = _configured_url()
+    if not url:
+        message = f"{DATABASE_URL_VARIABLE} is not set; point it at a dedicated {SAFE_DATABASE_PREFIX}* database"
+        if os.environ.get(REQUIRE_DATABASE_VARIABLE):
+            pytest.fail(message)
+        pytest.skip(message)
     dbname = str(conninfo_to_dict(url).get("dbname", ""))
     if not dbname.startswith(SAFE_DATABASE_PREFIX):
         pytest.fail(f"integration tests drop the public schema; use a database named {SAFE_DATABASE_PREFIX}*: {dbname}")
