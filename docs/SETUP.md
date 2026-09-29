@@ -8,13 +8,13 @@ API, worker, 스케줄러는 같은 패키지(`src/arxplore`)와 같은 app 이�
 
 | 명령 | 하는 일 |
 | --- | --- |
-| `arxplore migrate` | `src/arxplore/db/migrations`의 번호 SQL을 차례로 적용한다. `--dry-run`, `--target` |
-| `arxplore db-status` | 적용한 마이그레이션, 임베딩 차원, 검색 인덱스를 보여 주고 마지막 줄에 `ready: yes|no`를 쓴다 |
-| `arxplore api` | FastAPI 앱을 uvicorn으로 띄운다(기본 `127.0.0.1:8001`) |
-| `arxplore worker --loop` | prepare 잡을 받아 PDF 파싱, 청크 저장, 임베딩을 한다 |
-| `arxplore scheduler` | collect, maintenance, langsmith_cleanup을 cron 일정으로 돌린다. `scheduler history`는 최근 실행 기록 |
-| `arxplore run <작업>` | collect, maintenance, langsmith-cleanup을 한 번 돌리고 수동 실행으로 기록한다. rechunk, reparse는 코퍼스 도구다 |
-| `arxplore openapi` | API OpenAPI 스키마를 JSON으로 쓴다(`frontend/openapi.json`의 원본) |
+| `arxplore migrate` | `src/arxplore/db/migrations`의 번호 SQL을 차례로 적용합니다. `--dry-run`, `--target` |
+| `arxplore db-status` | 적용한 마이그레이션, 임베딩 차원, 검색 인덱스를 보여 주고 마지막 줄에 `ready: yes` 또는 `ready: no`를 씁니다 |
+| `arxplore api` | FastAPI 앱을 uvicorn으로 띄웁니다(기본 `127.0.0.1:8001`) |
+| `arxplore worker --loop` | prepare 잡을 받아 PDF 파싱, 청크 저장, 임베딩을 합니다 |
+| `arxplore scheduler` | collect, maintenance, langsmith_cleanup을 cron 일정으로 돌립니다. `scheduler history`는 최근 실행 기록입니다 |
+| `arxplore run <작업>` | collect, maintenance, langsmith-cleanup을 한 번 돌리고 수동 실행으로 기록합니다. rechunk, reparse는 코퍼스 도구입니다 |
+| `arxplore openapi` | API OpenAPI 스키마를 JSON으로 씁니다(`frontend/openapi.json`의 원본) |
 
 API와 worker는 시작할 때 스키마 버전과 임베딩 차원을 확인하고, 적용하지 않은 마이그레이션이 있거나 차원이 설정과 다르면 뜨지 않습니다. 스키마는 `arxplore migrate`만 바꿉니다.
 
@@ -117,7 +117,7 @@ npm run check:api                        # 백엔드 OpenAPI 스키마와 fronte
 | --- | --- | --- |
 | G1 | 검색 순위(평가 111, 제품 142, 상세 챗 97) | 골든 DB |
 | G2 | 저장된 섹션에서 만든 청크 | 골든 DB |
-| G3 | pypdf 파싱(PDF 10편), HURIDOCS 응답 재생 | PDF(`GOLDEN_PDF_DIR`). 재생은 입력 없이 돈다 |
+| G3 | pypdf 파싱(PDF 10편), HURIDOCS 응답 재생 | PDF(`GOLDEN_PDF_DIR`). 재생은 입력 없이 돕니다 |
 | G5 | HTTP·SSE 응답과 가짜 서버가 받은 LLM 요청(G4) | 골든 DB |
 | G6 | 화면 11개의 PNG, innerText, ARIA | 골든 DB, Playwright, `frontend/dist` |
 

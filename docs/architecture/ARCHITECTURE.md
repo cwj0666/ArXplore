@@ -267,7 +267,7 @@ FastAPI 앱(`api.app.create_app`)의 경로는 다음과 같다. 요청·응답 
 | --- | --- | --- |
 | `GET /bootstrap.json` | CSRF 쿠키를 심고 요약 모델 기본값·목록을 돌려준다 | - |
 | `GET /papers/` | `/?원래 쿼리`로 302 | - |
-| `GET /papers/list.json` | 목록과 검색. 쪽당 21편, `sort=latest|upvotes`, `q` | - |
+| `GET /papers/list.json` | 목록과 검색. 쪽당 21편, 정렬 `sort`(latest, upvotes), 검색어 `q` | - |
 | `GET /papers/<id>/detail.json` | 논문과 관련 논문(로컬 + arXiv 외부 검색) | detail |
 | `POST /papers/<id>/analyze/` | 개요·핵심 포인트. 캐시가 있으면 `cached: true` | llm |
 | `POST /papers/<id>/summary/` | 상세 요약. 본문 `{"model": ...}` | llm |
