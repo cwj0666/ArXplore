@@ -46,7 +46,6 @@ class Problem(Exception):
 
 
 def parse_frontmatter(text: str, path: Path) -> dict[str, object]:
-    """`---`로 감싼 frontmatter를 `key: value` 줄 단위로 읽는다. `[a, b]` 값은 목록이 된다."""
     if not text.startswith("---\n"):
         raise Problem(f"{path}: frontmatter(---)로 시작해야 한다")
     end = text.find("\n---\n", 4)
@@ -68,18 +67,15 @@ def parse_frontmatter(text: str, path: Path) -> dict[str, object]:
 
 
 def section_start(text: str, section: str) -> int:
-    """줄 머리에 놓인 섹션 제목의 위치. 없으면 -1."""
     m = re.search(r"^" + re.escape(section), text, re.MULTILINE)
     return m.start() if m else -1
 
 
 def trouble_section(text: str) -> str:
-    """본문에서 트러블슈팅 절(제목 줄부터 파일 끝까지)을 앞뒤 공백 없이 돌려준다."""
     return text[section_start(text, TROUBLE_SECTION) :].strip()
 
 
 def trouble_cases(section: str, path: Path) -> int:
-    """트러블슈팅 절의 사례 수. 해당 없음이면 0이고, 사례는 다섯 라벨 줄을 정해진 순서로 가져야 한다."""
     body = section[len(TROUBLE_SECTION) :].strip().lstrip("—").strip()
     if body.startswith(NOT_APPLICABLE):
         return 0
@@ -95,7 +91,6 @@ def trouble_cases(section: str, path: Path) -> int:
 
 
 def load_entry(path: Path, phase: str) -> dict[str, object]:
-    """항목 파일 하나를 검사하고 색인·모음에 쓸 필드를 돌려준다. 형식이 어긋나면 Problem을 던진다."""
     m = ENTRY_RE.match(path.name)
     if not m:
         raise Problem(f"{path}: 파일명은 YYYY-MM-DD_NN_제목.md 형식이어야 한다")
@@ -142,7 +137,6 @@ def newest_first(entries: list[dict[str, object]]) -> list[dict[str, object]]:
 
 
 def render_index(phase_dir: Path, entries: list[dict[str, object]]) -> str:
-    """페이즈 디렉터리의 INDEX.md 본문. 항목은 최신 순이다."""
     n = PHASE_RE.match(phase_dir.name).group(1)
     lines = [
         f"# Phase {n} 작업 로그 색인",
@@ -164,7 +158,6 @@ def entry_link(entry: dict[str, object]) -> str:
 
 
 def render_digest(by_phase: list[tuple[str, list[dict[str, object]]]]) -> str:
-    """트러블슈팅 사례가 있는 항목만 모은 TROUBLESHOOTING.md 본문. 페이즈는 최신 순, 페이즈 안의 항목도 최신 순이다."""
     groups = [(phase, newest_first([e for e in entries if e["cases"]])) for phase, entries in reversed(by_phase)]
     groups = [(phase, entries) for phase, entries in groups if entries]
     total_entries = sum(len(entries) for _, entries in groups)
@@ -200,7 +193,6 @@ def render_digest(by_phase: list[tuple[str, list[dict[str, object]]]]) -> str:
 
 
 def collect() -> tuple[dict[Path, str], list[str]]:
-    """모든 항목을 검사해 생성할 파일(INDEX.md 각각과 TROUBLESHOOTING.md)의 내용과 문제 목록을 돌려준다."""
     rendered: dict[Path, str] = {}
     problems: list[str] = []
     by_phase: list[tuple[str, list[dict[str, object]]]] = []
