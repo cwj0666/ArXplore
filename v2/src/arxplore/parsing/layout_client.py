@@ -14,11 +14,7 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_RETRIES = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
 RETRYABLE_STATUS_CODES = frozenset({422, *range(500, 600)})
-RETRYABLE_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
-    httpx.TimeoutException,
-    httpx.NetworkError,
-    httpx.RemoteProtocolError,
-)
+RETRYABLE_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (httpx.NetworkError, httpx.RemoteProtocolError)
 REQUIRED_SEGMENT_FIELDS = frozenset(
     {"left", "top", "width", "height", "page_number", "page_width", "page_height", "text", "type"}
 )
