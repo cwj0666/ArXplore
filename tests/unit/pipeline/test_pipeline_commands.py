@@ -313,3 +313,45 @@ def test_rechunk_and_reparse_options(corpus_calls: list[tuple[str, dict[str, Any
             },
         ),
     ]
+
+
+@pytest.fixture
+def requeue_calls(monkeypatch: pytest.MonkeyPatch, clean_env: Any) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    def run_with_fake_pool(operation: Any) -> dict[str, Any]:
+        return asyncio.run(operation("pool"))
+
+    async def fake_requeue(pool: Any, **kwargs: Any) -> _Result:
+        calls.append(kwargs)
+        return _Result({"stage": "requeue_failed", "applied": kwargs["apply"]})
+
+    monkeypatch.setattr(commands, "_run_with_pool", run_with_fake_pool)
+    monkeypatch.setattr(commands, "requeue_failed_jobs", fake_requeue)
+    return calls
+
+
+def test_requeue_failed_is_a_dry_run_for_auto_jobs_by_default(requeue_calls: list[dict[str, Any]]) -> None:
+    result = runner.invoke(app, ["run", "requeue-failed"])
+
+    assert result.exit_code == 0, result.output
+    assert requeue_calls == [{"mode": "auto", "since": None, "force": False, "apply": False}]
+    assert '"stage": "requeue_failed"' in result.output
+
+
+def test_requeue_failed_takes_the_legacy_script_options(requeue_calls: list[dict[str, Any]]) -> None:
+    result = runner.invoke(
+        app, ["run", "requeue-failed", "--since", "2026-04-07", "--mode", "backfill", "--apply", "--force"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert requeue_calls == [{"mode": "backfill", "since": date(2026, 4, 7), "force": True, "apply": True}]
+
+
+@pytest.mark.parametrize("arguments", [["--mode", "manual"], ["--since", "2026/04/07"]])
+def test_requeue_failed_rejects_unknown_modes_and_dates(
+    requeue_calls: list[dict[str, Any]], arguments: list[str]
+) -> None:
+    result = runner.invoke(app, ["run", "requeue-failed", *arguments])
+    assert result.exit_code == 2
+    assert requeue_calls == []

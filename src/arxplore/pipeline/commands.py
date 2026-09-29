@@ -3,6 +3,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import date
+from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
@@ -11,6 +12,7 @@ from arxplore.config import get_settings
 from arxplore.db.migrate import MigrationError, verify_schema
 from arxplore.db.pool import Pool, create_pool_from_settings, open_pool
 from arxplore.domain.jobs import DEFAULT_JOB_MODE
+from arxplore.pipeline.backfill import BACKFILL_JOB_MODE
 from arxplore.pipeline.corpus import rechunk_corpus, reparse_dates
 from arxplore.pipeline.embed import (
     EMBED_BACKLOG_BUDGET,
@@ -19,6 +21,7 @@ from arxplore.pipeline.embed import (
     EmbeddingBudget,
 )
 from arxplore.pipeline.langsmith_cleanup import DEFAULT_RETENTION_DAYS
+from arxplore.pipeline.requeue import requeue_failed_jobs
 from arxplore.pipeline.worker import DEFAULT_WAIT_TIMEOUT_SECONDS, DEFAULT_WORKER_NAME, WorkerOptions, run_worker
 from arxplore.scheduler.jobs import (
     COLLECT_JOB,
@@ -37,6 +40,11 @@ from arxplore.scheduler.service import run_job_manually
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 CORPUS_ROLE = "corpus"
+
+
+class JobMode(StrEnum):
+    AUTO = DEFAULT_JOB_MODE
+    BACKFILL = BACKFILL_JOB_MODE
 
 
 def configure_logging() -> None:
@@ -248,7 +256,14 @@ def register_run(app: typer.Typer) -> None:
 
         _echo_json(_run_with_pool(operation))
 
-    @run_app.command("reparse", help="Queue collected dates for another parse, forced by default.")
+    @run_app.command(
+        "reparse",
+        help=(
+            "Queue every collected date in the range for another parse, forced by default: pending, done and "
+            "failed jobs are reopened and dates without a job get one. To retry only failed jobs use "
+            "requeue-failed."
+        ),
+    )
     def reparse_command(
         since: Annotated[str | None, typer.Option("--since", help="First date, YYYY-MM-DD.")] = None,
         until: Annotated[str | None, typer.Option("--until", help="Last date, YYYY-MM-DD.")] = None,
@@ -269,6 +284,33 @@ def register_run(app: typer.Typer) -> None:
                 force=force,
                 apply=apply,
             )
+            return result.as_dict()
+
+        _echo_json(_run_with_pool(operation))
+
+    @run_app.command(
+        "requeue-failed",
+        help=(
+            "Reopen only failed prepare jobs, those that used up their attempts, as pending with the attempts "
+            "reset. Done jobs are left alone; to parse finished dates again use reparse."
+        ),
+    )
+    def requeue_failed_command(
+        since: Annotated[
+            str | None, typer.Option("--since", help="Only jobs whose date is YYYY-MM-DD or later.")
+        ] = None,
+        mode: Annotated[JobMode, typer.Option("--mode", help="prepare_jobs mode of the jobs.")] = JobMode.AUTO,
+        apply: Annotated[
+            bool, typer.Option("--apply", help="Reopen the jobs. Without it they are only listed.")
+        ] = False,
+        force: Annotated[
+            bool, typer.Option("--force", help="With --apply, also ask for a forced parse of those dates.")
+        ] = False,
+    ) -> None:
+        since_date = parse_date_option(since)
+
+        async def operation(pool: Pool) -> dict[str, Any]:
+            result = await requeue_failed_jobs(pool, mode=mode.value, since=since_date, force=force, apply=apply)
             return result.as_dict()
 
         _echo_json(_run_with_pool(operation))

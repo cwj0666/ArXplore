@@ -87,9 +87,10 @@ uv run arxplore run rechunk                     # 저장된 섹션으로 다시 
 uv run arxplore run rechunk --apply             # 바뀐 청크만 교체. 지워진 임베딩은 worker backlog가 다시 만든다
 uv run arxplore run reparse --since 2026-09-11 --until 2026-09-24            # 다시 파싱할 날짜 잡 확인
 uv run arxplore run reparse --since 2026-09-11 --until 2026-09-24 --apply    # force 잡으로 다시 연다
+uv run arxplore run requeue-failed --since 2026-09-11 --apply                # failed 잡만 pending으로 되돌린다(--mode backfill, --force)
 ```
 
-실패한 날짜 잡을 다시 돌릴 때도 `run reparse --no-force --apply`를 씁니다. 처리 중인 잡은 건드리지 않습니다.
+재시도를 다 쓴 failed 잡만 다시 돌릴 때는 `run requeue-failed`를 씁니다. `run reparse`는 done 잡까지 다시 열고 잡이 없는 날짜에는 새로 만듭니다. 처리 중인 잡은 둘 다 건드리지 않습니다.
 
 ## 테스트와 CI
 
