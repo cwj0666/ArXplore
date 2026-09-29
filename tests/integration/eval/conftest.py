@@ -2,6 +2,7 @@ import importlib.util
 import json
 import math
 import sys
+from collections import Counter
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -195,3 +196,86 @@ def fake_openai(fakes: ModuleType) -> Iterator[Any]:
     vectors = fakes.EmbeddingVectors({fakes.embedding_key(text): vector for text, vector in QUERY_VECTORS.items()})
     with fakes.FakeOpenAIServer(embedding_handler=vectors) as server:
         yield server
+
+
+RAGAS_FAIL_MARKER = "RAGAS-JUDGE-FAIL"
+RAGAS_FLAKY_MARKER = "RAGAS-JUDGE-FLAKY"
+INVALID_JUDGE_REPLY = "this is not the requested JSON"
+SCHEMA_START = "json_schema:"
+SCHEMA_END = "Make sure to return"
+TRANSLATION_START = "Statements to translate:"
+INPUT_START = "input: "
+OUTPUT_START = "Output:"
+
+
+def _system_text(request: Mapping[str, Any]) -> str:
+    return next(str(message["content"]) for message in request["messages"] if message["role"] == "system")
+
+
+def _user_text(request: Mapping[str, Any]) -> str:
+    return str(request["messages"][-1]["content"])
+
+
+def _prompt_input(user: str) -> dict[str, Any]:
+    payload = json.loads(user[user.rindex(INPUT_START) + len(INPUT_START) : user.rindex(OUTPUT_START)])
+    assert isinstance(payload, dict)
+    return payload
+
+
+@dataclass
+class RagasJudge:
+    titles: Counter[str] = field(default_factory=Counter)
+    unknown: list[str] = field(default_factory=list)
+    failed: int = 0
+    flaked: int = 0
+
+    def schema_title(self, request: Mapping[str, Any]) -> str:
+        system = _system_text(request)
+        schema = json.loads(system[system.index(SCHEMA_START) + len(SCHEMA_START) : system.index(SCHEMA_END)])
+        return str(schema["title"])
+
+    def reply(self, title: str, user: str) -> dict[str, Any] | None:
+        if title == "_TranslatedStrings":
+            return {"statements": json.loads(user[user.index(TRANSLATION_START) + len(TRANSLATION_START) :])}
+        if title == "StatementGeneratorOutput":
+            return {"statements": ["The answer makes a first claim.", "The answer makes a second claim."]}
+        if title == "NLIStatementOutput":
+            statements = _prompt_input(user)["statements"]
+            return {
+                "statements": [
+                    {"statement": statement, "reason": "Scripted verdict.", "verdict": index % 2}
+                    for index, statement in enumerate(statements)
+                ]
+            }
+        if title == "AnswerRelevanceOutput":
+            return {"question": "What does the answer describe?", "noncommittal": 0}
+        if title == "ContextPrecisionOutput":
+            return {"reason": "The context supports the reference.", "verdict": 1}
+        if title == "ContextRecallOutput":
+            return {
+                "classifications": [
+                    {"statement": "The reference makes one claim.", "reason": "It is in the context.", "attributed": 1}
+                ]
+            }
+        return None
+
+    def __call__(self, request: Mapping[str, Any]) -> str:
+        title = self.schema_title(request)
+        self.titles[title] += 1
+        user = _user_text(request)
+        if any(RAGAS_FAIL_MARKER in str(message["content"]) for message in request["messages"]):
+            self.failed += 1
+            return INVALID_JUDGE_REPLY
+        if RAGAS_FLAKY_MARKER in user:
+            self.flaked += 1
+            return INVALID_JUDGE_REPLY
+        payload = self.reply(title, user)
+        if payload is None:
+            self.unknown.append(title)
+            return "{}"
+        return json.dumps(payload, ensure_ascii=False)
+
+
+@pytest.fixture
+def ragas_judge() -> RagasJudge:
+    return RagasJudge()
