@@ -1,0 +1,152 @@
+name: arxplore
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+  image: ${COMPOSE_PROJECT_NAME}-app
+  env_file:
+    - .env
+  init: true
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    command: ["api", "--host", "0.0.0.0", "--port", "8001", "--workers", "${API_WORKERS:-1}"]
+    environment:
+      RUNTIME: production
+      DEBUG: "false"
+      POSTGRES_HOST: ${PROD_POSTGRES_HOST:?Set PROD_POSTGRES_HOST to the PostgreSQL host the containers connect to}
+      SERVER_POSTGRES_PORT: ${SERVER_POSTGRES_PORT:-15432}
+    expose:
+      - "8001"
+    depends_on:
+      postgres-local:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import http.client as h; c = h.HTTPConnection('127.0.0.1', 8001, timeout=4); c.request('GET', '/bootstrap.json'); c.getresponse()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}-web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:${PROD_HTTP_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+    restart: unless-stopped
+
+  vite:
+    image: node:24-bookworm-slim
+    profiles: ["dev"]
+    working_dir: /workspace/frontend
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && exec npm run dev -- --host 0.0.0.0 --port 5173"]
+    environment:
+      API_PROXY_TARGET: http://api:8001
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/workspace/frontend
+      - vite_node_modules:/workspace/frontend/node_modules
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    profiles: ["parser"]
+    command:
+      - worker
+      - --loop
+      - --max-jobs-per-run
+      - ${MAX_JOBS_PER_RUN:-1}
+      - --embed-max-chunks
+      - ${EMBED_MAX_CHUNKS:-200}
+      - --embed-backlog-max-chunks
+      - ${EMBED_BACKLOG_MAX_CHUNKS:-400}
+      - --wait-timeout-seconds
+      - ${WAIT_TIMEOUT_SECONDS:-120}
+    environment:
+      RUNTIME: production
+      POSTGRES_HOST: ${PROD_POSTGRES_HOST:?Set PROD_POSTGRES_HOST to the PostgreSQL host the containers connect to}
+      SERVER_POSTGRES_PORT: ${SERVER_POSTGRES_PORT:-15432}
+      LAYOUT_PARSER_BASE_URL: ${LAYOUT_PARSER_BASE_URL:-http://layout-parser:5060}
+      PREPARE_BACKFILL_ENABLED: ${PREPARE_BACKFILL_ENABLED:-false}
+    depends_on:
+      layout-parser:
+        condition: service_healthy
+      postgres-local:
+        condition: service_healthy
+        required: false
+
+  layout-parser:
+    build:
+      context: .
+      dockerfile: docker/parser/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}-layout-parser
+    profiles: ["parser"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [compute, utility]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "127.0.0.1:${LAYOUT_PARSER_PORT:-5060}:5060"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5060/', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  postgres-local:
+    image: pgvector/pgvector:pg16
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      APP_POSTGRES_DB: ${APP_POSTGRES_DB:-}
+    ports:
+      - "127.0.0.1:${SERVER_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres_local_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  vite_node_modules:
+  postgres_local_data:
