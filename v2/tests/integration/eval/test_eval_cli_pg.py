@@ -7,13 +7,13 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from typer.testing import CliRunner
 
+from arxplore.api.services.chat import build_chat_service
 from arxplore.api.services.store import PostgresPaperStore
 from arxplore.config import AppSettings
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.tracing import Tracer
 from arxplore.retrieval.service import Retriever
 from arxplore_eval.answers import (
-    build_chat_service,
     generate_agent_answer,
     generate_paper_chat_answer,
     load_answer_records,

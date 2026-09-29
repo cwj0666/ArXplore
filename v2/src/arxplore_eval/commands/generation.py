@@ -9,6 +9,7 @@ import typer
 from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
 
+from arxplore.api.services.chat import build_chat_service
 from arxplore.api.services.store import PostgresPaperStore
 from arxplore.config import AppSettings
 from arxplore.context import override_openai_runtime
@@ -20,7 +21,6 @@ from arxplore_eval.answers import (
     AnswersError,
     answer_key,
     append_answer_record,
-    build_chat_service,
     build_generators,
     collect_answers,
     completed_keys,

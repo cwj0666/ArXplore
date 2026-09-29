@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from arxplore.api.services.chat import CHAT_HISTORY_MAX_MESSAGES
+from arxplore.api.services.chat import CHAT_HISTORY_MAX_MESSAGES, build_chat_service
 from arxplore.config import AppSettings
 from arxplore.context import RetrievalObservation, record_retrieval
 from arxplore.domain.chunks import StoredChunk
@@ -19,7 +19,6 @@ from arxplore_eval.answers import (
     GenerationResult,
     append_answer_record,
     build_answer_record,
-    build_chat_service,
     build_generators,
     collect_answers,
     completed_keys,

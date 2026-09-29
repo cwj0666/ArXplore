@@ -7,16 +7,9 @@ from pathlib import Path
 from typing import Any, Self
 
 from arxplore.api.services.chat import ChatInput, ChatService, PreparedPaperChat
-from arxplore.api.services.store import PaperStore
-from arxplore.config import AppSettings
 from arxplore.context import RetrievalObservation, observe_retrieval
 from arxplore.domain.retrieval import RetrievalContext
-from arxplore.llm.agent.graph import build_agent_graph
-from arxplore.llm.agent.tools import build_agent_tools
 from arxplore.llm.events import CollectedAnswer, collect_answer
-from arxplore.llm.models import ChatModelFactory
-from arxplore.llm.tracing import Tracer
-from arxplore.retrieval.service import Retriever
 from arxplore_eval.behavior import (
     DEFAULT_REFUSAL_PHRASES,
     OUTCOME_REJECTED,
@@ -312,24 +305,6 @@ async def generate_paper_chat_answer(service: ChatService, query: EvalQuery) -> 
         retrieval_mode=retrieval.retrieval_mode,
         arxiv_id=arxiv_id,
         hit_arxiv_ids=[arxiv_id],
-    )
-
-
-def build_chat_service(
-    settings: AppSettings,
-    *,
-    store: PaperStore,
-    retriever: Retriever,
-    models: ChatModelFactory,
-    tracer: Tracer,
-) -> ChatService:
-    return ChatService(
-        settings=settings,
-        store=store,
-        retriever=retriever,
-        models=models,
-        tracer=tracer,
-        agent_graph=build_agent_graph(build_agent_tools(retriever, store), models),
     )
 
 
