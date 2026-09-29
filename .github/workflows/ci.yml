@@ -51,6 +51,9 @@ jobs:
       - name: Unit tests
         run: uv run --frozen pytest tests/unit
 
+      - name: Fake server and golden harness without the golden database
+        run: uv run --frozen pytest tests/fakes tests/golden
+
   integration:
     name: Integration tests (PostgreSQL + pgvector)
     runs-on: ubuntu-latest
