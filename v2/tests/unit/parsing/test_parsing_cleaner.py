@@ -95,13 +95,35 @@ def test_collapse_whitespace():
         ("I NTRODUCTION", "INTRODUCTION"),
         ("R ELATED W ORK", "RELATED WORK"),
         ("A.1 E XPERIMENTAL S ETUP", "A.1 EXPERIMENTAL SETUP"),
-        ("A Blation Study", "Ablation Study"),
+        ("A BSTRACT", "ABSTRACT"),
+        ("Idea A MBIG : Benchmarking", "Idea AMBIG: Benchmarking"),
         ("Table 1 :  Results", "Table 1: Results"),
         ("  Plain   heading ", "Plain heading"),
     ],
 )
 def test_normalize_heading_like_text_joins_spaced_small_caps(text, expected):
     assert normalize_heading_like_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A Training Details",
+        "E Limitations",
+        "Appendix A Implementation Details",
+        "APPENDIX B PROOFS",
+        "5 A Symmetry Audit of Common Representation Quantities",
+        "Robot Learning: A Survey",
+        "the following two lines: A or B Reason:",
+    ],
+)
+def test_normalize_heading_like_text_keeps_a_single_letter_apart_from_the_next_word(text):
+    assert normalize_heading_like_text(text) == text
+
+
+def test_normalize_heading_like_text_keeps_the_appendix_label_while_joining_small_caps():
+    assert normalize_heading_like_text("A PPENDIX B P ROOFS") == "APPENDIX B PROOFS"
+    assert normalize_heading_like_text("Appendix A P ROOFS") == "Appendix A PROOFS"
 
 
 def test_find_inline_heading_split_detects_a_short_title_sentence():

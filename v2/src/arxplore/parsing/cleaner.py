@@ -30,8 +30,7 @@ _EXCESS_BLANK_LINES = re.compile(r"\n{3,}")
 _SPACED_LETTER_PREFIX = re.compile(r"[A-Z](?:\.\d+)*")
 _SINGLE_CAPITAL = re.compile(r"[A-Z]")
 _UPPERCASE_WORD = re.compile(r"[A-Z]{2,}")
-_SPACED_CAPITAL_BEFORE_UPPERCASE = re.compile(r"\b([A-Z])\s+([A-Z]{2,})\b")
-_SPACED_CAPITAL_BEFORE_CAPITALIZED = re.compile(r"\b([A-Z])\s+([A-Z][a-z][A-Za-z-]*)\b")
+_SPACED_CAPITAL_BEFORE_UPPERCASE = re.compile(r"(?<![Aa][Pp][Pp][Ee][Nn][Dd][Ii][Xx] )\b([A-Z])\s+([A-Z]{2,})\b")
 _SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([:;,.!?])")
 
 _SHORT_TITLE_PREFIX = re.compile(r"^(?P<head>[A-Z0-9][A-Za-z0-9/+&' -]{2,48}\.)\s*(?P<rest>[A-Z].+)$")
@@ -70,11 +69,6 @@ def _join_spaced_capital(match: re.Match[str]) -> str:
     return f"{match.group(1)}{match.group(2)}"
 
 
-def _join_spaced_capital_lowering(match: re.Match[str]) -> str:
-    word = match.group(2)
-    return f"{match.group(1)}{word[0].lower()}{word[1:]}"
-
-
 def normalize_heading_like_text(text: str) -> str:
     normalized = collapse_whitespace(text)
     prefix = ""
@@ -91,7 +85,6 @@ def normalize_heading_like_text(text: str) -> str:
     while previous != normalized:
         previous = normalized
         normalized = _SPACED_CAPITAL_BEFORE_UPPERCASE.sub(_join_spaced_capital, normalized)
-        normalized = _SPACED_CAPITAL_BEFORE_CAPITALIZED.sub(_join_spaced_capital_lowering, normalized)
     normalized = _SPACE_BEFORE_PUNCTUATION.sub(r"\1", normalized)
     if prefix:
         normalized = f"{prefix} {normalized}"

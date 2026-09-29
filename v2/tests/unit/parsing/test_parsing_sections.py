@@ -91,10 +91,46 @@ def test_normalize_section_heading_rejects_non_headings(line):
     assert normalize_section_heading(line) is None
 
 
-def test_single_letter_prefixes_are_merged_into_the_next_capitalized_word():
-    assert normalize_section_heading("A Proofs of the Main Theorem") is None
-    assert normalize_section_heading("Appendix A Implementation Details") == "Appendix Aimplementation Details"
-    assert normalize_section_heading("APPENDIX B PROOFS") == "Appendix Bproofs"
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("A Proofs of the Main Theorem", "A Proofs of the Main Theorem"),
+        ("E Limitations", "E Limitations"),
+        ("I Prompts", "I Prompts"),
+        ("Appendix A Implementation Details", "Appendix A Implementation Details"),
+        ("APPENDIX B PROOFS", "Appendix B Proofs"),
+        (
+            "5 A Symmetry Audit of Common Representation Quantities",
+            "5 A Symmetry Audit of Common Representation Quantities",
+        ),
+    ],
+)
+def test_single_letter_prefixes_are_headings(line, expected):
+    assert normalize_section_heading(line) == expected
+
+
+def test_an_all_caps_title_after_a_bare_letter_is_still_read_as_small_caps():
+    assert normalize_section_heading("A BSTRACT") == "Abstract"
+    assert normalize_section_heading("A OBSERVATION SCOPE AND MEASUREMENT METHODS") is None
+
+
+def test_extract_sections_keeps_lettered_appendix_sections():
+    text = "\n".join(
+        [
+            "5 Conclusion",
+            "We conclude the paper.",
+            "A Proofs of the Main Theorem",
+            "The proof follows from the lemma.",
+            "B Additional Results",
+            "More results are shown here.",
+        ]
+    )
+
+    assert [section["title"] for section in extract_sections(text)] == [
+        "5 Conclusion",
+        "A Proofs of the Main Theorem",
+        "B Additional Results",
+    ]
 
 
 def test_looks_like_numbered_heading_uses_the_capitalized_word_ratio():

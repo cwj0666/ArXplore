@@ -75,3 +75,38 @@
 - 다른 4xx, 잘못된 JSON, segment 검증 실패는 재시도하지 않는다.
 
 골든은 HTTP를 거치지 않으므로 G3-layout 변형(기록된 응답 재생)은 바뀌지 않는다.
+
+## F34: 한 글자 접두 제목
+
+- 제목 정규화(`normalize_heading_like_text`)에서 "대문자 한 글자 + 공백 + 첫 글자만 대문자인 단어"를 붙이던 규칙을 없앴다. `A Training` → `Atraining`, `A Survey` → `Asurvey`가 그 결과였다.
+  - G3-layout 표본의 HURIDOCS 제목·캡션에서 이 규칙이 적용된 서로 다른 29곳이 모두 잘못 붙인 경우였다.
+  - 부록 접두 26곳, `Robot Learning: A Survey`, `5 A Symmetry Audit`(→ `5 Asymmetry Audit`로 뜻이 바뀌었음), `A or B Reason`이다.
+- `Appendix` 바로 뒤의 한 글자는 부록 접두로 보고, 뒤의 대문자 단어와 붙이지 않는다(`APPENDIX B PROOFS` → `Appendix B Proofs`).
+- 한 글자 + 전부 대문자 단어(`A BSTRACT`, `I NTRODUCTION`)는 small caps로 보고 예전처럼 붙인다. 그래서 2609.25199의 `A OBSERVATION SCOPE AND MEASUREMENT METHODS`, `B CI AND PROFILING`처럼 전부 대문자인 부록 제목은 여전히 붙는다. 한 줄만으로는 small caps와 구분할 수 없다.
+
+F33 대비(G3-layout 재생)
+
+| 논문 | 섹션 수 | 청크 수 | 평균 청크 길이 | 텍스트가 바뀐 청크 |
+| --- | --- | --- | --- | --- |
+| 2609.10539 | 61 → 63 | 201 → 201 | 1457.05 → 1453.48 | 11/201 |
+| 2609.22319 | 42 → 42 | 196 → 196 | 1559.84 → 1559.85 | 1/196 |
+| 2609.27158 | 24 → 25 | 47 → 47 | 1278.47 → 1268.77 | 6/47 |
+| 2609.20758 | 19 → 21 | 60 → 60 | 1480.38 → 1471.0 | 6/60 |
+| 2609.17652 | 16 → 18 | 56 → 57 | 1482.41 → 1452.91 | 10/57 |
+| 2609.09143 | 27 → 32 | 74 → 73 | 1369.74 → 1347.56 | 9/73 |
+
+- 나머지 4편은 같다.
+- 합계: 섹션 264 → 276, 청크 840 → 840, 텍스트가 바뀐 청크 43개
+- 새 섹션
+  - 2609.09143: `B`, `D`, `E`, `F`, `G` 부록
+  - 2609.10539: `C Construction of Codification-Ready Counterparts`, `H Scope of Research-Idea Specifications`
+  - 2609.17652: `A Worked example`, `D Additional ablations`
+  - 2609.20758: `A Details for Design-Based Validation`, `B Additional Details for the Benchmark Simulation`
+  - 2609.27158: `C Architecture-Induced Representation Symmetries`
+- 제목이 바뀐 섹션: 2609.27158 `5 Asymmetry Audit of Common Representation Quantities` → `5 A Symmetry Audit of Common Representation Quantities`
+- 섹션이 되지 않은 부록 제목(바로 뒤가 하위 제목)도 본문 텍스트에서 `Atraining Details` 대신 `A Training Details`로 남는다.
+
+예시
+1. 2609.09143: `C.6 …` 섹션 본문에 `Elimitations`로 붙어 있던 제목이 `E Limitations` 섹션이 된다.
+2. 2609.27158: 섹션 제목 `5 Asymmetry Audit …`가 원문대로 `5 A Symmetry Audit …`가 된다.
+3. 2609.22319: 논문 제목(Front Matter 본문) `Embedding Physics Priors in Robot Learning: Asurvey`가 `…: A Survey`가 된다.

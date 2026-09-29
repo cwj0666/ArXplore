@@ -153,3 +153,39 @@ F03 기대값 대비(F04 전체가 pypdf 경로에 남긴 차이)
 - 다른 4xx, 잘못된 JSON, segment 검증 실패는 재시도하지 않는다.
 
 골든은 HTTP를 거치지 않으므로 G3 pypdf 변형은 바뀌지 않는다.
+
+## F34: 한 글자 접두 제목
+
+- 제목 정규화(`normalize_heading_like_text`)에서 "대문자 한 글자 + 공백 + 첫 글자만 대문자인 단어"를 붙이던 규칙을 없앴다. `A Training` → `Atraining`, `A Survey` → `Asurvey`가 그 결과였다.
+  - G3-layout 표본의 HURIDOCS 제목·캡션에서 이 규칙이 적용된 서로 다른 29곳이 모두 잘못 붙인 경우였다.
+  - 부록 접두 26곳, `Robot Learning: A Survey`, `5 A Symmetry Audit`(→ `5 Asymmetry Audit`로 뜻이 바뀌었음), `A or B Reason`이다.
+- `Appendix` 바로 뒤의 한 글자는 부록 접두로 보고, 뒤의 대문자 단어와 붙이지 않는다(`APPENDIX B PROOFS` → `Appendix B Proofs`).
+- 한 글자 + 전부 대문자 단어(`A BSTRACT`, `I NTRODUCTION`)는 small caps로 보고 예전처럼 붙인다. 그래서 2609.25199의 `A OBSERVATION SCOPE AND MEASUREMENT METHODS`, `B CI AND PROFILING`처럼 전부 대문자인 부록 제목은 여전히 붙는다. 한 줄만으로는 small caps와 구분할 수 없다.
+
+F33 대비(G3 pypdf)
+
+| 논문 | 섹션 수 | 청크 수 | 평균 청크 길이 | md5가 바뀐 청크 |
+| --- | --- | --- | --- | --- |
+| 2609.10539 | 51 → 53 | 201 → 201 | 1472.9 → 1469.77 | 16/201 |
+| 2609.27158 | 18 → 18 | 43 → 43 | 1363.67 → 1362.67 | 1/43 |
+| 2609.20758 | 17 → 18 | 60 → 60 | 1454.45 → 1449.92 | 3/60 |
+| 2609.17652 | 15 → 17 | 58 → 54 | 1471.79 → 1428.15 | 4/54 |
+| 2609.25199 | 18 → 19 | 104 → 104 | 1562.37 → 1560.29 | 4/104 |
+| 2609.09143 | 21 → 24 | 77 → 77 | 1449.13 → 1439.74 | 7/77 |
+
+- 나머지 4편은 같다.
+- 합계: 섹션 230 → 239, 청크 831 → 827, md5가 바뀐 청크 35개
+- 새 섹션
+  - 2609.09143: `E Limitations`, `F Third-Party Attribution Notices`, `G Broader Impacts`
+  - 2609.10539: `G Human Validation`, `H Scope of Research-Idea Specifications`
+  - 2609.17652: `A Worked example`, `D Additional ablations`
+  - 2609.20758: `A Details for Design-Based Validation`
+- 다른 부록 제목도 제목으로 판정되지만, 바로 다음 줄이 하위 제목(`A.1 …`)이면 본문 없는 섹션이라 예전 번호 제목처럼 버려진다.
+- 2609.25199
+  - 표 행이 전에도 제목으로 잡히던 `4 Aconditional`, `5 Aconditional Sieve`, `6 Adetailed Proof of the`는 `4 A Conditional` 등으로 바뀐다.
+  - 표 칸의 줄 `A Weakly Quasi-Complete`가 새로 제목이 된다. 관사 `A`로 시작하는 제목 형식 줄은 접두 제목과 구분되지 않는다.
+
+예시
+1. 2609.09143: 본문에 `Elimitations`로 남던 줄이 `E Limitations` 섹션이 된다.
+2. 2609.17652: `A Worked example`, `D Additional ablations`가 앞 섹션 본문에서 떨어져 나와 섹션이 된다. 청크는 58 → 54개다.
+3. 2609.25199: 표 칸 `A Weakly Quasi-Complete`가 섹션 제목이 된다(오판 사례).
