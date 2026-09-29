@@ -407,7 +407,11 @@ SUMMARY = Bundle(
                 post(f"/papers/{UNKNOWN_PAPER}/summary/", {"model": "gpt-5-mini"}),
             ),
         ),
-        Scenario("summary_cached", (post(f"/papers/{CACHED_PAPER}/summary/", {"model": "gpt-5-mini"}),)),
+        Scenario(
+            "summary_cached",
+            (post(f"/papers/{CACHED_PAPER}/summary/", {"model": "gpt-5-mini"}),),
+            llm_layout="summary_graph",
+        ),
         Scenario(
             "summary_generate_gpt5_mini",
             (
@@ -807,7 +811,7 @@ def group_summary_graph(bodies: list[Any]) -> dict[str, Any]:
 def normalize_fake_requests(requests: list[RecordedRequest], llm_layout: str) -> dict[str, Any]:
     llm = [_without_stream_options(request.body) for request in requests if request.path == CHAT_COMPLETIONS_PATH]
     return {
-        "llm_requests": group_summary_graph(llm) if llm_layout == "summary_graph" else llm,
+        "llm_requests": group_summary_graph(llm) if llm_layout == "summary_graph" and llm else llm,
         "llm_statuses": [request.status for request in requests if request.path == CHAT_COMPLETIONS_PATH],
         "embedding_requests": [
             {"body": request.body, "status": request.status} for request in requests if request.path == EMBEDDINGS_PATH
