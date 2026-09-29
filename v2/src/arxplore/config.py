@@ -145,6 +145,10 @@ class AppSettings(BaseSettings):
 
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", validation_alias="OPENAI_MODEL")
+    openai_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_BASE_URL", "OPENAI_API_BASE"),
+    )
     openai_embedding_model: str = Field(default="text-embedding-3-large", validation_alias="OPENAI_EMBEDDING_MODEL")
     openai_embedding_dimensions: int = Field(default=1536, validation_alias="OPENAI_EMBEDDING_DIMENSIONS")
     embedding_batch_size: int = Field(default=64, validation_alias="EMBEDDING_BATCH_SIZE")
@@ -164,6 +168,13 @@ class AppSettings(BaseSettings):
     @field_validator("redis_url", mode="before")
     @classmethod
     def _normalize_redis_url(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @field_validator("openai_base_url", mode="before")
+    @classmethod
+    def _normalize_openai_base_url(cls, value: Any) -> Any:
         if isinstance(value, str):
             return value.strip() or None
         return value

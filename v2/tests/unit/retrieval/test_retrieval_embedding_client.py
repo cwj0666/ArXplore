@@ -191,3 +191,11 @@ def test_from_settings_reads_the_embedding_settings() -> None:
         "http://127.0.0.1:9/v1",
     )
     assert client.resolve_api_key() == "sk-settings"
+
+
+def test_from_settings_uses_the_configured_base_url_unless_one_is_given() -> None:
+    settings = AppSettings.model_validate({"OPENAI_API_KEY": "sk-settings", "OPENAI_BASE_URL": "http://llm.test/v1"})
+
+    assert EmbeddingClient.from_settings(settings).base_url == "http://llm.test/v1"
+    assert EmbeddingClient.from_settings(settings, base_url="http://127.0.0.1:9/v1").base_url == "http://127.0.0.1:9/v1"
+    assert EmbeddingClient.from_settings(AppSettings.model_validate({})).base_url is None

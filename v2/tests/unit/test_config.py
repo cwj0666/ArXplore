@@ -73,6 +73,7 @@ NEW_DEFAULTS = {
     "prepare_backfill_enabled": False,
     "scheduler_timezone": "Asia/Seoul",
     "serve_frontend_dist": False,
+    "openai_base_url": None,
 }
 
 
@@ -299,6 +300,21 @@ class TestValidation:
     def test_unknown_scheduler_timezone_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(ValidationError, match="SCHEDULER_TIMEZONE"):
             _load(monkeypatch, SCHEDULER_TIMEZONE="Mars/Olympus")
+
+    def test_openai_base_url_reads_the_sdk_variable_and_its_alias(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert _load(monkeypatch, OPENAI_BASE_URL=" http://llm.test/v1 ").openai_base_url == "http://llm.test/v1"
+        monkeypatch.delenv("OPENAI_BASE_URL")
+        assert _load(monkeypatch, OPENAI_API_BASE="http://legacy.test/v1").openai_base_url == "http://legacy.test/v1"
+
+    def test_openai_base_url_prefers_the_sdk_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        settings = _load(monkeypatch, OPENAI_BASE_URL="http://new.test/v1", OPENAI_API_BASE="http://old.test/v1")
+
+        assert settings.openai_base_url == "http://new.test/v1"
+
+    def test_openai_base_url_can_come_from_the_env_file(self, clean_env: Path) -> None:
+        (clean_env / ".env").write_text("OPENAI_BASE_URL=http://dotenv.test/v1\n", encoding="utf-8")
+
+        assert load_settings().openai_base_url == "http://dotenv.test/v1"
 
 
 class TestEnvFile:

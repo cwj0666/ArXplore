@@ -43,7 +43,7 @@ class EmbeddingClient:
             dimensions=settings.openai_embedding_dimensions,
             batch_size=settings.embedding_batch_size,
             api_key=settings.openai_api_key,
-            base_url=base_url,
+            base_url=base_url if base_url is not None else settings.openai_base_url,
         )
 
     def resolve_api_key(self) -> str | None:
