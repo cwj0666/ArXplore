@@ -191,6 +191,15 @@ class Sample:
     signature: Signature
     mode: str = ""
     error: str = ""
+    cold: bool = False
+
+    @property
+    def embedding_ms(self) -> float:
+        return self.stages_ms.get(EMBEDDING_STAGE, 0.0)
+
+    @property
+    def db_ms(self) -> float:
+        return max(0.0, self.total_ms - self.embedding_ms)
 
 
 @dataclass
@@ -204,6 +213,8 @@ class BenchmarkPlan:
     warmup: int = 1
     clock: Clock = time.perf_counter
     control_variant: str = PARALLEL
+    variants: tuple[str, ...] = VARIANTS
+    keep_warmup: bool = False
 
 
 @dataclass(frozen=True)
@@ -237,7 +248,7 @@ async def run_benchmark(plan: BenchmarkPlan, *, progress: BenchProgressFn | None
     total = (plan.warmup + plan.repeats) * len(plan.queries)
     done = 0
     for repeat in range(-plan.warmup, plan.repeats):
-        order = pair_order(repeat)
+        order = tuple(variant for variant in pair_order(repeat) if variant in plan.variants)
         for query in plan.queries:
             block: list[tuple[str, str, PathFn]] = [
                 (path, variant, fn) for path, fn in plan.paired_paths.items() for variant in order
@@ -249,7 +260,7 @@ async def run_benchmark(plan: BenchmarkPlan, *, progress: BenchProgressFn | None
                 run = await _run_once(plan, fn, retriever, query)
                 position = positions.get(path, 0)
                 positions[path] = position + 1
-                if repeat >= 0:
+                if repeat >= 0 or plan.keep_warmup:
                     samples.append(
                         Sample(
                             query_id=query.id,
@@ -263,6 +274,7 @@ async def run_benchmark(plan: BenchmarkPlan, *, progress: BenchProgressFn | None
                             signature=run.signature,
                             mode=run.mode,
                             error=run.error,
+                            cold=repeat < 0,
                         )
                     )
             done += 1
@@ -409,8 +421,10 @@ def write_samples_csv(samples: Sequence[Sample], path: str | Path) -> None:
                 "path",
                 "variant",
                 "position",
+                "cold",
                 "total_ms",
                 *[f"{stage}_ms" for stage in STAGES],
+                "db_ms",
                 "mode",
                 "result",
                 "error",
@@ -419,8 +433,9 @@ def write_samples_csv(samples: Sequence[Sample], path: str | Path) -> None:
         for sample in samples:
             writer.writerow(
                 [sample.query_id, sample.lang, sample.repeat, sample.path, sample.variant, sample.position]
-                + [f"{sample.total_ms:.3f}"]
+                + [int(sample.cold), f"{sample.total_ms:.3f}"]
                 + [f"{sample.stages_ms.get(stage, 0.0):.3f}" for stage in STAGES]
+                + [f"{sample.db_ms:.3f}"]
                 + [sample.mode, " ".join(f"{chunk_id}:{arxiv_id}" for chunk_id, arxiv_id in sample.signature)]
                 + [sample.error]
             )
@@ -434,14 +449,15 @@ def _pct(value: float) -> str:
     return f"{value * 100:+.1f}%"
 
 
-def _variants(path: str) -> tuple[str, ...]:
-    return VARIANTS if path in PAIRED_PATHS else (CONTROL,)
+def _variants(samples: Sequence[Sample], path: str) -> tuple[str, ...]:
+    present = {sample.variant for sample in samples if sample.path == path}
+    return tuple(variant for variant in (*VARIANTS, CONTROL) if variant in present)
 
 
 def latency_rows(samples: Sequence[Sample], paths: Sequence[str]) -> list[list[str]]:
     rows = []
     for path in paths:
-        for variant in _variants(path):
+        for variant in _variants(samples, path):
             chosen = select(samples, path=path, variant=variant)
             overall = summarize([sample.total_ms for sample in chosen])
             cells = [PATH_LABELS.get(path, path), variant, str(overall["n"]), _ms(overall["p50"]), _ms(overall["p95"])]
@@ -453,10 +469,34 @@ def latency_rows(samples: Sequence[Sample], paths: Sequence[str]) -> list[list[s
     return rows
 
 
+def split_rows(samples: Sequence[Sample], paths: Sequence[str]) -> list[list[str]]:
+    rows = []
+    for path in paths:
+        for variant in _variants(samples, path):
+            chosen = select(samples, path=path, variant=variant)
+            total = summarize([sample.total_ms for sample in chosen])
+            embedding = summarize([sample.embedding_ms for sample in chosen])
+            db = summarize([sample.db_ms for sample in chosen])
+            rows.append(
+                [
+                    PATH_LABELS.get(path, path),
+                    variant,
+                    str(total["n"]),
+                    _ms(total["p50"]),
+                    _ms(total["p95"]),
+                    _ms(embedding["p50"]),
+                    _ms(embedding["p95"]),
+                    _ms(db["p50"]),
+                    _ms(db["p95"]),
+                ]
+            )
+    return rows
+
+
 def _stage_rows(samples: Sequence[Sample], paths: Sequence[str]) -> list[list[str]]:
     rows = []
     for path in paths:
-        for variant in _variants(path):
+        for variant in _variants(samples, path):
             chosen = select(samples, path=path, variant=variant)
             medians = stage_medians(chosen)
             total = statistics.median([sample.total_ms for sample in chosen]) if chosen else None
@@ -474,6 +514,7 @@ def render_markdown(
     memo: Mapping[str, tuple[int, int]],
     embedding_usage: Mapping[str, Any],
     notes: Sequence[str] = (),
+    cold_samples: Sequence[Sample] = (),
 ) -> str:
     paths = [path for path in (*PAIRED_PATHS, *CONTROL_PATHS) if select(samples, path=path)]
     lines = [f"# {title}", ""]
@@ -483,30 +524,49 @@ def render_markdown(
         ["경로", "변형", "n", "p50", "p95", "mean", "ko p50", "ko p95", "en p50", "en p95"],
         latency_rows(samples, paths),
     )
+    split_header = ["경로", "변형", "n", "전체 p50", "전체 p95", "임베딩 p50", "임베딩 p95", "나머지 p50", "나머지 p95"]
     lines += [
         "",
-        "## 질의별 차이 B-A (병렬 - 순차)",
+        "## 임베딩 API와 나머지(DB 검색·융합·문맥 창) 분리 (ms)",
         "",
-        "질의마다 반복 중앙값을 낸 뒤 차이를 평균한다. 95% 구간은 ko/en 쌍 클러스터 재표집(paired bootstrap)이다.",
-        "상대 변화는 질의별 B/A-1의 평균이다.",
+        "나머지(`db_ms`) = 벽시계 전체 - 임베딩 API 대기. 병렬 변형에서 lexical 채널이 임베딩 대기와 겹친 부분은 "
+        "빠지므로 DB 시간의 합이 아니라 임베딩을 뺀 벽시계 시간이다.",
         "",
     ]
-    lines += markdown_table(
-        ["경로", "부분집합", "질의", "클러스터", "A 중앙값", "B 중앙값", "Δ ms (95% CI)", "상대 (95% CI)"],
-        [
+    lines += markdown_table(split_header, split_rows(samples, paths))
+    if cold_samples:
+        cold_paths = [path for path in (*PAIRED_PATHS, *CONTROL_PATHS) if select(cold_samples, path=path)]
+        lines += [
+            "",
+            "## cold (워밍업 패스: 질의마다 첫 실행, 위 통계에서 제외)",
+            "",
+        ]
+        lines += markdown_table(split_header, split_rows(cold_samples, cold_paths))
+    if deltas:
+        lines += [
+            "",
+            "## 질의별 차이 B-A (병렬 - 순차)",
+            "",
+            "질의마다 반복 중앙값을 낸 뒤 차이를 평균한다. 95% 구간은 ko/en 쌍 클러스터 재표집(paired bootstrap)이다.",
+            "상대 변화는 질의별 B/A-1의 평균이다.",
+            "",
+        ]
+        lines += markdown_table(
+            ["경로", "부분집합", "질의", "클러스터", "A 중앙값", "B 중앙값", "Δ ms (95% CI)", "상대 (95% CI)"],
             [
-                PATH_LABELS.get(row.path, row.path),
-                row.subset,
-                str(row.n),
-                str(row.n_clusters),
-                _ms(row.median_a),
-                _ms(row.median_b),
-                f"{row.delta_ms:+.1f} [{row.low_ms:+.1f}, {row.high_ms:+.1f}]",
-                f"{_pct(row.relative)} [{_pct(row.relative_low)}, {_pct(row.relative_high)}]",
-            ]
-            for row in deltas
-        ],
-    )
+                [
+                    PATH_LABELS.get(row.path, row.path),
+                    row.subset,
+                    str(row.n),
+                    str(row.n_clusters),
+                    _ms(row.median_a),
+                    _ms(row.median_b),
+                    f"{row.delta_ms:+.1f} [{row.low_ms:+.1f}, {row.high_ms:+.1f}]",
+                    f"{_pct(row.relative)} [{_pct(row.relative_low)}, {_pct(row.relative_high)}]",
+                ]
+                for row in deltas
+            ],
+        )
     lines += [
         "",
         "## 단계별 시간 (ms, 표본 중앙값)",

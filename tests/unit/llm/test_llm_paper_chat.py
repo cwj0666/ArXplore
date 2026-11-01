@@ -2,6 +2,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+import pytest
+from langchain_core.prompts import SystemMessagePromptTemplate
+
 from arxplore.config import RetrievalMode
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import Paper
@@ -17,6 +20,7 @@ from arxplore.llm.paper_chat import (
     retrieve_paper_chat_sources,
     stream_paper_chat_answer,
 )
+from arxplore.llm.prompts.paper_chat import PAPER_CHAT_PROMPT
 from arxplore.llm.tracing import Tracer
 
 PAPER = Paper(
@@ -216,6 +220,31 @@ async def test_answer_request_carries_history_and_the_numbered_excerpts(
     assert "[2] 섹션: 3 Method | chunk_id: 10\ncontext 10" in messages[3]["content"]
     assert messages[3]["content"].endswith("## 질문\n질문입니다")
     assert (request.body["model"], request.body["temperature"], request.body["stream"]) == ("gpt-4o", 0.0, True)
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["What loss does the paper optimize?", "이 논문은 어떤 손실 함수를 최적화하나요?"],
+)
+async def test_system_message_asks_for_the_question_language_for_any_question(
+    question: str, fake_openai: Any, models: ChatModelFactory, tracer: Tracer
+) -> None:
+    await collect_answer(
+        stream_paper_chat_answer(
+            question, paper=PAPER, retrieval=await _retrieval(), history=[], model=models.create(), tracer=tracer
+        )
+    )
+
+    template = PAPER_CHAT_PROMPT.messages[0]
+    assert isinstance(template, SystemMessagePromptTemplate)
+    (request,) = fake_openai.requests_for("/v1/chat/completions")
+    system, user = request.body["messages"]
+    assert system["role"] == "system"
+    assert system["content"] == template.prompt.template
+    assert "사용자의 마지막 질문과 같은 언어로" in system["content"]
+    assert "영어 질문에는 영어로" in system["content"]
+    assert "한국어로 답할 때는 정중한 존댓말" in system["content"]
+    assert user["content"].endswith(f"## 질문\n{question}")
 
 
 async def test_unreferenced_and_out_of_range_answers_return_every_source_unverified(

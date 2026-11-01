@@ -33,6 +33,32 @@ def recall_at_k(ranked: Sequence[Hashable], relevant: Collection[Hashable], k: i
     return len(found) / len(relevant_set)
 
 
+def precision_at_k(ranked: Sequence[Hashable], relevant: Collection[Hashable], k: int) -> float | None:
+    if not relevant:
+        return None
+    relevant_set = set(relevant)
+    found = relevant_set.intersection(_top_k(ranked, k))
+    return len(found) / k
+
+
+def _discount(position: int) -> float:
+    return 1.0 / math.log2(position + 1)
+
+
+def ndcg_at_k(ranked: Sequence[Hashable], relevant: Collection[Hashable], k: int) -> float | None:
+    if not relevant:
+        return None
+    relevant_set = set(relevant)
+    seen: set[Hashable] = set()
+    dcg = 0.0
+    for position, item in enumerate(_top_k(ranked, k), start=1):
+        if item in relevant_set and item not in seen:
+            seen.add(item)
+            dcg += _discount(position)
+    ideal = sum(_discount(position) for position in range(1, min(len(relevant_set), k) + 1))
+    return dcg / ideal
+
+
 def percentile(values: Iterable[float], p: float) -> float | None:
     if not 0 <= p <= 100:
         raise ValueError(f"p must be within [0, 100], got {p}")

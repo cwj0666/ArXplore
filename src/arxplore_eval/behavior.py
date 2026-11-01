@@ -5,7 +5,7 @@ from typing import Any
 
 from arxplore.api.errors import InvalidRequestError
 from arxplore.api.services.chat import validate_chat_input
-from arxplore.llm.citations import arxiv_id_from_url, normalize_cited_arxiv_id
+from arxplore.llm.citations import arxiv_id_from_url, extract_source_refs, normalize_cited_arxiv_id
 
 OUTCOME_ANSWERED = "answered"
 OUTCOME_REFUSED = "refused"
@@ -27,6 +27,19 @@ BEHAVIOR_METRIC_DESCRIPTIONS = {
     "mentions_required_ids": "`must_mention_arxiv_ids`가 있는 케이스: 필수 arXiv ID 중 답변에 ID·링크 또는 인용된 논문 제목으로 나온 비율",
     "rejected_as_expected": "입력 거부를 기대했거나 실제로 거부된 케이스: 기대와 결과가 일치",
 }
+ANSWER_CHECK_METRICS = ("lang_match", "citation_numbers_valid", "cited_relevant")
+ANSWER_CHECK_DESCRIPTIONS = {
+    "lang_match": "답변이 있는 케이스: 답변 언어(글자 중 한글 비율 30% 초과면 ko, 아니면 en)가 질의 lang과 같음",
+    "citation_numbers_valid": "상세 챗 답변: 답변의 `[n]` 번호가 모두 1..발췌문 수 안에 있음(번호가 없으면 1)",
+    "cited_relevant": "에이전트 답변: in_answer 인용 또는 답변 속 arXiv 링크에 정답 논문이 있음(정답 논문이 있는 질의만)",
+}
+REPORTED_BEHAVIOR_METRICS = (*BEHAVIOR_METRICS, *ANSWER_CHECK_METRICS)
+REPORTED_BEHAVIOR_DESCRIPTIONS = {**BEHAVIOR_METRIC_DESCRIPTIONS, **ANSWER_CHECK_DESCRIPTIONS}
+LANG_KO = "ko"
+LANG_EN = "en"
+KOREAN_ANSWER_MIN_HANGUL_RATIO = 0.3
+PAPER_CHAT = "paper_chat"
+AGENT = "agent"
 
 DEFAULT_REFUSAL_PHRASES = (
     "죄송하지만",
@@ -57,6 +70,8 @@ DEFAULT_REFUSAL_PHRASES = (
     "답변드리기 어렵",
     "말씀드리기 어렵",
     "도와드리기 어렵",
+    "찾기 어렵",
+    "제공하기 어렵",
     "알려드릴 수 없",
     "제공할 수 없",
     "공유할 수 없",
@@ -82,6 +97,7 @@ DEFAULT_REFUSAL_PHRASES = (
     "can't find",
     "cannot find",
     "unable to find",
+    "did not return",
     "no relevant",
     "not available in",
     "does not contain",
@@ -220,3 +236,59 @@ def behavior_scores(
     if required:
         scores["mentions_required_ids"] = _mentioned_required(record, answer, required)
     return outcome, scores
+
+
+def is_hangul(char: str) -> bool:
+    return "가" <= char <= "힣" or "ㄱ" <= char <= "ㆎ"
+
+
+def hangul_ratio(text: str) -> float:
+    letters = [char for char in text if char.isalpha()]
+    return sum(is_hangul(char) for char in letters) / len(letters) if letters else 0.0
+
+
+def answer_language(answer: str) -> str:
+    if not answer.strip():
+        return ""
+    return LANG_KO if hangul_ratio(answer) > KOREAN_ANSWER_MIN_HANGUL_RATIO else LANG_EN
+
+
+def source_count(record: Mapping[str, Any]) -> int:
+    sources = record.get("sources")
+    if isinstance(sources, list):
+        return len(sources)
+    return len([text for text in record.get("contexts") or [] if str(text).strip()])
+
+
+def citation_numbers_valid(answer: str, sources: int) -> bool:
+    return all(1 <= number <= sources for number in extract_source_refs(answer))
+
+
+def cited_arxiv_ids(record: Mapping[str, Any]) -> set[str]:
+    cited = {
+        normalize_cited_arxiv_id(str(citation.get("arxiv_id") or ""))
+        for citation in record.get("citations") or []
+        if isinstance(citation, Mapping) and citation.get("in_answer")
+    }
+    cited |= set(answer_link_ids(str(record.get("answer") or "")))
+    cited.discard("")
+    return cited
+
+
+def answer_checks(record: Mapping[str, Any], outcome: str) -> tuple[str, dict[str, float]]:
+    if outcome not in (OUTCOME_ANSWERED, OUTCOME_REFUSED):
+        return "", {}
+    answer = str(record.get("answer") or "")
+    language = answer_language(answer)
+    if not language:
+        return "", {}
+    scores: dict[str, float] = {}
+    if record.get("lang") in (LANG_KO, LANG_EN):
+        scores["lang_match"] = 1.0 if language == record.get("lang") else 0.0
+    if record.get("mode") == PAPER_CHAT:
+        scores["citation_numbers_valid"] = 1.0 if citation_numbers_valid(answer, source_count(record)) else 0.0
+    relevant = {normalize_cited_arxiv_id(str(value)) for value in record.get("relevant_arxiv_ids") or [] if value}
+    relevant.discard("")
+    if record.get("mode") == AGENT and relevant:
+        scores["cited_relevant"] = 1.0 if relevant & cited_arxiv_ids(record) else 0.0
+    return language, scores

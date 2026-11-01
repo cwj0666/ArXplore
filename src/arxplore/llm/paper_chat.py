@@ -4,6 +4,7 @@ from typing import Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import Paper
@@ -150,8 +151,9 @@ async def stream_paper_chat_answer(
     history: ChatHistory,
     model: BaseChatModel,
     tracer: Tracer,
+    prompt: ChatPromptTemplate = PAPER_CHAT_PROMPT,
 ) -> AsyncGenerator[AnswerEvent]:
-    chain = PAPER_CHAT_PROMPT | model | StrOutputParser()
+    chain = prompt | model | StrOutputParser()
     config = tracer.config(
         "paper_chat",
         metadata={

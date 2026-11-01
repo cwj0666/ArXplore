@@ -1,8 +1,10 @@
 import asyncio
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 import typer
 from psycopg import Error as DatabaseError
@@ -39,6 +41,7 @@ from arxplore_eval.latency import (
     PRODUCT,
     SEQUENTIAL,
     SUBSETS,
+    VARIANTS,
     BenchmarkPlan,
     BenchRetriever,
     PairedDelta,
@@ -57,6 +60,7 @@ from arxplore_eval.provenance import file_digest, git_revision, machine_info
 from arxplore_eval.runner import split_retrieval_queries
 
 PROGRESS_EVERY = 20
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,8 @@ class LatencyOptions:
     include_product: bool
     memo_check: bool
     base_url: str | None
+    product_only: bool = False
+    record_cold: bool = False
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,9 @@ async def run_latency(settings: AppSettings, queries: list[EvalQuery], options: 
                 product_limit=options.product_limit,
                 include_product=options.include_product,
             )
+            variants: tuple[str, ...] = VARIANTS
+            if options.product_only:
+                paired, controls, variants = {PRODUCT: paired[PRODUCT]}, {}, (PARALLEL,)
             plan = BenchmarkPlan(
                 queries=queries,
                 retrievers=retrievers,
@@ -115,6 +124,8 @@ async def run_latency(settings: AppSettings, queries: list[EvalQuery], options: 
                 control_paths=controls,
                 repeats=options.repeats,
                 warmup=options.warmup,
+                variants=variants,
+                keep_warmup=options.record_cold,
             )
             samples = await run_benchmark(plan, progress=_progress)
             timed_calls, timed_tokens = embeddings.calls, embeddings.tokens
@@ -145,14 +156,43 @@ async def run_latency(settings: AppSettings, queries: list[EvalQuery], options: 
     )
 
 
-def _usage(run: LatencyRun) -> dict[str, str]:
+def _usage(run: LatencyRun, price_per_million: float) -> dict[str, str]:
     embeddings = run.embeddings
     return {
         "측정(워밍업 포함) 호출": f"{run.timed_calls}회, {run.timed_tokens} 토큰",
         "임베딩 고정 패스 호출": f"{embeddings.calls - run.timed_calls}회, {embeddings.tokens - run.timed_tokens} 토큰",
         "합계": f"{embeddings.calls}회 ({embeddings.texts}개 텍스트), {embeddings.tokens} 토큰 ({embeddings.token_method})",
-        "추정 비용": f"${embedding_cost(embeddings.tokens):.5f} (${EMBEDDING_PRICE_PER_MTOK}/1M 토큰)",
+        "추정 비용": f"${embedding_cost(embeddings.tokens, price_per_million):.5f} (${price_per_million}/1M 토큰)",
     }
+
+
+def is_local_base_url(base_url: str | None) -> bool:
+    if not base_url:
+        return False
+    return (urlparse(base_url).hostname or "") in LOCAL_HOSTS
+
+
+def api_line(settings: AppSettings, base_url: str | None) -> str:
+    model = f"{settings.openai_embedding_model} ({settings.openai_embedding_dimensions}d)"
+    if is_local_base_url(base_url):
+        return f"질의 임베딩 {model}을 로컬 가짜 서버({base_url})가 응답. 실제 API 왕복 아님, 지연 수치를 API 지연으로 쓰지 말 것"
+    return f"질의 임베딩 {model} 왕복 포함, 캐시 없음"
+
+
+def select_latency_queries(queries: Sequence[EvalQuery], *, limit: int | None, per_lang: int | None) -> list[EvalQuery]:
+    if per_lang:
+        return select_per_lang(queries, per_lang)
+    return list(queries[:limit]) if limit else list(queries)
+
+
+def select_per_lang(queries: Sequence[EvalQuery], per_lang: int) -> list[EvalQuery]:
+    taken: Counter[str] = Counter()
+    selected: list[EvalQuery] = []
+    for query in queries:
+        if taken[query.lang] < per_lang:
+            taken[query.lang] += 1
+            selected.append(query)
+    return selected
 
 
 def register(app: typer.Typer) -> None:
@@ -167,19 +207,33 @@ def register(app: typer.Typer) -> None:
         limit: Annotated[int | None, typer.Option(min=1, help="검색 평가 대상 중 앞 N개 질의만")] = None,
         no_product: Annotated[bool, typer.Option(help="제품 경로 쌍을 빼고 eval 경로만 잰다")] = False,
         no_memo_check: Annotated[bool, typer.Option(help="임베딩 고정 패스의 결과 동일성 확인을 건너뛴다")] = False,
+        product_only: Annotated[
+            bool, typer.Option(help="제품 경로(병렬, retrieve_contexts)만 잰다. A/B·대조군·고정 패스 없음")
+        ] = False,
+        per_lang: Annotated[
+            int | None, typer.Option(min=1, help="검색 평가 대상에서 언어별 앞 N개(파일 순서)만. --limit과 함께 못 씀")
+        ] = None,
+        record_cold: Annotated[
+            bool, typer.Option(help="워밍업 패스 표본을 cold=1로 CSV에 남기고 md에 따로 표시(통계에서는 제외)")
+        ] = False,
+        price_per_million: Annotated[
+            float, typer.Option(min=0.0, help="추정 비용 계산용 1M 토큰당 USD")
+        ] = EMBEDDING_PRICE_PER_MTOK,
         resamples: Annotated[int, typer.Option(min=1)] = DEFAULT_RESAMPLES,
         seed: Annotated[int, typer.Option()] = DEFAULT_SEED,
         out_dir: Annotated[Path | None, typer.Option()] = None,
         openai_base_url: Annotated[str | None, typer.Option(envvar=BASE_URL_ENV, help=BASE_URL_HELP)] = None,
     ) -> None:
-        if repeats < 2 and not limit:
+        if limit and per_lang:
+            fail("--limit과 --per-lang은 함께 쓸 수 없습니다.")
+        if repeats < 2 and not (limit or per_lang):
             fail("전체 실행에는 --repeats 2 이상이 필요합니다(반복 간 기준선).")
         queries_path = queries or default_queries_path()
         try:
             eligible, _ = split_retrieval_queries(load_queries(queries_path))
         except (FileNotFoundError, DatasetError) as exc:
             fail(f"질의셋을 읽을 수 없습니다: {exc}")
-        selected = eligible[:limit] if limit else eligible
+        selected = select_latency_queries(eligible, limit=limit, per_lang=per_lang)
         if not selected:
             fail("잴 질의가 없습니다.")
         settings = settings_or_exit()
@@ -193,9 +247,11 @@ def register(app: typer.Typer) -> None:
             product_limit=product_limit,
             repeats=repeats,
             warmup=warmup,
-            include_product=not no_product,
-            memo_check=not no_memo_check,
+            include_product=not no_product or product_only,
+            memo_check=not no_memo_check and not product_only,
             base_url=openai_base_url,
+            product_only=product_only,
+            record_cold=record_cold,
         )
         started_at = now()
         try:
@@ -203,13 +259,21 @@ def register(app: typer.Typer) -> None:
         except (PoolTimeout, DatabaseError, OSError) as exc:
             fail(f"PostgreSQL에 연결할 수 없습니다: {type(exc).__name__}: {exc}")
 
-        paths = [path for path in PAIRED_PATHS if path != PRODUCT or not no_product]
-        deltas: list[PairedDelta] = [
-            paired_delta(run.samples, selected, path, subset=subset, resamples=resamples, seed=seed)
-            for path in paths
-            for subset in SUBSETS
+        measured = [sample for sample in run.samples if not sample.cold]
+        cold = [sample for sample in run.samples if sample.cold]
+        if product_only:
+            paths = [PRODUCT]
+            deltas: list[PairedDelta] = []
+        else:
+            paths = [path for path in PAIRED_PATHS if path != PRODUCT or not no_product]
+            deltas = [
+                paired_delta(measured, selected, path, subset=subset, resamples=resamples, seed=seed)
+                for path in paths
+                for subset in SUBSETS
+            ]
+        equality = [
+            row for path in paths for row in equality_rows(measured, path, repeats) if row.compared or not product_only
         ]
-        equality = [row for path in paths for row in equality_rows(run.samples, path, repeats)]
         langs = Counter(query.lang for query in selected)
         meta = {
             "실행 시각": f"{started_at.strftime(TIME_FORMAT)} ~ {run.finished_at}",
@@ -224,31 +288,40 @@ def register(app: typer.Typer) -> None:
             f"VECTOR_MIN_SIMILARITY={settings.vector_min_similarity}",
             "A / B": "A = `BenchRetriever(sequential=True)`(두 채널을 차례로 기다림), B = 제품 `Retriever`와 같은 병렬 "
             "경로(asyncio.gather). 같은 풀·임베딩 클라이언트를 공유",
-            "API": f"질의 임베딩 {settings.openai_embedding_model} ({settings.openai_embedding_dimensions}d) 왕복 포함, "
-            "캐시 없음",
+            "API": api_line(settings, openai_base_url or settings.openai_base_url),
             "순서": "반복마다 쌍 순서 A→B / B→A 교대, 블록 = eval 경로 쌍 → 제품 경로 쌍 → lexical 단독 → vector 단독",
             "bootstrap": f"{resamples}회, seed {seed}, ko/en 쌍 클러스터 재표집",
         }
+        if product_only:
+            meta["A / B"] = "제품 경로만: B = 제품 `Retriever`와 같은 병렬 경로(asyncio.gather). A/B 비교 없음"
+            meta["순서"] = "반복마다 질의 파일 순서로 한 번씩"
+            del meta["bootstrap"]
+        if cold:
+            meta["cold"] = f"워밍업 패스 표본 {len(cold)}개를 CSV에 cold=1로 남기고 통계에서 뺐다"
         notes = [
             "p50/p95는 질의 x 반복 표본 전체의 백분위(선형 보간). Δ는 질의별 반복 중앙값의 차이.",
             f"대조군({', '.join(CONTROL_PATHS)})은 이 변경과 무관한 경로로, 측정 중 DB·API 상태가 A/B에 공평했는지 보는 용도다.",
         ]
+        if product_only:
+            notes = ["p50/p95는 질의 x 반복 표본 전체의 백분위(선형 보간)."]
         stamp = stamp_of(started_at)
         directory = out_dir or default_results_dir()
         directory.mkdir(parents=True, exist_ok=True)
         csv_path = directory / f"latency_{stamp}.csv"
         md_path = directory / f"latency_{stamp}.md"
         write_samples_csv(run.samples, csv_path)
+        title = "제품 경로 지연 측정" if product_only else "hybrid 채널 병렬화 지연 측정"
         md_path.write_text(
             render_markdown(
-                run.samples,
-                title=f"hybrid 채널 병렬화 지연 측정 ({stamp})",
+                measured,
+                title=f"{title} ({stamp})",
                 meta=meta,
                 deltas=deltas,
                 equality=equality,
                 memo=run.memo,
-                embedding_usage=_usage(run),
+                embedding_usage=_usage(run, price_per_million),
                 notes=notes,
+                cold_samples=cold,
             ),
             encoding="utf-8",
         )

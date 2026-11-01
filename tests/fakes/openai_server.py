@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, TextIO
 from urllib.parse import parse_qs, urlsplit
 from xml.sax.saxutils import escape, quoteattr
 
@@ -587,6 +587,7 @@ class FakeOpenAIServer:
         chunk_chars: int = DEFAULT_CHUNK_CHARS,
         expected_api_key: str | None = FAKE_API_KEY,
         record_path: str | Path | None = None,
+        error_log: TextIO | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -596,6 +597,7 @@ class FakeOpenAIServer:
         self.chunk_chars = chunk_chars
         self.expected_api_key = expected_api_key
         self.record_path = Path(record_path) if record_path else None
+        self.error_log = error_log
         self._lock = threading.Lock()
         self._requests: list[RecordedRequest] = []
         self._errors: list[RecordedError] = []
@@ -713,6 +715,11 @@ class FakeOpenAIServer:
             else:
                 self._errors.append(entry)
                 line = {"kind": "error", **entry.as_dict()}
+                if self.error_log is not None:
+                    self.error_log.write(
+                        f"fake server error {entry.status} {entry.method} {entry.path}: {entry.message}\n"
+                    )
+                    self.error_log.flush()
             if self.record_path is not None:
                 with self.record_path.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
@@ -866,13 +873,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS)
     parser.add_argument("--embedding-table", type=Path)
+    parser.add_argument("--lenient-embeddings", action="store_true")
     parser.add_argument("--arxiv-feed", type=Path)
     parser.add_argument("--record", type=Path)
     parser.add_argument("--api-key", default=FAKE_API_KEY)
     parser.add_argument("--any-api-key", action="store_true")
     args = parser.parse_args(argv)
 
-    embedding_handler = EmbeddingVectors(load_embedding_table(args.embedding_table) if args.embedding_table else None)
+    if args.lenient_embeddings and args.embedding_table is None:
+        parser.error("--lenient-embeddings requires --embedding-table")
+    embedding_handler = (
+        EmbeddingVectors(load_embedding_table(args.embedding_table), strict=not args.lenient_embeddings)
+        if args.embedding_table
+        else EmbeddingVectors()
+    )
     arxiv_feed = args.arxiv_feed.read_text(encoding="utf-8") if args.arxiv_feed else None
     server = FakeOpenAIServer(
         host=args.host,
@@ -882,6 +896,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         chunk_chars=args.chunk_chars,
         expected_api_key=None if args.any_api_key else args.api_key,
         record_path=args.record,
+        error_log=sys.stderr,
     )
     server.start()
     print(server.base_url, flush=True)

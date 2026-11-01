@@ -2,7 +2,14 @@ import csv
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from arxplore_eval.runner import BASE_METHODS, METHODS, AggregateRow, QueryResult, metric_names
+from arxplore_eval.runner import (
+    BASE_METHODS,
+    METHODS,
+    AggregateRow,
+    QueryResult,
+    extended_metric_names,
+    metric_names,
+)
 from arxplore_eval.tables import csv_number, format_ms, format_rate, markdown_table
 
 README_TABLE_HEADER = "| 검색 방식 | hit@1 | hit@5 | hit@10 | MRR@10 | 지연 p50 / p95 (ms) |"
@@ -10,7 +17,7 @@ DEFAULT_K = 10
 
 
 def _metric_label(name: str) -> str:
-    return name.replace("mrr@", "MRR@")
+    return name.replace("mrr@", "MRR@").replace("ndcg@", "nDCG@")
 
 
 def render_readme_table(aggregates: Sequence[AggregateRow]) -> str:
@@ -82,6 +89,42 @@ def render_markdown(aggregates: Sequence[AggregateRow], *, title: str, meta: Map
         lines.append("청크 단위 정답이 있는 질의가 없습니다.")
     lines.append("")
 
+    extended = extended_metric_names(k)
+    extended_labels = [_metric_label(name) for name in extended]
+    lines += ["## precision·nDCG (binary 관련성)", "", "논문 단위", ""]
+    lines += markdown_table(
+        ["method", "subset", "n", *extended_labels],
+        [
+            [
+                row.method,
+                row.subset,
+                str(row.n_queries),
+                *(format_rate(row.paper_extended.get(name)) for name in extended),
+            ]
+            for row in aggregates
+        ],
+    )
+    if chunk_rows:
+        lines += ["", "청크 단위 (relevant_chunk_ids가 있는 질의만)", ""]
+        lines += markdown_table(
+            ["method", "subset", "n", *extended_labels],
+            [
+                [
+                    row.method,
+                    row.subset,
+                    str(row.n_chunk_queries),
+                    *(format_rate(row.chunk_extended.get(name)) for name in extended),
+                ]
+                for row in chunk_rows
+            ],
+        )
+    lines += [
+        "",
+        f"precision@n = top-n 안의 서로 다른 정답 수 / n. nDCG@{k} = 정답의 첫 등장 위치만 1/log2(위치+1)로 더하고 "
+        f"min(정답 수, {k})개를 맨 앞에 둔 이상값으로 나눈다.",
+        "",
+    ]
+
     lines += ["## 방식", ""]
     lines.extend(f"- `{row.method}`: {METHODS[row.method].description}" for row in overall if row.method in METHODS)
     lines += [
@@ -108,10 +151,13 @@ QUERY_CSV_BASE_FIELDS = [
 def write_query_csv(results: Sequence[QueryResult], path: str | Path) -> None:
     k = results[0].k if results else DEFAULT_K
     names = metric_names(k)
+    extended = extended_metric_names(k)
     fields = [
         *QUERY_CSV_BASE_FIELDS,
         *(f"paper_{name}" for name in names),
         *(f"chunk_{name}" for name in names),
+        *(f"paper_{name}" for name in extended),
+        *(f"chunk_{name}" for name in extended),
         "noise_count",
         "retrieved_arxiv_ids",
         "retrieved_chunk_ids",
@@ -139,20 +185,26 @@ def write_query_csv(results: Sequence[QueryResult], path: str | Path) -> None:
             for name in names:
                 record[f"paper_{name}"] = csv_number(row.paper_metrics.get(name))
                 record[f"chunk_{name}"] = csv_number(row.chunk_metrics.get(name))
+            for name in extended:
+                record[f"paper_{name}"] = csv_number(row.paper_extended.get(name))
+                record[f"chunk_{name}"] = csv_number(row.chunk_extended.get(name))
             writer.writerow(record)
 
 
 def write_summary_csv(aggregates: Sequence[AggregateRow], path: str | Path) -> None:
     k = aggregates[0].k if aggregates else DEFAULT_K
     names = metric_names(k)
+    extended = extended_metric_names(k)
     fields = [
         "method",
         "subset",
         "n_queries",
         "n_errors",
         *(f"paper_{name}" for name in names),
+        *(f"paper_{name}" for name in extended),
         "n_chunk_queries",
         *(f"chunk_{name}" for name in names),
+        *(f"chunk_{name}" for name in extended),
         "noise_rate",
         "latency_p50_ms",
         "latency_p95_ms",
@@ -174,4 +226,7 @@ def write_summary_csv(aggregates: Sequence[AggregateRow], path: str | Path) -> N
             for name in names:
                 record[f"paper_{name}"] = csv_number(row.paper.get(name))
                 record[f"chunk_{name}"] = csv_number(row.chunk.get(name))
+            for name in extended:
+                record[f"paper_{name}"] = csv_number(row.paper_extended.get(name))
+                record[f"chunk_{name}"] = csv_number(row.chunk_extended.get(name))
             writer.writerow(record)

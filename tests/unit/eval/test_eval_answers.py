@@ -11,12 +11,14 @@ from arxplore.context import RetrievalObservation, record_retrieval
 from arxplore.domain.chunks import StoredChunk
 from arxplore.domain.papers import Paper
 from arxplore.domain.retrieval import RetrievalContext, RetrievalResult
+from arxplore.llm.agent import tools as agent_tools
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.tracing import Tracer
 from arxplore_eval.answers import (
     AnswersError,
     CapturedContexts,
     GenerationResult,
+    agent_search_limit,
     append_answer_record,
     build_answer_record,
     build_generators,
@@ -411,3 +413,75 @@ class TestProductGenerators:
         service = _service(fake_openai, ObservedRetriever([]), FakeStore())
         assert set(build_generators(service, ["agent"])) == {"agent"}
         assert set(build_generators(service, ["agent", "paper_chat"])) == {"agent", "paper_chat"}
+
+
+class TestSearchLimit:
+    async def test_collection_overrides_the_agent_tool_limit_and_restores_it(
+        self, fakes, fake_openai, make_hit, make_context
+    ) -> None:
+        retriever = ObservedRetriever([make_context(make_hit(1, arxiv_id="2401.00001"), text="window")])
+        fake_openai.chat_handler = lambda request: (
+            "[Paper](https://arxiv.org/abs/2401.00001)"
+            if _after_tool(request)
+            else fakes.ToolCall(name="search_paper_chunks_tool", arguments=json.dumps({"query": "loss"}))
+        )
+        service = _service(fake_openai, retriever, FakeStore({"2401.00001": _paper("2401.00001")}))
+        seen: list[int] = []
+
+        def progress(*_: Any) -> None:
+            seen.append(agent_tools.SEARCH_RESULT_LIMIT)
+
+        records = await collect_answers(
+            [_q("a", query="DPO 손실은?")],
+            ["agent", "paper_chat"],
+            build_generators(service, ["agent", "paper_chat"]),
+            progress=progress,
+            search_limit=3,
+        )
+
+        assert [call[1] for call in retriever.calls] == [3, 5]
+        assert seen == [3, 3]
+        assert agent_tools.SEARCH_RESULT_LIMIT == 5
+        assert records[0]["search_limit"] == 3
+        assert "search_limit" not in records[1]
+
+    async def test_without_a_limit_records_and_tool_stay_as_before(self, fakes, fake_openai) -> None:
+        retriever = ObservedRetriever([])
+        fake_openai.chat_handler = lambda request: (
+            "없습니다."
+            if _after_tool(request)
+            else fakes.ToolCall(name="search_paper_chunks_tool", arguments=json.dumps({"query": "loss"}))
+        )
+        service = _service(fake_openai, retriever, FakeStore())
+
+        records = await collect_answers([_q("a", mode="agent")], ["agent"], build_generators(service, ["agent"]))
+
+        assert retriever.calls == [("loss", agent_tools.SEARCH_RESULT_LIMIT, None)]
+        assert "search_limit" not in records[0]
+        assert list(records[0]) == list(build_answer_record(_q("a"), "agent"))
+
+    async def test_the_limit_is_restored_when_generation_raises(self) -> None:
+        async def generate(query: EvalQuery) -> GenerationResult:
+            assert agent_tools.SEARCH_RESULT_LIMIT == 10
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            await collect_answers([_q("a")], ["agent"], {"agent": generate}, search_limit=10)
+        assert agent_tools.SEARCH_RESULT_LIMIT == 5
+
+    def test_invalid_limit_is_refused_without_touching_the_tool(self) -> None:
+        with pytest.raises(ValueError), agent_search_limit(0):
+            pass
+        assert agent_tools.SEARCH_RESULT_LIMIT == 5
+
+    def test_answer_files_keep_the_limit_and_reject_bad_values(self, tmp_path) -> None:
+        path = tmp_path / "answers.jsonl"
+        append_answer_record(path, build_answer_record(QUERIES[0], "agent", result=_result(), search_limit=10))
+        assert load_answer_records(path)[0]["search_limit"] == 10
+
+        for bad in (0, "3", True):
+            broken = tmp_path / f"bad_{bad}.jsonl"
+            record = {**build_answer_record(QUERIES[0], "agent", result=_result()), "search_limit": bad}
+            append_answer_record(broken, record)
+            with pytest.raises(AnswersError, match="search_limit"):
+                load_answer_records(broken)

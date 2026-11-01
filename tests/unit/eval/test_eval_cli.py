@@ -9,6 +9,8 @@ from arxplore_eval.answers import GenerationResult, append_answer_record, build_
 from arxplore_eval.candidate_cache import CachedQuery, write_cache
 from arxplore_eval.cli import app
 from arxplore_eval.commands import fusion as fusion_commands
+from arxplore_eval.commands import generation as generation_commands
+from arxplore_eval.corpus import PreconditionError
 from arxplore_eval.dataset import EvalQuery, dump_queries
 from arxplore_eval.fusion_sweep import CURRENT, PLAIN_RRF_K60, VECTOR_ONLY, build_specs
 from arxplore_eval.research_fusion import LEGACY_RULES_FUSION
@@ -186,6 +188,12 @@ def _answers_file(path: Path) -> Path:
     return path
 
 
+def _result_with_link() -> GenerationResult:
+    return GenerationResult(
+        answer="[P](https://arxiv.org/abs/2401.00001)", contexts=["ctx"], hit_arxiv_ids=["2401.00001"]
+    )
+
+
 class TestGenerationCommand:
     def test_behavior_only_scores_without_key_or_database(self, clean_env) -> None:
         answers = _answers_file(clean_env / "answers.jsonl")
@@ -223,6 +231,8 @@ class TestGenerationCommand:
             (["generation", "--answers", "a.jsonl"], "OPENAI_API_KEY"),
             (["generation", "--answers", "a.jsonl", "--metrics", "bleu"], "bleu"),
             (["generation", "--answers", "a.jsonl", "--mode", "chat"], "mode"),
+            (["generation", "--answers", "a.jsonl", "--search-limit", "3"], "--search-limit"),
+            (["generation", "--collect", "--search-limit", "0"], "--search-limit"),
         ],
     )
     def test_preconditions_exit_with_two(self, clean_env, argv: list[str], message: str) -> None:
@@ -234,6 +244,43 @@ class TestGenerationCommand:
         result = runner.invoke(app, ["generation", "--answers", "missing.jsonl", "--behavior-only"])
         assert result.exit_code == 2
         assert "답변 파일이 없습니다" in result.stderr
+
+    def test_search_limit_reaches_the_report_header(self, clean_env) -> None:
+        path = clean_env / "answers.jsonl"
+        append_answer_record(path, build_answer_record(_q("a"), "agent", result=_result_with_link(), search_limit=3))
+        out_dir = clean_env / "results"
+
+        result = runner.invoke(
+            app, ["generation", "--answers", str(path), "--behavior-only", "--out-dir", str(out_dir)]
+        )
+
+        assert result.exit_code == 0, result.output
+        markdown = next(out_dir.glob("generation_*.md")).read_text(encoding="utf-8")
+        assert "에이전트 검색 결과 수(search_limit): 3" in markdown
+
+    def test_reports_without_a_limit_have_no_limit_line(self, clean_env) -> None:
+        out_dir = clean_env / "results"
+        answers = _answers_file(clean_env / "answers.jsonl")
+        result = runner.invoke(
+            app, ["generation", "--answers", str(answers), "--behavior-only", "--out-dir", str(out_dir)]
+        )
+        assert result.exit_code == 0, result.output
+        assert "search_limit" not in next(out_dir.glob("generation_*.md")).read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize(("recorded", "wanted"), [(3, 5), (3, None), (None, 3)])
+    def test_resuming_with_another_limit_is_refused(self, clean_env, recorded: int | None, wanted: int | None) -> None:
+        path = clean_env / "answers.jsonl"
+        append_answer_record(
+            path, build_answer_record(_q("a"), "agent", result=_result_with_link(), search_limit=recorded)
+        )
+        with pytest.raises(PreconditionError, match="search_limit"):
+            generation_commands._done_keys(path, wanted)
+
+    def test_resuming_with_the_same_limit_skips_finished_answers(self, clean_env) -> None:
+        path = clean_env / "answers.jsonl"
+        append_answer_record(path, build_answer_record(_q("a"), "agent", result=_result_with_link(), search_limit=3))
+        append_answer_record(path, build_answer_record(_q("b"), "paper_chat", result=_result_with_link()))
+        assert generation_commands._done_keys(path, 3) == {("a", "agent"), ("b", "paper_chat")}
 
 
 class TestRetrievalCommand:
@@ -318,7 +365,6 @@ class TestOtherCommands:
 
 
 def test_scoring_without_ragas_fails_before_any_work(clean_env, monkeypatch: pytest.MonkeyPatch) -> None:
-    from arxplore_eval.commands import generation as generation_commands
     from arxplore_eval.generation import RagasUnavailableError
 
     def missing() -> None:

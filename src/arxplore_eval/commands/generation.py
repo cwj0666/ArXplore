@@ -2,6 +2,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -16,19 +17,34 @@ from arxplore.context import override_openai_runtime
 from arxplore.llm.models import ChatModelFactory
 from arxplore.llm.tracing import Tracer
 from arxplore.retrieval.service import RetrievalConfig, Retriever
+from arxplore_eval.agent_plan import file_sha256
 from arxplore_eval.answers import (
+    AGENT_MODE,
+    AGENT_ORIGIN_LIVE,
+    AGENT_ORIGIN_PLAN_ONLY,
+    AGENT_ORIGIN_PLAN_REPLAY,
+    PAPER_CHAT_MODE,
+    SOURCES_FROM_REPLAY,
+    SOURCES_FROM_RETRIEVAL,
+    AgentOptions,
     AnswerRecord,
     AnswersError,
+    PaperChatOptions,
+    RecordedSources,
     answer_key,
     append_answer_record,
     build_generators,
     collect_answers,
     completed_keys,
+    load_agent_plans,
     load_answer_records,
+    load_recorded_sources,
     load_reference_answers,
+    prepare_query,
+    recorded_search_limit,
     resolve_modes,
 )
-from arxplore_eval.behavior import DEFAULT_REFUSAL_PHRASES, OUTCOMES, load_refusal_phrases
+from arxplore_eval.behavior import DEFAULT_REFUSAL_PHRASES, OUTCOMES, InputRejected, load_refusal_phrases
 from arxplore_eval.commands.common import (
     BASE_URL_ENV,
     BASE_URL_HELP,
@@ -59,6 +75,7 @@ from arxplore_eval.dataset import (
     placeholder_problems,
     select_queries,
 )
+from arxplore_eval.fusion_variants import FUSION_CONVEX, FUSION_LEGACY_RULES, FusionRetriever
 from arxplore_eval.generation import (
     DEFAULT_CONCURRENCY,
     DEFAULT_EMBEDDING_MODEL,
@@ -77,7 +94,25 @@ from arxplore_eval.generation import (
     write_sample_csv,
     write_summary_csv,
 )
+from arxplore_eval.prompt_variants import PROMPT_BEFORE, PROMPT_CURRENT, PROMPT_REFUSAL_RULE
 from arxplore_eval.provenance import file_digest, git_revision
+
+SOURCES_ONLY_SETUP = "sources_only"
+
+
+class PaperChatPrompt(StrEnum):
+    current = PROMPT_CURRENT
+    before = PROMPT_BEFORE
+    refusal_rule = PROMPT_REFUSAL_RULE
+
+
+class Fusion(StrEnum):
+    convex = FUSION_CONVEX
+    legacy_rules = FUSION_LEGACY_RULES
+
+
+type AgentSetup = tuple[str | None, str | None, str | None]
+DEFAULT_AGENT_SETUP: AgentSetup = (None, None, None)
 
 
 @dataclass(frozen=True)
@@ -93,6 +128,37 @@ class CollectionOptions:
     base_url: str | None
     trace: bool
     refusal_phrases: Sequence[str]
+    search_limit: int | None = None
+    paper_chat_prompt: str = PROMPT_CURRENT
+    sources_only: bool = False
+    replay_sources: Path | None = None
+    fusion: str | None = None
+    plan_only: bool = False
+    replay_plan: Path | None = None
+
+    @property
+    def plan_sha256(self) -> str | None:
+        return None if self.replay_plan is None else file_sha256(self.replay_plan)
+
+    @property
+    def agent_setup(self) -> AgentSetup:
+        if self.plan_only:
+            return (AGENT_ORIGIN_PLAN_ONLY, None, None)
+        if self.replay_plan is not None:
+            return (AGENT_ORIGIN_PLAN_REPLAY, self.fusion, self.plan_sha256)
+        if self.fusion is not None:
+            return (AGENT_ORIGIN_LIVE, self.fusion, None)
+        return DEFAULT_AGENT_SETUP
+
+    @property
+    def skips_scoring(self) -> bool:
+        return self.sources_only or self.plan_only
+
+    @property
+    def paper_chat_setup(self) -> tuple[str, str]:
+        variant = SOURCES_ONLY_SETUP if self.sources_only else self.paper_chat_prompt
+        origin = SOURCES_FROM_REPLAY if self.replay_sources is not None else SOURCES_FROM_RETRIEVAL
+        return variant, origin
 
 
 @dataclass(frozen=True)
@@ -159,34 +225,193 @@ def _collection_queries(options: CollectionOptions) -> tuple[list[EvalQuery], di
     return queries, references
 
 
-def _done_keys(path: Path) -> set[tuple[str, str]]:
+def _search_limits(records: Sequence[AnswerRecord]) -> set[int | None]:
+    return {recorded_search_limit(record) for record in records if record.get("mode") == AGENT_MODE}
+
+
+def paper_chat_setup(record: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    variant = SOURCES_ONLY_SETUP if record.get("sources_only") else record.get("prompt_variant")
+    origin = record.get("sources_origin")
+    return (
+        variant if isinstance(variant, str) else None,
+        origin if isinstance(origin, str) else None,
+    )
+
+
+def _paper_chat_setups(records: Sequence[AnswerRecord]) -> set[tuple[str | None, str | None]]:
+    return {
+        paper_chat_setup(record)
+        for record in records
+        if record.get("mode") == PAPER_CHAT_MODE and not record.get("error") and not record.get("rejection")
+    }
+
+
+def _check_paper_chat_setup(path: Path, records: Sequence[AnswerRecord], wanted: tuple[str, str]) -> None:
+    for variant, origin in _paper_chat_setups(records):
+        if variant not in (None, wanted[0]) or origin not in (None, wanted[1]):
+            raise PreconditionError(
+                f"{path}의 상세 챗 레코드 설정(프롬프트 {variant}, 소스 {origin})이 이번 실행"
+                f"(프롬프트 {wanted[0]}, 소스 {wanted[1]})과 다릅니다. 다른 --out을 쓰세요."
+            )
+
+
+def agent_setup(record: Mapping[str, Any]) -> AgentSetup:
+    values = (record.get("agent_origin"), record.get("fusion"), record.get("plan_sha256"))
+    origin, fusion, plan = (value if isinstance(value, str) else None for value in values)
+    return (origin, fusion, plan)
+
+
+def _agent_setups(records: Sequence[AnswerRecord]) -> set[AgentSetup]:
+    return {
+        agent_setup(record)
+        for record in records
+        if record.get("mode") == AGENT_MODE and not record.get("error") and not record.get("rejection")
+    }
+
+
+def _setup_text(setup: AgentSetup) -> str:
+    origin, fusion, plan = setup
+    if origin is None:
+        return "제품 기본"
+    parts = [origin, f"fusion {fusion or '-'}"]
+    if plan:
+        parts.append(f"plan {plan[:12]}")
+    return ", ".join(parts)
+
+
+def _check_agent_setup(path: Path, records: Sequence[AnswerRecord], wanted: AgentSetup) -> None:
+    for setup in _agent_setups(records):
+        if setup != wanted:
+            raise PreconditionError(
+                f"{path}의 에이전트 레코드 설정({_setup_text(setup)})이 이번 실행({_setup_text(wanted)})과 다릅니다. "
+                "다른 --out을 쓰세요."
+            )
+
+
+def _done_keys(
+    path: Path,
+    search_limit: int | None = None,
+    paper_chat: tuple[str, str] | None = None,
+    agent: AgentSetup | None = None,
+) -> set[tuple[str, str]]:
     if not path.exists():
         return set()
     try:
-        done = completed_keys(load_answer_records(path))
+        existing = load_answer_records(path)
     except AnswersError as exc:
         raise PreconditionError(f"이어 쓸 답변 파일 형식 오류: {exc}") from exc
+    recorded = _search_limits(existing)
+    if recorded - {search_limit}:
+        found = ", ".join(sorted("없음" if value is None else str(value) for value in recorded))
+        wanted = "없음" if search_limit is None else str(search_limit)
+        raise PreconditionError(
+            f"{path}의 에이전트 레코드 search_limit({found})이 이번 실행({wanted})과 다릅니다. 다른 --out을 쓰세요."
+        )
+    if paper_chat is not None:
+        _check_paper_chat_setup(path, existing, paper_chat)
+    if agent is not None:
+        _check_agent_setup(path, existing, agent)
+    done = completed_keys(existing)
     echo_err(f"{path}에서 이어서 수집합니다(완료 {len(done)}건 건너뜀).")
     return done
 
 
 def _progress(done: int, total: int, mode: str, query: EvalQuery, record: AnswerRecord) -> None:
-    status = "error" if record.get("error") else f"{record.get('outcome')}, {len(record['contexts'])} contexts"
+    if record.get("error"):
+        status = "error"
+    elif record.get("sources_only"):
+        status = f"sources only, {len(record['contexts'])} contexts"
+    elif record.get("plan_only"):
+        plan = record.get("plan") or {}
+        status = f"plan {plan.get('kind')}, {len(plan.get('searches') or [])} searches"
+    else:
+        status = f"{record.get('outcome')}, {len(record['contexts'])} contexts"
     echo_err(f"[answer {done}/{total}] {mode:<10} {query.id} ({status})")
+
+
+def _rejected_input(query: EvalQuery) -> bool:
+    try:
+        prepare_query(query)
+    except InputRejected:
+        return True
+    return False
+
+
+def load_replay(options: CollectionOptions, queries: Sequence[EvalQuery]) -> dict[str, RecordedSources] | None:
+    if options.replay_sources is None:
+        return None
+    try:
+        replay = load_recorded_sources(options.replay_sources)
+    except FileNotFoundError as exc:
+        raise PreconditionError(f"재생할 소스 파일이 없습니다: {options.replay_sources}") from exc
+    except AnswersError as exc:
+        raise PreconditionError(f"재생할 소스 파일 형식 오류: {exc}") from exc
+    missing = [
+        query.id
+        for query in queries
+        if query.supports_mode(PAPER_CHAT_MODE) and query.id not in replay and not _rejected_input(query)
+    ]
+    if missing and not options.keep_going:
+        raise PreconditionError(
+            f"{options.replay_sources}에 소스 기록이 없는 상세 챗 질의 {len(missing)}개: {missing[:10]}. "
+            "--keep-going이면 error 레코드로 남기고 계속합니다."
+        )
+    return replay
+
+
+def load_plan_replay(options: CollectionOptions, queries: Sequence[EvalQuery]) -> dict[str, Any] | None:
+    if options.replay_plan is None:
+        return None
+    try:
+        plans, questions = load_agent_plans(options.replay_plan)
+    except FileNotFoundError as exc:
+        raise PreconditionError(f"재생할 계획 파일이 없습니다: {options.replay_plan}") from exc
+    except AnswersError as exc:
+        raise PreconditionError(f"재생할 계획 파일 형식 오류: {exc}") from exc
+    wanted = [query for query in queries if query.supports_mode(AGENT_MODE) and not _rejected_input(query)]
+    changed = [query.id for query in wanted if query.id in questions and questions[query.id] != query.query]
+    if changed:
+        raise PreconditionError(f"{options.replay_plan}의 질문이 질의셋과 다른 질의 {len(changed)}개: {changed[:10]}")
+    missing = [query.id for query in wanted if query.id not in plans]
+    if missing and not options.keep_going:
+        raise PreconditionError(
+            f"{options.replay_plan}에 계획이 없는 에이전트 질의 {len(missing)}개: {missing[:10]}. "
+            "--keep-going이면 error 레코드로 남기고 계속합니다."
+        )
+    return dict(plans)
 
 
 async def run_collection(settings: AppSettings, api_key: str, options: CollectionOptions) -> Collection:
     queries, references = _collection_queries(options)
+    replay = load_replay(options, queries)
+    plans = load_plan_replay(options, queries)
+    paper_chat = PaperChatOptions(
+        prompt_variant=options.paper_chat_prompt, sources_only=options.sources_only, replay=replay
+    )
     async with eval_pool(settings) as pool:
         async with pool.connection() as connection:
             corpus = await generation_preflight(connection, queries, modes=options.modes)
-        done = _done_keys(options.out)
+        done = _done_keys(
+            options.out,
+            options.search_limit,
+            options.paper_chat_setup if PAPER_CHAT_MODE in options.modes else None,
+            options.agent_setup if AGENT_MODE in options.modes else None,
+        )
         embedder = embedding_client(settings, options.base_url)
         try:
+            retriever = Retriever(pool, embedder, RetrievalConfig.from_settings(settings))
+            agent = AgentOptions(
+                fusion=options.fusion,
+                plan_only=options.plan_only,
+                replay=plans,
+                replay_sha256=options.plan_sha256,
+                retriever=retriever,
+            )
+            live_fusion = options.fusion is not None and plans is None
             service = build_chat_service(
                 settings,
                 store=PostgresPaperStore(pool),
-                retriever=Retriever(pool, embedder, RetrievalConfig.from_settings(settings)),
+                retriever=FusionRetriever(retriever, options.fusion or "") if live_fusion else retriever,
                 models=ChatModelFactory.from_settings(settings, base_url=options.base_url),
                 tracer=Tracer.from_settings(settings) if options.trace else Tracer.disabled(),
             )
@@ -194,14 +419,15 @@ async def run_collection(settings: AppSettings, api_key: str, options: Collectio
                 await collect_answers(
                     queries,
                     options.modes,
-                    build_generators(service, options.modes),
+                    build_generators(service, options.modes, paper_chat=paper_chat, agent=agent),
                     done=done,
                     keep_going=options.keep_going,
                     reference_answers=references,
-                    model=options.answer_model,
+                    model=None if options.sources_only else options.answer_model,
                     sink=lambda record: append_answer_record(options.out, record),
                     progress=_progress,
                     refusal_phrases=options.refusal_phrases,
+                    search_limit=options.search_limit,
                 )
         finally:
             await embedder.aclose()
@@ -282,6 +508,20 @@ def build_meta(
         "판정": judging,
         "거절 문구": f"`{refusal_phrases_path.name}`" if refusal_phrases_path else "내장 목록",
     }
+    setups = _paper_chat_setups(records)
+    if setups - {(None, None)}:
+        meta["상세 챗 프롬프트·소스"] = ", ".join(
+            f"프롬프트 {variant or '기록 없음'} / 소스 {origin or '기록 없음'}"
+            for variant, origin in sorted(setups, key=lambda item: (item[0] or "", item[1] or ""))
+        )
+    agent_setups = _agent_setups(records)
+    if agent_setups - {DEFAULT_AGENT_SETUP}:
+        meta["에이전트 융합·계획"] = ", ".join(sorted(_setup_text(setup) for setup in agent_setups))
+    limits = _search_limits(records)
+    if limits - {None}:
+        meta["에이전트 검색 결과 수(search_limit)"] = ", ".join(
+            "기본" if value is None else str(value) for value in sorted(limits, key=lambda value: value or 0)
+        )
     categories = Counter(str(record.get("category")) for record in records if record.get("category"))
     if categories:
         meta["케이스 카테고리"] = ", ".join(f"{key} {value}" for key, value in sorted(categories.items()))
@@ -330,22 +570,74 @@ def register(app: typer.Typer) -> None:
         out_dir: Annotated[Path | None, typer.Option()] = None,
         openai_base_url: Annotated[str | None, typer.Option(envvar=BASE_URL_ENV, help=BASE_URL_HELP)] = None,
         trace: Annotated[bool, typer.Option(help="LangSmith 추적을 설정대로 켠다(기본 끔)")] = False,
+        search_limit: Annotated[
+            int | None, typer.Option(min=1, help="--collect와 함께: 에이전트 검색 도구가 돌려주는 청크 수")
+        ] = None,
+        paper_chat_prompt: Annotated[
+            PaperChatPrompt,
+            typer.Option(
+                help="--collect와 함께: 상세 챗 시스템 프롬프트(current=제품, before=질문 언어 규칙 전, refusal_rule=고정 거절 문장 대신 규칙)"
+            ),
+        ] = PaperChatPrompt.current,
+        sources_only: Annotated[
+            bool, typer.Option(help="--collect --mode paper_chat: 검색만 해 소스를 기록하고 LLM은 부르지 않는다")
+        ] = False,
+        replay_sources: Annotated[
+            Path | None,
+            typer.Option(help="--collect --mode paper_chat: --sources-only로 기록한 JSONL의 소스로 검색 없이 생성"),
+        ] = None,
+        fusion: Annotated[
+            Fusion | None,
+            typer.Option(help="--collect --mode agent: hybrid 융합 방식(convex=제품, legacy_rules=옛 가중 RRF)"),
+        ] = None,
+        plan_only: Annotated[
+            bool,
+            typer.Option(help="--collect --mode agent: 에이전트 첫 턴의 도구 호출과 융합 전 검색 후보만 기록"),
+        ] = False,
+        replay_plan: Annotated[
+            Path | None,
+            typer.Option(help="--collect --mode agent: --plan-only로 기록한 계획을 --fusion으로 융합해 최종 답만 생성"),
+        ] = None,
     ) -> None:
         if collect == (answers is not None):
             fail("--collect와 --answers 중 하나만 지정하세요.")
         if no_score and not collect:
             fail("--no-score는 --collect와 함께만 씁니다.")
+        if search_limit is not None and not collect:
+            fail("--search-limit는 --collect와 함께만 씁니다.")
+        paper_chat_flags = sources_only or replay_sources is not None or paper_chat_prompt != PaperChatPrompt.current
+        if paper_chat_flags and not collect:
+            fail("--paper-chat-prompt, --sources-only, --replay-sources는 --collect와 함께만 씁니다.")
+        if sources_only and replay_sources is not None:
+            fail("--sources-only와 --replay-sources는 함께 쓸 수 없습니다.")
+        if sources_only and paper_chat_prompt != PaperChatPrompt.current:
+            fail("--sources-only는 LLM을 부르지 않으므로 --paper-chat-prompt를 쓰지 않습니다.")
+        agent_flags = fusion is not None or plan_only or replay_plan is not None
+        if agent_flags and not collect:
+            fail("--fusion, --plan-only, --replay-plan은 --collect와 함께만 씁니다.")
+        if plan_only and replay_plan is not None:
+            fail("--plan-only와 --replay-plan은 함께 쓸 수 없습니다.")
+        if plan_only and fusion is not None:
+            fail("--plan-only는 융합 전 후보만 기록하므로 --fusion을 쓰지 않습니다.")
+        if replay_plan is not None and fusion is None:
+            fail("--replay-plan에는 --fusion이 필요합니다.")
         try:
             modes = resolve_modes(split_names(mode))
             chosen_metrics = [] if behavior_only else resolve_metrics(split_names(metrics))
             phrases = load_refusal_phrases(refusal_phrases) if refusal_phrases else list(DEFAULT_REFUSAL_PHRASES)
         except (ValueError, OSError) as exc:
             fail(str(exc))
+        if (sources_only or replay_sources is not None) and modes != [PAPER_CHAT_MODE]:
+            fail("--sources-only와 --replay-sources는 --mode paper_chat에서만 씁니다.")
+        if paper_chat_prompt != PaperChatPrompt.current and PAPER_CHAT_MODE not in modes:
+            fail("--paper-chat-prompt는 paper_chat 모드를 수집할 때만 씁니다.")
+        if agent_flags and modes != [AGENT_MODE]:
+            fail("--fusion, --plan-only, --replay-plan은 --mode agent에서만 씁니다.")
         settings = settings_or_exit()
         api_key = usable_api_key(settings)
         if api_key is None and (collect or not behavior_only):
             fail("OPENAI_API_KEY가 없습니다. 답변 생성과 RAGAS 판정 모두 서버 키가 필요합니다.")
-        if chosen_metrics and not no_score:
+        if chosen_metrics and not no_score and not sources_only and not plan_only:
             try:
                 require_ragas()
             except RagasUnavailableError as exc:
@@ -379,10 +671,21 @@ def register(app: typer.Typer) -> None:
                     base_url=openai_base_url,
                     trace=trace,
                     refusal_phrases=phrases,
+                    search_limit=search_limit,
+                    paper_chat_prompt=paper_chat_prompt.value,
+                    sources_only=sources_only,
+                    replay_sources=replay_sources,
+                    fusion=None if fusion is None else fusion.value,
+                    plan_only=plan_only,
+                    replay_plan=replay_plan,
                 )
                 collection = asyncio.run(run_collection(settings, api_key, options))
                 echo_err(f"답변: {collection.path} ({len(collection.records)}건, 실패 {collection.errors}건)")
-                if no_score:
+                if sources_only:
+                    echo_err("검색 전용 수집(--sources-only)이라 채점하지 않습니다.")
+                if plan_only:
+                    echo_err("계획 캡처(--plan-only)라 채점하지 않습니다.")
+                if no_score or options.skips_scoring:
                     raise typer.Exit(code=EXIT_FAILURES if collection.errors else 0)
                 answers_path, records, corpus = collection.path, collection.records, collection.corpus
             else:
@@ -392,6 +695,18 @@ def register(app: typer.Typer) -> None:
                 records = _answer_records(
                     answers_path, modes=modes, lang=lang_value(lang), limit=limit, category=category
                 )
+                sources_only_ids = [str(record["id"]) for record in records if record.get("sources_only")]
+                if sources_only_ids:
+                    raise PreconditionError(
+                        f"검색 전용(--sources-only) 레코드 {len(sources_only_ids)}건은 답변이 없어 채점하지 않습니다: "
+                        f"{sources_only_ids[:10]}"
+                    )
+                plan_only_ids = [str(record["id"]) for record in records if record.get("plan_only")]
+                if plan_only_ids:
+                    raise PreconditionError(
+                        f"계획 캡처(--plan-only) 레코드 {len(plan_only_ids)}건은 답변이 없어 채점하지 않습니다: "
+                        f"{plan_only_ids[:10]}"
+                    )
             if not records:
                 raise PreconditionError("채점할 답변 레코드가 없습니다.")
             chunk_texts = asyncio.run(load_chunk_texts(settings, needed_chunk_ids(records, chosen_metrics)))

@@ -49,6 +49,25 @@ def test_paper_chat_prompt_ignores_instructions_in_excerpts_and_user_messages() 
     assert (placeholder.variable_name, placeholder.optional) == ("chat_history", True)
 
 
+def test_paper_chat_prompt_answers_in_the_question_language() -> None:
+    system_prompt = _system_text(PAPER_CHAT_PROMPT)
+
+    for phrase in (
+        "발췌문의 언어가 아니라 사용자의 마지막 질문과 같은 언어로",
+        "한국어 질문에는 한국어로, 영어 질문에는 영어로",
+        "논문 제목과 고유 용어는 원문 그대로",
+        "'I cannot answer this from the provided excerpts.'",
+        "발췌문만 근거로 답합니다",
+        "발췌문에 없는 내용은 추측하지 말고 '제공된 발췌문으로는 답하기 어렵습니다'",
+        "대괄호 숫자로 표시합니다",
+        "이모티콘은 쓰지 않습니다",
+    ):
+        assert phrase in system_prompt
+    assert system_prompt.count("존댓말") == 1
+    assert "한국어로 답할 때는 정중한 존댓말" in system_prompt
+    assert "모든 답변은" not in system_prompt
+
+
 def test_prompt_variables() -> None:
     assert set(OVERVIEW_PROMPT.input_variables) == {"paper_metadata", "paper_sections"}
     assert set(KEY_FINDINGS_PROMPT.input_variables) == {"paper_metadata", "paper_sections"}

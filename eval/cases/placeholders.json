@@ -158,6 +158,18 @@
       ],
       "all_matches": true,
       "need": "집합: 검색 증강 생성·검색 논문 전부(RAG 오타 질의의 정답 집합)"
+    },
+    "0000.0000y": {
+      "title_keyword": "",
+      "chunk_pattern": "auxiliary-loss-free load balanc",
+      "all_matches": true,
+      "need": "집합: MoE expert 부하 분산(보조 손실 없는 방식 포함)을 다루는 논문 전부(MoE load balancing 질의의 정답 집합). 본문 기준이라 사람이 확인할 것"
+    },
+    "0000.0000z": {
+      "title_keywords": ["Preference"],
+      "chunk_pattern": "RLHF",
+      "all_matches": true,
+      "need": "집합: RLHF를 본문에서 다루는 선호 정렬 논문 전부(약어 질의 'RLHF'의 정답 집합). 코퍼스에 RLHF 전용 논문이 없어 RLHF 대안(직접 선호 최적화) 논문을 쓴다"
     }
   },
   "absent": {

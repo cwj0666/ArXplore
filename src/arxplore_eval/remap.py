@@ -15,6 +15,9 @@ from arxplore_eval.dataset import EvalQuery
 DEFAULT_MIN_OVERLAP = 0.9
 MIN_BLOCK_CHARS = 60
 MIN_GAIN = 0.05
+MIN_GAIN_CHARS = 40
+MIN_INSIDE_SHARE = 0.5
+REVIEW_SKIPPED_SHARE = 0.1
 COMPLETE_COVERAGE = 0.999
 SHINGLE_WORDS = 5
 MAX_CANDIDATES = 6
@@ -33,6 +36,7 @@ NEW_CHUNKS_SQL = """
 MISSING_OLD_CHUNK = "옛 DB에 청크 없음"
 MISSING_NEW_PAPER = "새 DB에 논문 청크 없음"
 LOW_OVERLAP = "겹침 부족"
+SKIPPED_OVERLAP = "제외 후보 겹침"
 
 _WORD = re.compile(r"\w+")
 
@@ -55,6 +59,7 @@ class ChunkShare:
     chunk_index: int
     share: float
     contained: bool
+    inside_share: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,7 @@ class ChunkMapping:
     new_chunks: tuple[ChunkShare, ...]
     overlap: float
     problem: str | None = None
+    skipped: tuple[ChunkShare, ...] = ()
 
     @property
     def new_chunk_ids(self) -> tuple[int, ...]:
@@ -141,24 +147,30 @@ def map_chunk(old: StoredText, chunks: Sequence[StoredText]) -> ChunkMapping:
         return ChunkMapping(old.chunk_id, old.arxiv_id, (), 0.0, LOW_OVERLAP)
     measured: list[tuple[ChunkShare, list[Span]]] = []
     for chunk in candidate_chunks(text, chunks):
-        spans = matched_spans(text, normalize(chunk.text))
+        candidate_text = normalize(chunk.text)
+        spans = matched_spans(text, candidate_text)
+        matched = covered_length(spans)
         measured.append(
             (
                 ChunkShare(
                     chunk_id=chunk.chunk_id,
                     chunk_index=chunk.chunk_index,
-                    share=covered_length(spans) / len(text),
+                    share=matched / len(text),
                     contained=spans == [(0, len(text))],
+                    inside_share=matched / len(candidate_text) if candidate_text else 0.0,
                 ),
                 spans,
             )
         )
     measured.sort(key=lambda item: (-item[0].share, item[0].chunk_index))
     selected: list[ChunkShare] = []
+    skipped: list[ChunkShare] = []
     covered: list[Span] = []
     for candidate, spans in measured:
         gain = covered_length([*covered, *spans]) - covered_length(covered)
-        if gain / len(text) < MIN_GAIN:
+        if not adds_enough(candidate, gain, len(text)):
+            if gain > 0 and candidate.share >= REVIEW_SKIPPED_SHARE:
+                skipped.append(candidate)
             continue
         selected.append(candidate)
         covered.extend(spans)
@@ -166,7 +178,14 @@ def map_chunk(old: StoredText, chunks: Sequence[StoredText]) -> ChunkMapping:
             break
     overlap = covered_length(covered) / len(text)
     ordered = tuple(sorted(selected, key=lambda item: item.chunk_index))
-    return ChunkMapping(old.chunk_id, old.arxiv_id, ordered, overlap)
+    problem = SKIPPED_OVERLAP if skipped else None
+    return ChunkMapping(old.chunk_id, old.arxiv_id, ordered, overlap, problem, tuple(skipped))
+
+
+def adds_enough(candidate: ChunkShare, gain: int, old_length: int) -> bool:
+    if gain / old_length >= MIN_GAIN:
+        return True
+    return gain >= MIN_GAIN_CHARS and candidate.inside_share >= MIN_INSIDE_SHARE
 
 
 def remap_queries(
@@ -230,7 +249,9 @@ def describe_mapping(mapping: ChunkMapping) -> str:
         f"{share.chunk_id}(#{share.chunk_index} {share.share:.3f}{' 포함' if share.contained else ''})"
         for share in mapping.new_chunks
     )
-    return f"{mapping.old_chunk_id} → {targets or '-'}"
+    skipped = ", ".join(f"{share.chunk_id}(#{share.chunk_index} {share.share:.3f})" for share in mapping.skipped)
+    held = f" [제외 후보 {skipped}]" if skipped else ""
+    return f"{mapping.old_chunk_id} → {targets or '-'}{held}"
 
 
 def report_lines(remaps: Sequence[QueryRemap]) -> list[str]:

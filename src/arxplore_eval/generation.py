@@ -13,11 +13,16 @@ from typing import Any, Protocol
 from openai import AsyncOpenAI
 
 from arxplore_eval.behavior import (
-    BEHAVIOR_METRIC_DESCRIPTIONS,
+    ANSWER_CHECK_METRICS,
     BEHAVIOR_METRICS,
     DEFAULT_REFUSAL_PHRASES,
+    LANG_EN,
+    LANG_KO,
     OUTCOME_REJECTED,
     OUTCOMES,
+    REPORTED_BEHAVIOR_DESCRIPTIONS,
+    REPORTED_BEHAVIOR_METRICS,
+    answer_checks,
     behavior_scores,
 )
 from arxplore_eval.metrics import mean
@@ -115,6 +120,13 @@ class SampleScore:
     expected_behavior: str = "answer"
     outcome: str = ""
     behavior: dict[str, float] = field(default_factory=dict)
+    answer_lang: str = ""
+    checks: dict[str, float] = field(default_factory=dict)
+
+    def behavior_value(self, metric: str) -> float | None:
+        if metric in self.behavior:
+            return self.behavior[metric]
+        return self.checks.get(metric)
 
 
 def resolve_reference(record: Mapping[str, Any], chunk_texts: Mapping[int, str]) -> tuple[str | None, str]:
@@ -199,6 +211,7 @@ def _sample(
     record: Mapping[str, Any], reference_kind: str, skipped: dict[str, str], phrases: Sequence[str]
 ) -> SampleScore:
     outcome, behavior = behavior_scores(record, phrases)
+    answer_lang, checks = answer_checks(record, outcome)
     return SampleScore(
         id=str(record.get("id")),
         mode=str(record.get("mode")),
@@ -212,6 +225,8 @@ def _sample(
         expected_behavior=str(record.get("expected_behavior") or "answer"),
         outcome=outcome,
         behavior=behavior,
+        answer_lang=answer_lang,
+        checks=checks,
     )
 
 
@@ -281,9 +296,12 @@ def _aggregate_group(
         means={metric: mean(sample.scores.get(metric) for sample in group) for metric in metrics},
         counts={metric: sum(1 for sample in group if metric in sample.scores) for metric in metrics},
         n_metric_errors=sum(len(sample.errors) for sample in group),
-        behavior_means={metric: mean(sample.behavior.get(metric) for sample in group) for metric in BEHAVIOR_METRICS},
+        behavior_means={
+            metric: mean(sample.behavior_value(metric) for sample in group) for metric in REPORTED_BEHAVIOR_METRICS
+        },
         behavior_counts={
-            metric: sum(1 for sample in group if metric in sample.behavior) for metric in BEHAVIOR_METRICS
+            metric: sum(1 for sample in group if sample.behavior_value(metric) is not None)
+            for metric in REPORTED_BEHAVIOR_METRICS
         },
         outcomes={outcome: sum(1 for sample in group if sample.outcome == outcome) for outcome in OUTCOMES},
     )
@@ -316,18 +334,32 @@ def _behavior_cell(row: GenerationAggregate, metric: str) -> str:
 
 def render_behavior_table(aggregates: Sequence[GenerationAggregate]) -> list[str]:
     return markdown_table(
-        ["mode", "subset", "n", *OUTCOMES, *BEHAVIOR_METRICS],
+        ["mode", "subset", "n", *OUTCOMES, *REPORTED_BEHAVIOR_METRICS],
         [
             [
                 row.mode,
                 row.subset,
                 str(row.n_records),
                 *(str(row.outcomes.get(outcome, 0)) for outcome in OUTCOMES),
-                *(_behavior_cell(row, metric) for metric in BEHAVIOR_METRICS),
+                *(_behavior_cell(row, metric) for metric in REPORTED_BEHAVIOR_METRICS),
             ]
             for row in aggregates
         ],
     )
+
+
+def render_language_table(samples: Sequence[SampleScore]) -> list[str]:
+    rows: list[list[str]] = []
+    for mode in _ordered_modes(samples):
+        for lang in ANSWER_LANGS:
+            group = [sample for sample in samples if sample.mode == mode and sample.lang == lang and sample.answer_lang]
+            if not group:
+                continue
+            counts = [sum(1 for sample in group if sample.answer_lang == answer) for answer in ANSWER_LANGS]
+            rows.append([mode, lang, str(len(group)), *(str(count) for count in counts)])
+    if not rows:
+        return ["답변이 있는 레코드가 없습니다."]
+    return markdown_table(["mode", "질의 lang", "답변 수", *(f"답변 {answer}" for answer in ANSWER_LANGS)], rows)
 
 
 def render_readme_table(aggregates: Sequence[GenerationAggregate]) -> str:
@@ -389,6 +421,14 @@ def render_markdown(
     ]
     lines += render_behavior_table(aggregates)
     lines.append("")
+    lines += [
+        "## 답변 언어 (질의 lang x 답변 언어)",
+        "",
+        "답변 글자 중 한글 비율이 30%를 넘으면 ko, 아니면 en입니다.",
+        "",
+    ]
+    lines += render_language_table(samples)
+    lines.append("")
 
     skip_counts = _skip_counts(samples)
     lines += ["## 건너뛴 지표", ""]
@@ -403,7 +443,7 @@ def render_markdown(
 
     lines += ["## 지표", ""]
     lines.extend(f"- `{metric}`: {METRIC_DESCRIPTIONS[metric]}" for metric in metrics)
-    lines.extend(f"- `{metric}`: {BEHAVIOR_METRIC_DESCRIPTIONS[metric]}" for metric in BEHAVIOR_METRICS)
+    lines.extend(f"- `{metric}`: {REPORTED_BEHAVIOR_DESCRIPTIONS[metric]}" for metric in REPORTED_BEHAVIOR_METRICS)
     lines += [
         "",
         "LLM 판정 점수이므로 같은 판정 모델·같은 답변 파일로 잰 값끼리 상대 비교에만 씁니다.",
@@ -411,6 +451,8 @@ def render_markdown(
     return "\n".join(lines) + "\n"
 
 
+ANSWER_LANG_FIELD = "answer_lang"
+ANSWER_LANGS = (LANG_KO, LANG_EN)
 SAMPLE_CSV_BASE_FIELDS = [
     "id",
     "mode",
@@ -429,7 +471,7 @@ def write_sample_csv(samples: Sequence[SampleScore], metrics: Sequence[str], pat
     fields = [*SAMPLE_CSV_BASE_FIELDS]
     for metric in metrics:
         fields += [metric, f"{metric}_skipped", f"{metric}_error"]
-    fields += list(BEHAVIOR_METRICS)
+    fields += [*BEHAVIOR_METRICS, ANSWER_LANG_FIELD, *ANSWER_CHECK_METRICS]
     with Path(path).open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -452,6 +494,9 @@ def write_sample_csv(samples: Sequence[SampleScore], metrics: Sequence[str], pat
                 record[f"{metric}_error"] = sample.errors.get(metric, "")
             for metric in BEHAVIOR_METRICS:
                 record[metric] = csv_number(sample.behavior.get(metric))
+            record[ANSWER_LANG_FIELD] = sample.answer_lang
+            for metric in ANSWER_CHECK_METRICS:
+                record[metric] = csv_number(sample.checks.get(metric))
             writer.writerow(record)
 
 
@@ -460,7 +505,7 @@ def write_summary_csv(aggregates: Sequence[GenerationAggregate], metrics: Sequen
     for metric in metrics:
         fields += [metric, f"{metric}_n"]
     fields += [f"n_{outcome}" for outcome in OUTCOMES]
-    for metric in BEHAVIOR_METRICS:
+    for metric in REPORTED_BEHAVIOR_METRICS:
         fields += [metric, f"{metric}_n"]
     with Path(path).open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -478,7 +523,7 @@ def write_summary_csv(aggregates: Sequence[GenerationAggregate], metrics: Sequen
                 record[f"{metric}_n"] = row.counts.get(metric, 0)
             for outcome in OUTCOMES:
                 record[f"n_{outcome}"] = row.outcomes.get(outcome, 0)
-            for metric in BEHAVIOR_METRICS:
+            for metric in REPORTED_BEHAVIOR_METRICS:
                 record[metric] = csv_number(row.behavior_means.get(metric))
                 record[f"{metric}_n"] = row.behavior_counts.get(metric, 0)
             writer.writerow(record)

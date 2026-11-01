@@ -36,7 +36,7 @@ def token_counter() -> tuple[Callable[[str], int], str]:
         return _estimate_tokens, ESTIMATED_METHOD
 
     def count(text: str) -> int:
-        return len(encoding.encode(text))
+        return len(encoding.encode(text, disallowed_special=()))
 
     return count, TIKTOKEN_METHOD
 

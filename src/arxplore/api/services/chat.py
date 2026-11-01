@@ -2,6 +2,8 @@ from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.prompts import ChatPromptTemplate
+
 from arxplore.api.errors import EMPTY_MESSAGE_MESSAGE, INVALID_REQUEST_MESSAGE, AiUnavailableError, InvalidRequestError
 from arxplore.api.services.detail import find_paper
 from arxplore.api.services.store import PaperStore
@@ -18,6 +20,7 @@ from arxplore.llm.paper_chat import (
     retrieve_paper_chat_sources,
     stream_paper_chat_answer,
 )
+from arxplore.llm.prompts.paper_chat import PAPER_CHAT_PROMPT
 from arxplore.llm.tracing import Tracer
 from arxplore.text import strip_control_characters
 
@@ -123,7 +126,11 @@ class ChatService:
         )
 
     def answer_paper_sources(
-        self, prepared: PreparedPaperChat, retrieval: PaperChatRetrieval
+        self,
+        prepared: PreparedPaperChat,
+        retrieval: PaperChatRetrieval,
+        *,
+        prompt: ChatPromptTemplate = PAPER_CHAT_PROMPT,
     ) -> AsyncGenerator[AnswerEvent]:
         return stream_paper_chat_answer(
             prepared.message,
@@ -132,6 +139,7 @@ class ChatService:
             history=prepared.history,
             model=self.models.create(temperature=PAPER_CHAT_TEMPERATURE),
             tracer=self.tracer,
+            prompt=prompt,
         )
 
     async def stream_paper_chat(self, prepared: PreparedPaperChat) -> AsyncGenerator[AnswerEvent]:

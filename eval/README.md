@@ -6,7 +6,7 @@
 
 | 모듈 (`src/arxplore_eval/`) | 역할 |
 | --- | --- |
-| `metrics.py` | hit@k, MRR@k, recall@k, percentile (순수 함수) |
+| `metrics.py` | hit@k, MRR@k, recall@k, precision@k, nDCG@k(binary), percentile (순수 함수) |
 | `dataset.py` | 질의셋 JSONL 스키마·검증·로더(파일 또는 디렉터리), 자리표시자 채우기 |
 | `runner.py` | 방식 레지스트리(기본 + ablation), 질의 실행, 집계. 제품의 채널별 조회·rerank·필터, 융합, 논문 다양성, 문맥 창 함수를 조립한다 |
 | `report.py`, `tables.py`, `subsets.py` | 질의별·집계 CSV, Markdown 표, 부분집합 |
@@ -17,7 +17,9 @@
 | `research_fusion.py` | 연구용 융합: 예전 가중 RRF 규칙, 표준 RRF, 고정·confidence 가중, 이론 정규화 |
 | `candidate_cache.py` | hybrid 융합 입력 캐시(gzip JSONL) 형식·기록·재생·게이트 |
 | `fusion_sweep.py` | 융합 설정 가족, 재생 채점, ko/en 쌍 클러스터 단위 반복 층화 CV, 1-SE 선택, 클러스터 paired bootstrap, 리포트 |
-| `latency.py` | hybrid 지연 A/B(채널 순차 vs 병렬): 계측, 쌍 교대 실행, 질의별 중앙값 차이의 클러스터 bootstrap |
+| `latency.py` | hybrid 지연 A/B(채널 순차 vs 병렬)와 제품 경로 단독 측정: 계측, 쌍 교대 실행, 임베딩 API·나머지 분리, 질의별 중앙값 차이의 클러스터 bootstrap |
+| `compare_runs.py` | 두 retrieval 실행 CSV의 질의·방식 짝짓기, 지표 차이와 클러스터 paired bootstrap, 개선·악화 건수, lexical·vector 2×2, lexical 동일성 검사 |
+| `embed_cost.py` | 임베딩 대상 청크(worker와 같은 조건)의 토큰 수·비용 추정, 읽기 전용 |
 | `explain.py` | 제품 검색 SQL의 `EXPLAIN (ANALYZE, BUFFERS)` 요약 |
 | `commands/` | `arxplore-eval` 명령 |
 
@@ -129,7 +131,10 @@ uv run arxplore-eval explain --arxiv-id 2609.27980 --channel vector        # 논
 
 - **논문 단위**: 상위 k개 hit의 `arxiv_id` 순서로 계산. 같은 논문 청크가 여러 자리를 차지하면 그 자리는 소모되지만 recall은 한 번만 셉니다.
 - **청크 단위**: 상위 k개 hit의 `chunk_id`(문맥 창의 이웃 청크는 제외)로 계산. `relevant_chunk_ids`가 있는 질의만 대상.
-- hit@1/5/10, MRR@10, recall@10은 질의 평균. 정답이 비어 있는 질의는 해당 지표에서 제외합니다.
+- hit@1/5/10, MRR@10, recall@10, precision@1/5/10, nDCG@10은 질의 평균. 정답이 비어 있는 질의는 해당 지표에서 제외합니다.
+- **precision@n**: 상위 n개 안에 든 서로 다른 정답 수 / n. 같은 논문이 두 자리를 차지해도 한 번만 셉니다. 정답이 하나인 질의에서는 hit@n / n이므로 최댓값이 1/n입니다.
+- **nDCG@10 (binary)**: 관련도는 정답이면 1, 아니면 0. 각 정답의 첫 등장 위치 i에 1/log2(i+1)을 더하고(중복 등장은 0), 정답 min(정답 수, 10)개를 맨 앞에 둔 이상 DCG로 나눕니다. 정답이 하나인 질의에서는 1/log2(첫 정답 순위+1)입니다. 정답이 하나인 질의에서 recall@10은 hit@10과 같습니다.
+- 새 두 지표는 리포트 md의 "precision·nDCG" 절과 질의별·요약 CSV의 `paper_precision@n`, `paper_ndcg@10`, `chunk_*` 열에 들어갑니다. 기존 열과 표는 그대로입니다.
 - **noise@10**: 상위 10개 hit 중 `content_role ∈ {references, toc, front_matter}`인 비율.
 - **지연 p50/p95**: 방식 호출 1회의 wall-clock(ms). 문맥 창 조회 DB 왕복, vector 계열은 OpenAI 임베딩 API 왕복까지 포함합니다. 네트워크(Tailscale 경유 DB 등) 영향이 크므로 같은 환경에서 잰 값끼리만 비교합니다.
 - 부분집합: `all`, `ko`, `en`, `known_item`, `llm_synth`, `manual`, 그리고 질의에 있는 `category:<이름>`과 (기대 행동이 두 종류 이상일 때) `behavior:<answer|clarify>`.
@@ -198,6 +203,80 @@ uv run arxplore-eval fusion convex --cache eval/cache/candidates_<timestamp>.jso
 (`--product-limit`, 기본 5)를 함께 재고, 같은 임베딩을 넣었을 때 두 실행의 결과가 같은지 먼저 확인합니다(`--no-memo-check`로 건너뜀).
 DB와 키가 필요하고 임베딩만 부릅니다. 결과는 `eval/results/latency_<timestamp>.{md,csv}`입니다.
 
+임베딩 모델 비교처럼 제품 경로 하나의 지연만 잴 때는 `--product-only`를 씁니다. 제품 `Retriever`와 같은 병렬 경로(`retrieve_contexts`)만
+반복마다 질의 파일 순서로 한 번씩 돌리고, A/B·대조군·임베딩 고정 패스는 하지 않습니다.
+
+```bash
+# 언어별 앞 15개(파일 순서) x 반복 5, 워밍업 패스는 cold로 따로 남김. 비용 추정 단가는 모델에 맞춘다
+uv run arxplore-eval latency --product-only --per-lang 15 --repeats 5 --warmup 1 --record-cold --price-per-million 0.02
+```
+
+- 표본 CSV에는 `total_ms`, 단계별 `embedding_ms`(임베딩 API 대기), `lexical_channel_ms`, `vector_channel_ms`, `context_window_ms`와
+  `db_ms`(= `total_ms` - `embedding_ms`, 임베딩을 뺀 벽시계 시간)가 있고, `cold`가 1인 행은 워밍업 패스(질의마다 첫 실행)입니다.
+- md에는 임베딩 API와 나머지를 나눈 p50/p95 표가 있고, `--record-cold`면 cold 표본 표가 따로 붙습니다. cold 표본은 다른 통계에서 뺍니다.
+- `--per-lang N`은 검색 평가 대상에서 언어별 앞 N개를 파일 순서로 고릅니다(`--limit`과 함께 쓰지 않음).
+- `OPENAI_BASE_URL`(또는 `--openai-base-url`)이 로컬 주소(127.0.0.1, localhost)면 머리말 "API" 줄이 "로컬 가짜 서버 응답, 실제 API 왕복
+  아님"으로 바뀝니다. 가짜 서버로 잰 지연을 API 지연으로 보고하지 않습니다.
+
+## 실행 비교 (compare-runs)
+
+`arxplore-eval compare-runs`는 두 `retrieval` 실행의 질의별 CSV(`<stamp>.csv`)를 (방식, 질의) 단위로 짝지어 비교합니다. 임베딩 모델처럼
+한 조건만 바꾼 두 실행을 놓고 쓰며, DB·API 키가 필요 없습니다.
+
+```bash
+uv run arxplore-eval compare-runs --a runs/large/<stamp>.csv --b runs/small/<stamp>.csv --queries eval/queries.jsonl \
+  --label-a large --label-b small --out-dir runs/compare
+```
+
+- 방식·지표·부분집합(`all`, `ko`, `en`, source, `category:*`)마다 두 평균과 질의별 차이(b - a)의 평균, 한영 번역쌍 클러스터 paired
+  bootstrap 구간(`fusion_sweep.paired_bootstrap`, 기본 10,000회, seed 20261005, 95%)을 냅니다. 청크 단위는 `relevant_chunk_ids`가 있는
+  질의만 별도 표로 냅니다.
+- 질의별 개선·동률·악화 건수(hit@5, MRR@10), 실행별 lexical·vector 2×2(hit@10 기준 둘 다·lexical만·vector만·둘 다 실패)를 냅니다.
+- lexical 계열 방식의 top-k가 두 실행에서 모두 같은지 검사합니다. 다르면 "경고" 줄을 남깁니다(임베딩 외 조건이 바뀌었다는 신호).
+- CSV에 기록된 MRR이 `--queries` 정답으로 다시 센 순위와 다르면(다른 정답 라벨로 돈 실행) 짝짓기 경고를 남깁니다.
+- 결과: `compare.md`, `compare_metrics.csv`(방식·단위·부분집합·지표별 평균·차이·구간), `compare_queries.csv`(질의별 a·b 첫 정답 순위,
+  지표 값과 차이, 두 실행의 top-k 논문 목록).
+
+## 생성 비교 (compare-generation)
+
+`arxplore-eval compare-generation`은 두 조건(예: 상세 챗 프롬프트 before/current)의 생성 평가 결과를 질의별로 짝지어 비교합니다.
+조건마다 반복 파일을 여러 개 받아 질의별 반복 평균을 낸 뒤 비교합니다. DB·API 키가 필요 없습니다.
+
+```bash
+uv run arxplore-eval compare-generation \
+  --a runs/score_A_r1/generation_<stamp>.csv --a runs/score_A_r2/generation_<stamp>.csv \
+  --b runs/score_B_r1/generation_<stamp>.csv --b runs/score_B_r2/generation_<stamp>.csv \
+  --queries eval/queries.jsonl --label-a before --label-b after --out-dir runs/compare
+```
+
+- 입력은 `generation`의 질의별 CSV(`generation_<stamp>.csv`) 또는 답변 JSONL입니다. JSONL은 행동 지표만 그 자리에서 계산하고 RAGAS 값은 비웁니다.
+  `--mode`(기본 `paper_chat`)의 레코드만 씁니다.
+- 지표: `faithfulness`, `answer_relevancy`, `lang_match`, `refused`(refused=1, answered=0, rejected·error는 값 없음), `citation_numbers_valid`,
+  `cited_relevant`(에이전트). 두 조건에 모두 값이 있는 지표만 냅니다.
+- `--strata FILE`(`id`, `stratum` 열 CSV, 예: `plan-diff`의 `strata.csv`)을 주면 `stratum:<이름>` 부분집합의 차이·개선/동률/악화 건수를 더합니다.
+- 부분집합(`all`, `ko`, `en`, source, `category:*`, `behavior:*`)마다 두 평균, 질의별 차이(b - a)의 평균과 한영 번역쌍 군집 paired bootstrap 구간
+  (`compare-runs`와 같은 `paired_stats`, 기본 10,000회, seed 20261005, 95%)을 냅니다.
+- 기대 행동별 거절 표(거절 기대 = 거절 유지율, 답변 기대 = 과잉 거절률)와 질의별 반복 평균 0.5 이상을 거절로 센 2×2 건수(둘 다 거절·a만·b만·둘 다 답변),
+  반복 간 분산(조건·지표별 질의별 표본 표준편차의 평균·최대, 반복별 평균), 질의별 개선·동률·악화 건수를 냅니다.
+- 한쪽 조건에만 있는 질의는 빼고, 일부 반복에만 있거나 rejected·error 반복이 있는 질의는 짝짓기 경고로 남깁니다.
+- 결과: `compare_generation.md`, `compare_generation_metrics.csv`, `compare_generation_queries.csv`(질의별 반복 결과·평균·차이),
+  `compare_generation_variance.csv`, `compare_generation_refusal.csv`.
+
+## 임베딩 비용 추정 (embed-cost)
+
+`arxplore-eval embed-cost`는 읽기 전용 트랜잭션에서 임베딩 대상 청크 본문을 읽어 tiktoken(`cl100k_base`) 토큰 수와 USD 추정을 냅니다.
+API를 부르지 않습니다. 토큰은 worker가 보내는 입력(`clean_embedding_input`)으로 셉니다.
+
+```bash
+# 기본(--missing): worker가 고를 청크와 같은 조건(임베딩 없음, references 제외)
+uv run arxplore-eval embed-cost --db postgresql://arxplore@localhost:55432/<db> --model text-embedding-3-small --price-per-million 0.02
+# --all: references를 뺀 전체 청크(이미 임베딩이 있어도 셈)
+uv run arxplore-eval embed-cost --db <dsn> --model text-embedding-3-large --price-per-million 0.13 --all --json-out cost.json
+```
+
+출력에는 청크 수, 글자 수, 토큰, 추정 비용, 현재 `paper_embeddings`의 모델별 행 수가 있습니다. 단가는 인자로 받으므로 청구 단가가
+바뀌면 인자만 바꿉니다.
+
 ## 생성 품질(RAGAS)
 
 제품의 두 답변 경로, 에이전트(`agent`)와 상세 챗(`paper_chat`)이 만든 답변을 [RAGAS](https://docs.ragas.io) LLM 판정으로 채점합니다.
@@ -215,6 +294,8 @@ ragas 호출은 `generation.py`의 `RagasScorer` 하나에 모여 있고(`ragas.
 
 - `agent`: 에이전트를 부릅니다. `contexts`는 검색 도구(`search_paper_chunks_tool`)가 LLM에 넘긴 청크 본문(문맥 창 포함)이고, 도구를 여러 번 부르면 중복을 뺀 합집합입니다. 발췌문은 검색 관찰 훅(`arxplore.context.observe_retrieval`)으로 받습니다.
 - `paper_chat`: 질의의 `open_arxiv_id`(없으면 `relevant_arxiv_ids[0]`) 논문으로 상세 챗을 부릅니다. `contexts`는 프롬프트의 번호 출처(초록 + 검색 청크) 본문 그대로입니다.
+  상세 챗 레코드에는 `prompt_variant`(`current`/`before`, 검색 전용이면 `null`), `sources_origin`(`retrieval`/`replay`), `sources_only`,
+  `context_sha256`(LLM에 넘긴 발췌문 문맥 `format_paper_chat_context` 출력의 sha256), `sources`(번호 순서대로 `chunk_id`, `section_title`, `text`)가 붙습니다.
 - 질의의 `mode` 힌트가 허용하지 않는 (질의, 모드) 조합은 만들지 않습니다.
 - 호출 전에 제품 API의 입력 검증(`arxplore.api.services.chat.validate_chat_input`)을 그대로 씁니다: 앞뒤 공백 제거 후 빈 문자열이거나 4,000자를 넘으면 생성하지 않고 `outcome="rejected"`, `rejection`에 API 안내 문구를 남깁니다(오류가 아님). `history`는 user/assistant이고 내용이 있는 턴만, 턴당 4,000자, 최근 20턴만 남기고, 마지막 user 턴이 현재 질문과 같으면 뺀 뒤 넘깁니다.
 - 레코드의 `outcome`: `answered` / `refused`(답변에 거절 문구) / `rejected` / `error`. `hit_arxiv_ids`는 에이전트 검색 도구가 LLM에 넘긴 청크의 논문(상세 챗은 열어 둔 논문)입니다.
@@ -260,10 +341,68 @@ uv run arxplore-eval generation --answers eval/results/answers_run1.jsonl
 uv run arxplore-eval generation --answers eval/results/answers_run1.jsonl --metrics faithfulness,answer_relevancy --judge-model gpt-4o-mini
 ```
 
+### 상세 챗 프롬프트 A/B (소스 고정 재생)
+
+같은 검색 결과·문맥 순서로 상세 챗 시스템 프롬프트만 바꿔 비교할 때 씁니다. 검색은 한 번만 하고, 모든 조건·반복이 기록한 소스를 재생해 LLM만 부릅니다.
+
+```bash
+# 1) 검색 전용 패스: 질의 임베딩 + 검색만, LLM 호출 없음. answer="" 레코드에 소스를 기록
+uv run arxplore-eval generation --collect --mode paper_chat --sources-only --out runs/sources.jsonl
+
+# 2) 재생 생성: 검색 없이 기록한 소스로 프롬프트별 답변 수집 (before = 질문 언어 규칙 전, current = 제품)
+uv run arxplore-eval generation --collect --mode paper_chat --replay-sources runs/sources.jsonl \
+  --paper-chat-prompt before --no-score --out runs/answers_A_r1.jsonl
+uv run arxplore-eval generation --collect --mode paper_chat --replay-sources runs/sources.jsonl \
+  --paper-chat-prompt current --no-score --out runs/answers_B_r1.jsonl
+
+# 3) 채점 후 비교 (아래 compare-generation)
+uv run arxplore-eval generation --answers runs/answers_A_r1.jsonl --mode paper_chat --metrics faithfulness,answer_relevancy
+```
+
+- `before` 프롬프트는 `arxplore_eval.prompt_variants`에 평가용 상수로만 있습니다(제품 기본 프롬프트·API는 그대로). 제품 경로는
+  `ChatService.answer_paper_sources(..., prompt=...)` 선택 인자로 프롬프트만 바꿔 부릅니다.
+- 재생은 소스 기록의 `chunk_id`, `section_title`, `text`와 DB의 논문 제목으로 `PaperChatRetrieval`을 다시 만들고, `format_paper_chat_context`
+  출력이 기록한 `context_sha256`과 다르면 그 질의를 오류로 남깁니다. 입력 거부 질의를 뺀 상세 챗 질의가 소스 파일에 없으면
+  (`--keep-going` 없이) 시작하지 않습니다.
+- 같은 `--out`에 다른 프롬프트·소스 출처로 이어 쓰려 하면 거부합니다. 검색 전용 레코드는 `--answers` 채점과 `compare-generation`에서 거부합니다.
+- 리포트 머리말에 "상세 챗 프롬프트·소스" 줄이 붙습니다.
+
+### 에이전트 융합 A/B (계획 고정 재생)
+
+hybrid 융합 방식만 바꿔 에이전트 답변을 비교할 때 씁니다. `legacy_rules`는 2026-09-29까지의 가중 RRF 규칙(`research_fusion.LEGACY_RULES_FUSION`,
+retrieval `hybrid_rules` ablation과 같은 함수), `convex`는 제품 `fuse_hybrid_hits`(min-max 가중합)입니다.
+
+```bash
+# 1) 계획 캡처: 에이전트 첫 모델 턴(도구 호출)만 부르고, 검색 호출마다 융합 전 lexical·vector 후보(점수 포함)를 기록
+uv run arxplore-eval generation --collect --mode agent --plan-only --out runs/plan.jsonl
+
+# 2) 두 융합의 top-k 차이 (LLM·DB 없음). strata.csv = 질의별 same / reordered / changed / no_search
+uv run arxplore-eval plan-diff --plan runs/plan.jsonl --out-dir runs/plan_diff
+
+# 3) 재생 생성: 기록한 후보를 조건별로 융합 → 문맥 → 도구 메시지 → 최종 답 한 번(tool_choice="none")
+uv run arxplore-eval generation --collect --mode agent --replay-plan runs/plan.jsonl --fusion legacy_rules \
+  --no-score --out runs/answers_A_r1.jsonl
+uv run arxplore-eval generation --collect --mode agent --replay-plan runs/plan.jsonl --fusion convex \
+  --no-score --out runs/answers_B_r1.jsonl
+
+# 4) 채점 후 비교
+uv run arxplore-eval compare-generation --mode agent --a <A csv> --b <B csv> --strata runs/plan_diff/strata.csv
+```
+
+- 첫 턴은 검색 결과를 보기 전에 정해지므로 두 조건이 같은 도구 호출 계획·검색 질의·후보를 씁니다. 질의 임베딩도 계획 캡처 때 한 번만 부릅니다.
+  두 번째 이후의 순차 검색은 막으므로 제품 에이전트 전체 경로와는 다릅니다. 전체 경로 비교는 `--fusion`만 주고 계획 없이 수집합니다.
+- 계획 레코드에는 `plan_only`, `plan`(`kind` tools/direct, `tool_calls`, `searches`의 직렬화한 `HybridInputs`, `search_limit`, `usage`)이 붙고,
+  재생 레코드에는 `fusion`, `agent_origin`(`live`/`plan_only`/`plan_replay`), `plan_sha256`, `searches`(검색 질의·chunk_id 순서), `tool_output_sha256`, `usage`가 붙습니다.
+- 같은 `--out`에 다른 융합·계획으로 이어 쓰려 하면 거부합니다. 계획 레코드는 `--answers` 채점에서 거부합니다. 질의셋과 질문이 다른 계획은 거부합니다.
+
 주요 옵션: `--mode agent|paper_chat|both`(기본 both), `--metrics`(기본 all), `--limit`, `--lang ko|en`, `--category`, `--behavior-only`(RAGAS 생략, 행동 지표만),
+`--search-limit N`(`--collect`와 함께: 에이전트 검색 도구가 돌려주는 청크 수를 N으로 바꿔 수집. 답변 레코드에 `search_limit`이 남고,
+같은 `--out`에 다른 값으로 이어 쓰려 하면 거부합니다. 리포트 머리말에 "에이전트 검색 결과 수(search_limit)" 줄이 붙습니다),
 `--refusal-phrases FILE`(거절 문구 목록, 한 줄에 하나), `--judge-model`(기본 `gpt-5-mini`),
 `--embedding-model`(기본 `text-embedding-3-small`, `answer_relevancy`용), `--judge-max-tokens`(gpt-5·o 계열 기본 8192), `--concurrency 4`,
-`--no-adapt-language`, `--trace`(LangSmith 추적을 설정대로 켬, 기본 끔), `--out-dir eval/results`.
+`--no-adapt-language`, `--trace`(LangSmith 추적을 설정대로 켬, 기본 끔), `--out-dir eval/results`,
+`--paper-chat-prompt current|before`, `--sources-only`, `--replay-sources FILE`(위 A/B 절, 모두 `--collect`와 함께),
+`--fusion convex|legacy_rules`, `--plan-only`, `--replay-plan FILE`(위 에이전트 융합 A/B 절, `--collect --mode agent`와 함께).
 
 결과: `eval/results/generation_<timestamp>.md`(README 붙여넣기용 표 + 모드 × 부분집합 표), `generation_<timestamp>.csv`(질의별 점수·건너뛴 사유·판정 오류), `generation_<timestamp>_summary.csv`.
 부분집합은 검색 평가와 같은 `all`, `ko`, `en`, `known_item`, `llm_synth`, `manual`, `category:<이름>`, `behavior:<기대 행동>`이고 모드별로 나눕니다. 표의 값은 `평균 (계산된 질의 수)`입니다.
@@ -310,6 +449,12 @@ uv run arxplore-eval generation --answers eval/results/answers_run1.jsonl --metr
 | `must_not_contain_ok` | `must_not_contain`이 있는 레코드 | 금지 문자열이 하나도 없음(대소문자 무시) |
 | `mentions_required_ids` | `must_mention_arxiv_ids`가 있는 레코드 | 필수 ID 중 답변에 나온 비율(링크 속 ID, 본문의 `2401.12345` 형태, 버전 접미사 무시) |
 | `rejected_as_expected` | `expect_rejected`이거나 실제로 거부된 레코드 | 기대(`expect_rejected`)와 결과(`outcome == rejected`)가 일치. 경계 밖인데 통과했거나, 경계 안인데 거부됐으면 0 |
+| `lang_match` | 답변이 있는 레코드(answered/refused) | 답변 언어가 질의 `lang`과 같음. 답변 언어는 글자(`str.isalpha`) 중 한글 비율이 30%를 넘으면 `ko`, 아니면 `en` |
+| `citation_numbers_valid` | 답변이 있는 상세 챗 레코드 | 답변의 `[n]`(제품 `extract_source_refs`로 추출) 번호가 모두 1..발췌문 수 안에 있음. 번호가 없으면 통과 |
+| `cited_relevant` | 답변이 있고 `relevant_arxiv_ids`가 있는 에이전트 레코드 | `in_answer` 인용 또는 답변 속 arXiv 링크에 정답 논문이 있음(버전 접미사 무시) |
+
+- 질의별 CSV에는 `answer_lang`(`ko`/`en`, 답변이 없으면 빈 값) 열이 같이 붙고, 리포트에는 "답변 언어 (질의 lang x 답변 언어)" 표가 붙습니다.
+  한글 비율 기준은 10-02 거절 라벨링(`hangul_ratio_letters > 0.3`)과 같습니다.
 
 - 링크 해석은 제품의 `arxplore.llm.citations.arxiv_id_from_url`·`normalize_cited_arxiv_id`를 그대로 씁니다(`abs`/`pdf`, `v2`·`.pdf` 접미사, `www.`·`export.` 호스트).
 - 거절 문구 기본 목록은 `DEFAULT_REFUSAL_PHRASES`(상세 챗 프롬프트의 "제공된 발췌문으로는 답하기 어렵습니다", "찾지 못", "찾을 수 없", "관련 논문이 없", "could not find", "not in the provided" 등)입니다. 문자열 포함 검사라 "정확히 알 수 없지만 …"처럼 답을 하면서 거절 문구를 쓰는 답변도 `refused`로 셉니다. 제품 문구를 바꾸면 `--refusal-phrases`로 목록을 바꿔 다시 채점합니다(답변 파일은 그대로).
@@ -361,8 +506,8 @@ uv run arxplore-eval generation --collect --queries eval/queries.cases.jsonl --k
 uv run arxplore-eval generation --answers eval/results/answers_<timestamp>.jsonl   # 같은 답변에 RAGAS까지
 ```
 
-- `placeholders.json`의 조건: `title_keyword`(제목 ILIKE, `%` 와일드카드 가능), `title_keywords`(그중 하나라도 맞으면 되는 OR 목록, 있으면 `title_keyword` 대신 씀), `exclude_title_keywords`(제목에 있으면 빼는 목록), `min_chunks`(청크 수 하한), `section_keyword`(그 섹션 제목을 가진 청크 존재), `content_role`(예: `appendix` 청크 존재), `chunk_pattern`(본문 ILIKE, 예: `Figure 1`). `need`는 사람이 확인할 조건 설명입니다.
-- **집합 자리표시자**(`all_matches: true`, `0000.0000r`~`0000.0000x`): 조건에 맞는 논문 **전부**(최대 50편)가 정답이 됩니다. "diffusion", "4비트 양자화"처럼 특정 논문이 아니라 주제를 묻는 `query_form` 질의에 씁니다. 첫 실측에서 이런 질의에 단일 자리표시자를 붙였더니 제목 키워드가 우연히 맞는 논문(예: `Quantiz` → 벡터 양자화 토크나이저 논문) 하나만 정답이 되어 12건 중 10건이 검색은 맞았는데도 0점이었습니다. 리스트 안의 집합 자리표시자는 모든 id로 펼쳐지고, 문자열 안(`{{title:...}}`, 링크)에서는 첫 논문을 씁니다. 다른 자리표시자가 고른 논문도 집합에서 빼지 않습니다.
+- `placeholders.json`의 조건: `title_keyword`(제목 ILIKE, `%` 와일드카드 가능), `title_keywords`(그중 하나라도 맞으면 되는 OR 목록, 있으면 `title_keyword` 대신 씀), `exclude_title_keywords`(제목에 있으면 빼는 목록), `min_chunks`(청크 수 하한), `section_keyword`(그 섹션 제목을 가진 청크 존재), `content_role`(예: `appendix` 청크 존재), `chunk_pattern`(본문 ILIKE, 예: `Figure 1`). `chunk_pattern`은 집합 자리표시자에도 쓸 수 있습니다(예: `0000.0000y`). `need`는 사람이 확인할 조건 설명입니다.
+- **집합 자리표시자**(`all_matches: true`, `0000.0000r`~`0000.0000z`): 조건에 맞는 논문 **전부**(최대 50편)가 정답이 됩니다. "diffusion", "4비트 양자화"처럼 특정 논문이 아니라 주제를 묻는 `query_form` 질의에 씁니다. 첫 실측에서 이런 질의에 단일 자리표시자를 붙였더니 제목 키워드가 우연히 맞는 논문(예: `Quantiz` → 벡터 양자화 토크나이저 논문) 하나만 정답이 되어 12건 중 10건이 검색은 맞았는데도 0점이었습니다. 리스트 안의 집합 자리표시자는 모든 id로 펼쳐지고, 문자열 안(`{{title:...}}`, 링크)에서는 첫 논문을 씁니다. 다른 자리표시자가 고른 논문도 집합에서 빼지 않습니다.
 - 채우지 못한 자리표시자가 남은 케이스와 `absent` 논문이 코퍼스에 있는 케이스는 빼고 목록을 출력합니다. 자리표시자가 없는 케이스(거절·입력 거부·인젝션 일부)는 그대로 들어갑니다.
 - 채운 파일은 측정에 쓴 질의셋으로 결과와 함께 커밋합니다(리포트 머리말의 sha256으로 대조). `queries.jsonl`을 다시 쓸 때는 `build-queries --combine`을 씁니다.
 

@@ -11,7 +11,7 @@ from arxplore.retrieval.query import candidate_fetch_limit, hybrid_branch_limit,
 from arxplore.retrieval.service import EmbedderMissingError, QueryEmbedder, Retriever, run_hybrid_channels
 from arxplore.retrieval.vector import fetch_vector_candidates, rerank_vector_hits
 from arxplore_eval.dataset import EvalQuery
-from arxplore_eval.metrics import hit_at_k, mean, mrr_at_k, percentile, recall_at_k
+from arxplore_eval.metrics import hit_at_k, mean, mrr_at_k, ndcg_at_k, percentile, precision_at_k, recall_at_k
 from arxplore_eval.research_fusion import LEGACY_RULES_FUSION, STANDARD_RRF_FUSION, HybridFusionConfig, fuse_hits
 from arxplore_eval.subsets import build_subsets, in_subset
 
@@ -212,6 +212,8 @@ class QueryResult:
     error: str | None = None
     category: str = ""
     expected_behavior: str = "answer"
+    paper_extended: dict[str, float | None] = field(default_factory=dict)
+    chunk_extended: dict[str, float | None] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -226,10 +228,26 @@ def metric_names(k: int) -> list[str]:
     return [f"hit@{cutoff}" for cutoff in hit_cutoffs(k)] + [f"mrr@{k}", f"recall@{k}"]
 
 
+def extended_metric_names(k: int) -> list[str]:
+    return [f"precision@{cutoff}" for cutoff in hit_cutoffs(k)] + [f"ndcg@{k}"]
+
+
+def all_metric_names(k: int) -> list[str]:
+    return [*metric_names(k), *extended_metric_names(k)]
+
+
 def _metric_block(ranked: Sequence[Any], relevant: Sequence[Any], k: int) -> dict[str, float | None]:
     block: dict[str, float | None] = {f"hit@{cutoff}": hit_at_k(ranked, relevant, cutoff) for cutoff in hit_cutoffs(k)}
     block[f"mrr@{k}"] = mrr_at_k(ranked, relevant, k)
     block[f"recall@{k}"] = recall_at_k(ranked, relevant, k)
+    return block
+
+
+def _extended_block(ranked: Sequence[Any], relevant: Sequence[Any], k: int) -> dict[str, float | None]:
+    block: dict[str, float | None] = {
+        f"precision@{cutoff}": precision_at_k(ranked, relevant, cutoff) for cutoff in hit_cutoffs(k)
+    }
+    block[f"ndcg@{k}"] = ndcg_at_k(ranked, relevant, k)
     return block
 
 
@@ -254,6 +272,8 @@ def score_hits(
         retrieved_roles=roles,
         paper_metrics=_metric_block(arxiv_ids, query.relevant_arxiv_ids, k),
         chunk_metrics=_metric_block(chunk_ids, query.relevant_chunk_ids, k) if query.relevant_chunk_ids else {},
+        paper_extended=_extended_block(arxiv_ids, query.relevant_arxiv_ids, k),
+        chunk_extended=_extended_block(chunk_ids, query.relevant_chunk_ids, k) if query.relevant_chunk_ids else {},
         noise_count=sum(1 for role in roles if role in NOISE_ROLES),
     )
 
@@ -350,6 +370,8 @@ class AggregateRow:
     noise_rate: float | None
     latency_p50_ms: float | None
     latency_p95_ms: float | None
+    paper_extended: dict[str, float | None] = field(default_factory=dict)
+    chunk_extended: dict[str, float | None] = field(default_factory=dict)
 
 
 def _aggregate_group(method: str, subset: str, k: int, rows: Sequence[QueryResult]) -> AggregateRow:
@@ -359,6 +381,7 @@ def _aggregate_group(method: str, subset: str, k: int, rows: Sequence[QueryResul
     noise_total = sum(row.noise_count for row in ok_rows)
     latencies = [row.latency_ms for row in ok_rows if row.latency_ms is not None]
     names = metric_names(k)
+    extended = extended_metric_names(k)
     return AggregateRow(
         method=method,
         subset=subset,
@@ -371,6 +394,8 @@ def _aggregate_group(method: str, subset: str, k: int, rows: Sequence[QueryResul
         noise_rate=(noise_total / retrieved_total) if retrieved_total else None,
         latency_p50_ms=percentile(latencies, 50),
         latency_p95_ms=percentile(latencies, 95),
+        paper_extended={name: mean(row.paper_extended.get(name) for row in ok_rows) for name in extended},
+        chunk_extended={name: mean(row.chunk_extended.get(name) for row in chunk_rows) for name in extended},
     )
 
 
